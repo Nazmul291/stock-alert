@@ -3,10 +3,10 @@ import '@shopify/shopify-api/adapters/node';
 import jwt from 'jsonwebtoken';
 
 export const shopify = shopifyApi({
-  apiKey: process.env.SHOPIFY_API_KEY!,
-  apiSecretKey: process.env.SHOPIFY_API_SECRET!,
-  scopes: process.env.SHOPIFY_SCOPES!.split(','),
-  hostName: process.env.SHOPIFY_APP_URL!.replace(/https?:\/\//, ''),
+  apiKey: process.env.SHOPIFY_API_KEY || '38a870cdc7f41175fd49a52689539f9d',
+  apiSecretKey: process.env.SHOPIFY_API_SECRET || '',
+  scopes: (process.env.SHOPIFY_SCOPES || 'read_products,write_products,read_inventory,write_inventory').split(','),
+  hostName: (process.env.SHOPIFY_APP_URL || 'https://dev.nazmulcodes.org').replace(/https?:\/\//, ''),
   apiVersion: ApiVersion.July25,
   isEmbeddedApp: true,
   logger: {
@@ -21,14 +21,14 @@ export function generateSessionToken(shop: string, accessToken: string): string 
       accessToken,
       iat: Math.floor(Date.now() / 1000),
     },
-    process.env.JWT_SECRET!,
+    process.env.JWT_SECRET || 'default-jwt-secret-change-in-production',
     { expiresIn: '7d' }
   );
 }
 
 export function verifySessionToken(token: string): { shop: string; accessToken: string } | null {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-jwt-secret-change-in-production') as any;
     return {
       shop: decoded.shop,
       accessToken: decoded.accessToken,

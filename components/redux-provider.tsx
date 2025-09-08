@@ -2,12 +2,12 @@
 
 import { Provider } from 'react-redux';
 import { store } from '@/store/store';
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAppDispatch } from '@/store/hooks';
 import { setAuth, setLoading } from '@/store/authSlice';
 
-function AuthInitializer({ children }: { children: React.ReactNode }) {
+function AuthInitializerInner({ children }: { children: React.ReactNode }) {
   const dispatch = useAppDispatch();
   const searchParams = useSearchParams();
   
@@ -47,6 +47,16 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   }, [dispatch, searchParams]);
   
   return <>{children}</>;
+}
+
+function AuthInitializer({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<>{children}</>}>
+      <AuthInitializerInner>
+        {children}
+      </AuthInitializerInner>
+    </Suspense>
+  );
 }
 
 export default function ReduxProvider({ children }: { children: React.ReactNode }) {
