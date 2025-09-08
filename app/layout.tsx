@@ -20,12 +20,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta name="shopify-api-key" content="38a870cdc7f41175fd49a52689539f9d" />
+        <meta name="shopify-api-key" content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY} />
         <link 
           rel="stylesheet" 
           href="https://unpkg.com/@shopify/polaris@12.27.0/build/esm/styles.css"
         />
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" data-api-key="38a870cdc7f41175fd49a52689539f9d"></script>
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" data-api-key={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}></script>
       </head>
       <body className={inter.className} suppressHydrationWarning>
         <ReduxProvider>
