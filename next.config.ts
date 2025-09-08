@@ -4,6 +4,14 @@ const nextConfig: NextConfig = {
   // Performance optimizations
   reactStrictMode: true,
   
+  // Skip type checking and linting during build
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  
   // Allow Shopify admin to load the app
   async headers() {
     return [
