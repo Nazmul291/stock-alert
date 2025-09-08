@@ -1,0 +1,70 @@
+import { shopifyApi, ApiVersion, Session } from '@shopify/shopify-api';
+import '@shopify/shopify-api/adapters/node';
+import jwt from 'jsonwebtoken';
+
+export const shopify = shopifyApi({
+  apiKey: process.env.SHOPIFY_API_KEY!,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET!,
+  scopes: process.env.SHOPIFY_SCOPES!.split(','),
+  hostName: process.env.SHOPIFY_APP_URL!.replace(/https?:\/\//, ''),
+  apiVersion: ApiVersion.July25,
+  isEmbeddedApp: true,
+  logger: {
+    level: process.env.NODE_ENV === 'development' ? 0 : 2,
+  },
+});
+
+export function generateSessionToken(shop: string, accessToken: string): string {
+  return jwt.sign(
+    {
+      shop,
+      accessToken,
+      iat: Math.floor(Date.now() / 1000),
+    },
+    process.env.JWT_SECRET!,
+    { expiresIn: '7d' }
+  );
+}
+
+export function verifySessionToken(token: string): { shop: string; accessToken: string } | null {
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    return {
+      shop: decoded.shop,
+      accessToken: decoded.accessToken,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+export async function getShopifyClient(shop: string, accessToken: string) {
+  const session = new Session({
+    id: `offline_${shop}`,
+    shop,
+    state: '',
+    isOnline: false,
+    accessToken,
+  });
+
+  return new shopify.clients.Rest({ session });
+}
+
+export async function getGraphQLClient(shop: string, accessToken: string) {
+  const session = new Session({
+    id: `offline_${shop}`,
+    shop,
+    state: '',
+    isOnline: false,
+    accessToken,
+  });
+
+  return new shopify.clients.Graphql({ session });
+}
+
+export const WEBHOOK_TOPICS = {
+  INVENTORY_LEVELS_UPDATE: 'INVENTORY_LEVELS/UPDATE',
+  PRODUCTS_UPDATE: 'PRODUCTS/UPDATE',
+  PRODUCTS_DELETE: 'PRODUCTS/DELETE',
+  APP_UNINSTALLED: 'APP/UNINSTALLED',
+} as const;

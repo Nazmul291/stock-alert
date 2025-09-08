@@ -1,0 +1,29 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "38a870cdc7f41175fd49a52689539f9d"
+name = "Stock Alert"
+handle = "stock-alert-27"
+application_url = "https://dev.nazmulcodes.org"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "muscled-production-app-test.myshopify.com"
+include_config_on_deploy = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products,write_products,read_inventory,write_inventory"
+
+[auth]
+redirect_urls = [
+  "https://dev.nazmulcodes.org/auth/callback",
+  "https://dev.nazmulcodes.org/auth/shopify/callback",
+  "https://dev.nazmulcodes.org/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2025-07"
+
+[pos]
+embedded = false
