@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
-import HomeContent from './home-content';
+import DashboardServer from './dashboard-server';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // Server Component - handles redirects on the server
@@ -70,8 +70,8 @@ export default async function HomePage({
       console.error('Error fetching setup progress:', error);
     }
     
-    // All good, show the home page
-    return <HomeContent searchParams={params} setupProgress={setupProgress} store={store} />;
+    // All good, show the home page - using SERVER COMPONENT
+    return <DashboardServer searchParams={params} setupProgress={setupProgress} store={store} />;
   }
   
   // Default landing page for non-embedded context
