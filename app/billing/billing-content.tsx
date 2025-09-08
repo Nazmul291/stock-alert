@@ -102,6 +102,7 @@ export default function BillingContent({
                   <List.Item>Low stock alerts via email</List.Item>
                   <List.Item>Global threshold settings</List.Item>
                   <List.Item>Basic inventory tracking</List.Item>
+                  <List.Item><strong>Monitor up to 10 products</strong></List.Item>
                 </List>
 
                 {store?.plan === 'pro' && (
@@ -138,6 +139,7 @@ export default function BillingContent({
                   <List.Item>Advanced rules & collections</List.Item>
                   <List.Item>Multiple notification users</List.Item>
                   <List.Item>Priority support</List.Item>
+                  <List.Item><strong>Monitor up to 10,000 products</strong></List.Item>
                 </List>
 
                 {store?.plan === 'free' && (

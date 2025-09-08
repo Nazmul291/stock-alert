@@ -31,13 +31,15 @@ import {
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import PolarisReady from '@/components/polaris-ready';
+import PlanUsage from '@/components/plan-usage';
 
 interface HomeContentProps {
   searchParams: { shop?: string; host?: string };
   setupProgress?: any;
+  store?: any;
 }
 
-export default function HomeContent({ searchParams, setupProgress }: HomeContentProps) {
+export default function HomeContent({ searchParams, setupProgress, store }: HomeContentProps) {
   const router = useRouter();
   const [currentTime, setCurrentTime] = useState(new Date());
   
@@ -242,6 +244,16 @@ export default function HomeContent({ searchParams, setupProgress }: HomeContent
                 </BlockStack>
               </Box>
             </Card>
+          </Layout.Section>
+
+          {/* Plan Usage Section */}
+          <Layout.Section>
+            <PlanUsage 
+              shop={searchParams.shop || ''} 
+              host={searchParams.host}
+              plan={store?.plan || 'free'}
+              searchParams={searchParams}
+            />
           </Layout.Section>
 
           {/* Features Grid */}

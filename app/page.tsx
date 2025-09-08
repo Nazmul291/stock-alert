@@ -71,7 +71,7 @@ export default async function HomePage({
     }
     
     // All good, show the home page
-    return <HomeContent searchParams={params} setupProgress={setupProgress} />;
+    return <HomeContent searchParams={params} setupProgress={setupProgress} store={store} />;
   }
   
   // Default landing page for non-embedded context
