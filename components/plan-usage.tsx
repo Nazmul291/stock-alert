@@ -40,6 +40,8 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
         if (response.ok) {
           const data = await response.json();
           setUsage(data);
+        } else {
+          console.error('Failed to fetch usage:', response.status);
         }
       } catch (error) {
         console.error('Error fetching usage:', error);
@@ -50,6 +52,8 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
 
     if (shop) {
       fetchUsage();
+    } else {
+      setLoading(false);
     }
   }, [shop]);
 
@@ -65,15 +69,15 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
       <Card>
         <Box padding="400">
           <BlockStack gap="200">
-            <Text variant="headingMd">Plan Usage</Text>
-            <Text variant="bodyMd" tone="subdued">Loading...</Text>
+            <Text variant="headingMd" as="h3">Plan Usage</Text>
+            <Text variant="bodyMd" tone="subdued" as="p">Loading...</Text>
           </BlockStack>
         </Box>
       </Card>
     );
   }
 
-  const { stats, store, validation } = usage;
+  const { stats, store } = usage;
   const usagePercentage = Math.round((stats.currentProducts / stats.maxProducts) * 100);
   const isNearLimit = usagePercentage >= 80;
   const isAtLimit = usagePercentage >= 100;
@@ -83,7 +87,7 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
       <Box padding="400">
         <BlockStack gap="400">
           <InlineStack align="space-between" blockAlign="center">
-            <Text variant="headingMd">Plan Usage</Text>
+            <Text variant="headingMd" as="h3">Plan Usage</Text>
             <Badge tone={store.plan === 'pro' ? 'success' : 'info'}>
               {store.name}
             </Badge>
@@ -91,8 +95,8 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
 
           <BlockStack gap="300">
             <InlineStack align="space-between" blockAlign="center">
-              <Text variant="bodyMd">Products Tracked</Text>
-              <Text variant="bodyMd" fontWeight="semibold">
+              <Text variant="bodyMd" as="p">Products Tracked</Text>
+              <Text variant="bodyMd" fontWeight="semibold" as="p">
                 {stats.currentProducts} / {stats.maxProducts}
               </Text>
             </InlineStack>
@@ -100,11 +104,10 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
             <ProgressBar 
               progress={usagePercentage} 
               size="small"
-              tone={isAtLimit ? 'critical' : isNearLimit ? 'warning' : 'success'}
             />
 
             {stats.remainingSlots > 0 && (
-              <Text variant="bodySm" tone="subdued">
+              <Text variant="bodySm" tone="subdued" as="p">
                 {stats.remainingSlots} slots remaining
               </Text>
             )}
@@ -112,7 +115,7 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
             {isAtLimit && store.plan === 'free' && (
               <Box paddingBlockStart="200">
                 <BlockStack gap="200">
-                  <Text variant="bodySm" tone="critical">
+                  <Text variant="bodySm" tone="critical" as="p">
                     You've reached your 10 product limit on the Free plan.
                   </Text>
                   <Button 
@@ -129,7 +132,7 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
             {isNearLimit && !isAtLimit && store.plan === 'free' && (
               <Box paddingBlockStart="200">
                 <BlockStack gap="200">
-                  <Text variant="bodySm" tone="warning">
+                  <Text variant="bodySm" as="p">
                     You're approaching your 10 product limit. Upgrade to track up to 10,000 products.
                   </Text>
                   <Button 

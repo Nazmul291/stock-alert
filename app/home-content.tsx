@@ -247,14 +247,16 @@ export default function HomeContent({ searchParams, setupProgress, store }: Home
           </Layout.Section>
 
           {/* Plan Usage Section */}
-          <Layout.Section>
-            <PlanUsage 
-              shop={searchParams.shop || ''} 
-              host={searchParams.host}
-              plan={store?.plan || 'free'}
-              searchParams={searchParams}
-            />
-          </Layout.Section>
+          {searchParams.shop && (
+            <Layout.Section>
+              <PlanUsage 
+                shop={searchParams.shop} 
+                host={searchParams.host}
+                plan={store?.plan || 'free'}
+                searchParams={searchParams}
+              />
+            </Layout.Section>
+          )}
 
           {/* Features Grid */}
           <Layout.Section>
