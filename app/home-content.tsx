@@ -30,7 +30,6 @@ import {
 } from '@shopify/polaris-icons';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import PolarisReady from '@/components/polaris-ready';
 import PlanUsage from '@/components/plan-usage';
 
 interface HomeContentProps {
@@ -80,8 +79,7 @@ export default function HomeContent({ searchParams, setupProgress, store }: Home
   const progressPercentage = calculateProgress();
 
   return (
-    <PolarisReady>
-      <Page>
+    <Page>
         <div className="pb-24">
         <Layout>
           {/* Welcome Section */}
@@ -445,6 +443,5 @@ export default function HomeContent({ searchParams, setupProgress, store }: Home
         </Layout>
         </div>
       </Page>
-    </PolarisReady>
   );
 }

@@ -29,7 +29,7 @@ export default async function HomePage({
     // Check if store exists in database (has completed OAuth)
     const { data: store } = await supabaseAdmin
       .from('stores')
-      .select('id, access_token')
+      .select('id, access_token, plan, shop_domain')
       .eq('shop_domain', params.shop)
       .single();
     

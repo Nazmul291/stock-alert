@@ -1,36 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
+// This component is now just a passthrough since we don't need
+// loading states for SSR. It's kept for backwards compatibility
+// but can be removed entirely in the future.
 export default function PolarisReady({ 
   children 
 }: { 
   children: React.ReactNode 
 }) {
-  const [isReady, setIsReady] = useState(false);
-
-  useEffect(() => {
-    // Small delay to ensure AppProvider is mounted
-    const timer = setTimeout(() => {
-      setIsReady(true);
-    }, 0);
-    
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (!isReady) {
-    return (
-      <div style={{ 
-        minHeight: '100vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        backgroundColor: '#f6f6f7'
-      }}>
-        <div>Loading...</div>
-      </div>
-    );
-  }
-
   return <>{children}</>;
 }

@@ -30,11 +30,12 @@ interface UsageData {
 
 export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageProps) {
   const [usage, setUsage] = useState<UsageData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Don't show loading initially
   const router = useRouter();
 
   useEffect(() => {
     async function fetchUsage() {
+      setLoading(true); // Only show loading when actively fetching
       try {
         const response = await fetch(`/api/products/validate?shop=${shop}`);
         if (response.ok) {
@@ -52,8 +53,6 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
 
     if (shop) {
       fetchUsage();
-    } else {
-      setLoading(false);
     }
   }, [shop]);
 
@@ -64,13 +63,16 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
     router.push(`/billing?${params.toString()}`);
   };
 
-  if (loading || !usage) {
+  // Show a default state if no data yet (don't show loading on initial render)
+  if (!usage) {
     return (
       <Card>
         <Box padding="400">
           <BlockStack gap="200">
             <Text variant="headingMd" as="h3">Plan Usage</Text>
-            <Text variant="bodyMd" tone="subdued" as="p">Loading...</Text>
+            <Text variant="bodyMd" tone="subdued" as="p">
+              {loading ? 'Updating...' : `${plan === 'pro' ? 'Professional' : 'Free'} Plan`}
+            </Text>
           </BlockStack>
         </Box>
       </Card>

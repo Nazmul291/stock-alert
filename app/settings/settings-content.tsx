@@ -4,7 +4,6 @@ import { Page, Layout, Card, Banner } from '@shopify/polaris';
 import SettingsForm from './settings-form';
 import ProductsTable from '../products/products-table';
 import SyncProductsButton from './sync-products-button';
-import PolarisReady from '@/components/polaris-ready';
 
 interface SettingsContentProps {
   store: any;
@@ -28,8 +27,7 @@ export default function SettingsContent({
   searchParams 
 }: SettingsContentProps) {
   return (
-    <PolarisReady>
-      <Page
+    <Page
       title="Settings"
       backAction={{
         content: 'Home',
@@ -95,6 +93,5 @@ export default function SettingsContent({
         )}
       </Layout>
     </Page>
-    </PolarisReady>
   );
 }

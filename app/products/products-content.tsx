@@ -2,7 +2,6 @@
 
 import { Page, Layout, Card } from '@shopify/polaris';
 import ProductsTable from './products-table';
-import PolarisReady from '@/components/polaris-ready';
 
 interface ProductsContentProps {
   products: any[];
@@ -14,8 +13,7 @@ export default function ProductsContent({
   searchParams 
 }: ProductsContentProps) {
   return (
-    <PolarisReady>
-      <Page
+    <Page
       title="Product Settings"
       backAction={{
         content: 'Home',
@@ -30,6 +28,5 @@ export default function ProductsContent({
         </Layout.Section>
       </Layout>
     </Page>
-    </PolarisReady>
   );
 }

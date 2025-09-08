@@ -11,7 +11,6 @@ import {
   Banner,
   List,
 } from '@shopify/polaris';
-import PolarisReady from '@/components/polaris-ready';
 
 interface BillingContentProps {
   store: any;
@@ -70,8 +69,7 @@ export default function BillingContent({
   };
 
   return (
-    <PolarisReady>
-      <Page
+    <Page
       title="Billing & Plans"
       backAction={{
         content: 'Dashboard',
@@ -177,6 +175,5 @@ export default function BillingContent({
         )}
       </Layout>
     </Page>
-    </PolarisReady>
   );
 }
