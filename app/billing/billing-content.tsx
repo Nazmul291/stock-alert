@@ -25,8 +25,13 @@ export default function BillingContent({
   const [upgrading, setUpgrading] = useState(false);
 
   const handleUpgrade = async () => {
+    console.log('🔴 FRONTEND: Starting upgrade process');
+    console.log('Current URL:', window.location.href);
+    console.log('Search params:', searchParams);
+    
     setUpgrading(true);
     try {
+      console.log('📞 FRONTEND: Making billing API call');
       const response = await fetch('/api/billing', {
         method: 'POST',
         headers: {
@@ -35,21 +40,37 @@ export default function BillingContent({
         body: JSON.stringify({ plan: 'pro' }),
       });
 
+      console.log('📥 FRONTEND: Response status:', response.status);
       const data = await response.json();
+      console.log('📥 FRONTEND: Response data:', data);
       
       if (data.confirmation_url) {
         // Real charge - redirect to Shopify confirmation
-        window.location.href = data.confirmation_url;
+        console.log('🚀 FRONTEND: Redirecting to Shopify confirmation:', data.confirmation_url);
+        
+        // For embedded apps, we need to redirect the parent window, not the iframe
+        if (window.parent && window.parent !== window) {
+          console.log('🔄 FRONTEND: Detected iframe, redirecting parent window');
+          window.parent.location.href = data.confirmation_url;
+        } else {
+          console.log('🔄 FRONTEND: Not in iframe, redirecting current window');
+          window.location.href = data.confirmation_url;
+        }
       } else if (data.upgraded) {
-        // Development bypass - just refresh the page
-        window.location.reload();
+        // This should no longer be used - all upgrades go through Shopify confirmation
+        alert('Plan upgraded successfully! Redirecting to dashboard...');
+        
+        // Redirect to dashboard with success parameter
+        const dashboardUrl = `/dashboard?shop=${searchParams.shop}&host=${searchParams.host}&upgraded=true`;
+        window.location.href = dashboardUrl;
+        return;
       } else if (data.error) {
         console.error('Billing error:', data.error);
         alert(`Upgrade failed: ${data.error}`);
+        setUpgrading(false);
       }
     } catch (error) {
       console.error('Upgrade error:', error);
-    } finally {
       setUpgrading(false);
     }
   };

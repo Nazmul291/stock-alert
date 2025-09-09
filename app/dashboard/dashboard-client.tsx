@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Page, 
   Layout, 
@@ -52,6 +52,29 @@ export default function DashboardClient({
   searchParams
 }: DashboardClientProps) {
   const [refreshing, setRefreshing] = useState(false);
+  const [showUpgradeBanner, setShowUpgradeBanner] = useState(false);
+
+  useEffect(() => {
+    console.log('🟡 DASHBOARD: useEffect triggered');
+    console.log('Current URL:', window.location.href);
+    
+    // Check if we just upgraded
+    const urlParams = new URLSearchParams(window.location.search);
+    console.log('URL params:', Object.fromEntries(urlParams.entries()));
+    
+    if (urlParams.get('upgraded') === 'true') {
+      console.log('✅ DASHBOARD: Upgraded param found, showing banner');
+      setShowUpgradeBanner(true);
+      // Remove the upgraded param from URL
+      urlParams.delete('upgraded');
+      const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
+      console.log('🔄 DASHBOARD: Updating URL to:', newUrl);
+      window.history.replaceState({}, '', newUrl);
+      
+      // Hide banner after 5 seconds
+      setTimeout(() => setShowUpgradeBanner(false), 5000);
+    }
+  }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -92,6 +115,17 @@ export default function DashboardClient({
         }
       ]}
     >
+      {showUpgradeBanner && (
+        <div style={{ marginBottom: '16px' }}>
+          <Banner
+            title="Plan upgraded successfully!"
+            tone="success"
+            onDismiss={() => setShowUpgradeBanner(false)}
+          >
+            You have been upgraded to the Professional plan. All pro features are now available.
+          </Banner>
+        </div>
+      )}
       <Layout>
         {/* Welcome Banner for new users */}
         {progressPercentage < 100 && (

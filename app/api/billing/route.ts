@@ -3,20 +3,31 @@ import { shopify, verifySessionToken, getShopifyClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
+  console.log('🔵 BILLING REQUEST START');
+  console.log('URL:', req.url);
+  console.log('Method:', req.method);
+  console.log('Headers:', Object.fromEntries(req.headers.entries()));
+  
   try {
     const { plan } = await req.json();
     const sessionToken = req.cookies.get('shopify-session')?.value;
+    const host = req.nextUrl.searchParams.get('host') || req.headers.get('shopify-app-host');
+    
+    console.log('📝 Request data:', { plan, hasSessionToken: !!sessionToken, host });
     
     if (!sessionToken) {
+      console.log('❌ No session token found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const session = verifySessionToken(sessionToken);
     if (!session) {
+      console.log('❌ Invalid session token');
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
     const { shop, accessToken } = session;
+    console.log('✅ Session verified for shop:', shop);
 
     // Get store from database
     const { data: store } = await supabaseAdmin
@@ -33,17 +44,19 @@ export async function POST(req: NextRequest) {
 
     if (plan === 'pro') {
       // Create recurring charge for Pro plan
-      console.log(`Creating TEST billing charge for ${shop}`);
+      console.log(`💳 Creating TEST billing charge for ${shop}`);
+      console.log('Return URL will be:', `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}${host ? `&host=${host}` : ''}`);
       
       let recurringCharge;
       try {
+        console.log('📞 Calling Shopify billing API...');
         recurringCharge = await client.post({
           path: 'recurring_application_charges',
           data: {
             recurring_application_charge: {
               name: 'Stock Alert Pro (Test)',
               price: 9.99,
-              return_url: `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}`,
+              return_url: `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}${host ? `&host=${host}` : ''}`,
               test: true, // ALWAYS use test charges for now
               trial_days: 7,
               capped_amount: 9.99,
@@ -52,62 +65,19 @@ export async function POST(req: NextRequest) {
           },
         });
       } catch (billingError: any) {
-        console.error('Billing API Error:', billingError.message || billingError);
-        
-        // For any billing error in development, use the bypass
-        // This includes: ownership errors, connection errors, API version issues, etc.
-        const isDevelopmentStore = shop.includes('dev-') || 
-                                  shop.includes('test-') || 
-                                  shop.includes('.myshopify.com');
-        
-        if (isDevelopmentStore || process.env.NODE_ENV === 'development') {
-          console.log('Development store detected - using billing bypass');
-          
-          // For development, just update the plan in the database without creating a charge
-          const { error: updateError } = await supabaseAdmin
-            .from('stores')
-            .update({ 
-              plan: 'pro',
-              updated_at: new Date().toISOString()
-            })
-            .eq('shop_domain', shop);
-
-          if (!updateError) {
-            // Also create a mock billing record for tracking
-            await supabaseAdmin
-              .from('billing_records')
-              .insert({
-                store_id: store.id,
-                charge_id: Date.now(), // Mock charge ID
-                plan: 'pro',
-                status: 'active',
-                amount: 0, // Test charge
-                currency: 'USD',
-                activated_on: new Date().toISOString(),
-                created_at: new Date().toISOString(),
-              });
-
-            // Don't redirect, just return success
-            // The client will handle the UI update
-            return NextResponse.json({
-              success: true,
-              message: 'Development mode: Plan upgraded without charge',
-              upgraded: true,
-              plan: 'pro'
-            });
-          } else {
-            console.error('Failed to update plan in database:', updateError);
-            return NextResponse.json({ 
-              error: 'Failed to upgrade plan in development mode' 
-            }, { status: 500 });
-          }
-        }
-        
-        // For production, throw the actual error
-        throw billingError;
+        console.error('💥 Billing API Error:', billingError.message || billingError);
+        console.error('Full error:', billingError);
+        return NextResponse.json({ 
+          error: `Failed to create billing charge: ${billingError.message || 'Unknown error'}` 
+        }, { status: 500 });
       }
 
       const charge = recurringCharge.body.recurring_application_charge;
+      console.log('✅ Billing charge created successfully:', {
+        id: charge.id,
+        status: charge.status,
+        confirmation_url: charge.confirmation_url
+      });
       
       // Store charge info in database
       await supabaseAdmin
@@ -121,6 +91,7 @@ export async function POST(req: NextRequest) {
           currency: 'USD',
         });
 
+      console.log('🚀 Returning confirmation URL to frontend:', charge.confirmation_url);
       return NextResponse.json({ 
         confirmation_url: charge.confirmation_url 
       });
