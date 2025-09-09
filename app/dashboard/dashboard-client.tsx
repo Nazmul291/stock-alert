@@ -347,7 +347,7 @@ export default function DashboardClient({
                   </Box>
                   <Box>
                     <Text variant="bodySm" tone="subdued">Email</Text>
-                    <Text variant="bodyMd">{store.email || 'Not set'}</Text>
+                    <Text variant="bodyMd">{settings?.notification_email || store.email || 'Not set'}</Text>
                   </Box>
                   <Box>
                     <Text variant="bodySm" tone="subdued">Installed</Text>

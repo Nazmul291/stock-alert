@@ -81,6 +81,7 @@ export async function updateStoreSettings(formData: FormData, shop: string) {
     });
 
   revalidatePath('/settings');
+  revalidatePath('/dashboard');
   return { success: true };
 }
 
