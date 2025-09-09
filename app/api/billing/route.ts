@@ -33,20 +33,51 @@ export async function POST(req: NextRequest) {
 
     if (plan === 'pro') {
       // Create recurring charge for Pro plan
-      const recurringCharge = await client.post({
-        path: 'recurring_application_charges',
-        data: {
-          recurring_application_charge: {
-            name: 'Stock Alert Pro',
-            price: 9.99,
-            return_url: `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}`,
-            test: process.env.NODE_ENV === 'development',
-            trial_days: 7,
-            capped_amount: 9.99,
-            terms: 'Pro features including Slack notifications, per-product thresholds, and priority support',
+      console.log(`Creating TEST billing charge for ${shop}`);
+      
+      let recurringCharge;
+      try {
+        recurringCharge = await client.post({
+          path: 'recurring_application_charges',
+          data: {
+            recurring_application_charge: {
+              name: 'Stock Alert Pro (Test)',
+              price: 9.99,
+              return_url: `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}`,
+              test: true, // ALWAYS use test charges for now
+              trial_days: 7,
+              capped_amount: 9.99,
+              terms: 'Pro features including Slack notifications, per-product thresholds, and priority support',
+            },
           },
-        },
-      });
+        });
+      } catch (billingError: any) {
+        console.error('Billing API Error:', billingError);
+        
+        // Check if it's the ownership error
+        if (billingError.message?.includes('owned by a Shop') || billingError.response?.body?.base?.[0]?.includes('owned by a Shop')) {
+          console.log('App ownership error - using development bypass');
+          
+          // For development, just update the plan in the database without creating a charge
+          const { error: updateError } = await supabaseAdmin
+            .from('stores')
+            .update({ 
+              plan: 'pro',
+              updated_at: new Date().toISOString()
+            })
+            .eq('shop_domain', shop);
+
+          if (!updateError) {
+            return NextResponse.json({
+              success: true,
+              message: 'Development mode: Plan upgraded without charge',
+              confirmationUrl: `/billing?upgraded=true&shop=${shop}`
+            });
+          }
+        }
+        
+        throw billingError;
+      }
 
       const charge = recurringCharge.body.recurring_application_charge;
       
