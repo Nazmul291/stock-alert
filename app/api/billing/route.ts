@@ -87,10 +87,13 @@ export async function POST(req: NextRequest) {
                 created_at: new Date().toISOString(),
               });
 
+            // Don't redirect, just return success
+            // The client will handle the UI update
             return NextResponse.json({
               success: true,
               message: 'Development mode: Plan upgraded without charge',
-              confirmationUrl: `/settings?shop=${shop}&upgraded=true`
+              upgraded: true,
+              plan: 'pro'
             });
           } else {
             console.error('Failed to update plan in database:', updateError);

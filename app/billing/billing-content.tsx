@@ -38,7 +38,14 @@ export default function BillingContent({
       const data = await response.json();
       
       if (data.confirmation_url) {
+        // Real charge - redirect to Shopify confirmation
         window.location.href = data.confirmation_url;
+      } else if (data.upgraded) {
+        // Development bypass - just refresh the page
+        window.location.reload();
+      } else if (data.error) {
+        console.error('Billing error:', data.error);
+        alert(`Upgrade failed: ${data.error}`);
       }
     } catch (error) {
       console.error('Upgrade error:', error);
