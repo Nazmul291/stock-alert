@@ -22,16 +22,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Store not found' }, { status: 404 });
     }
 
-    // Count current tracked products for this store
-    const { count: productCount, error: countError } = await supabaseAdmin
+    // Get current tracked products for this store
+    const { data: products, error: countError } = await supabaseAdmin
       .from('inventory_tracking')
-      .select('product_id', { count: 'exact', head: true })
+      .select('product_id')
       .eq('store_id', store.id);
 
     if (countError) {
       console.error('Error counting products:', countError);
       return NextResponse.json({ error: 'Failed to count products' }, { status: 500 });
     }
+
+    // Count distinct products (not variants)
+    const distinctProductIds = new Set(products?.map(p => p.product_id) || []);
+    const productCount = distinctProductIds.size;
 
     // Validate against plan limits
     const validation = validateProductLimit(store.plan || 'free', productCount || 0);
@@ -81,15 +85,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Store not found' }, { status: 404 });
     }
 
-    // Count current tracked products
-    const { count: currentCount, error: countError } = await supabaseAdmin
+    // Get current tracked products
+    const { data: currentProducts, error: countError } = await supabaseAdmin
       .from('inventory_tracking')
-      .select('product_id', { count: 'exact', head: true })
+      .select('product_id')
       .eq('store_id', store.id);
 
     if (countError) {
       return NextResponse.json({ error: 'Failed to count products' }, { status: 500 });
     }
+
+    // Count distinct products (not variants)
+    const distinctCurrentProducts = new Set(currentProducts?.map(p => p.product_id) || []);
+    const currentCount = distinctCurrentProducts.size;
 
     const planLimits = getPlanLimits(store.plan || 'free');
     const newTotal = (currentCount || 0) + productIds.length;

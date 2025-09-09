@@ -63,8 +63,8 @@ export async function getGraphQLClient(shop: string, accessToken: string) {
 }
 
 export const WEBHOOK_TOPICS = {
-  INVENTORY_LEVELS_UPDATE: 'INVENTORY_LEVELS/UPDATE',
-  PRODUCTS_UPDATE: 'PRODUCTS/UPDATE',
-  PRODUCTS_DELETE: 'PRODUCTS/DELETE',
-  APP_UNINSTALLED: 'APP/UNINSTALLED',
+  INVENTORY_LEVELS_UPDATE: 'inventory_levels/update',
+  PRODUCTS_UPDATE: 'products/update',
+  PRODUCTS_DELETE: 'products/delete',
+  APP_UNINSTALLED: 'app/uninstalled',
 } as const;

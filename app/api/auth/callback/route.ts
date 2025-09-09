@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { shopify, generateSessionToken, WEBHOOK_TOPICS } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
+import { registerWebhooks } from '@/lib/webhook-registration';
 
 export async function GET(req: NextRequest) {
   try {
@@ -70,6 +71,33 @@ export async function GET(req: NextRequest) {
 
     if (existingStore) {
       console.log('Updating existing store:', existingStore.id);
+      
+      // Clean up old inventory data when reinstalling
+      // This handles cases where the uninstall webhook might not have fired
+      console.log('Cleaning up old inventory data for store:', existingStore.id);
+      const { error: cleanupError } = await supabaseAdmin
+        .from('inventory_tracking')
+        .delete()
+        .eq('store_id', existingStore.id);
+      
+      if (cleanupError) {
+        console.error('Error cleaning up inventory data:', cleanupError);
+        // Continue anyway - not critical
+      } else {
+        console.log('Old inventory data cleaned up successfully');
+      }
+      
+      // Also clean up product settings
+      const { error: settingsCleanupError } = await supabaseAdmin
+        .from('product_settings')
+        .delete()
+        .eq('store_id', existingStore.id);
+      
+      if (settingsCleanupError) {
+        console.error('Error cleaning up product settings:', settingsCleanupError);
+        // Continue anyway - not critical
+      }
+      
       // Update existing store
       const { data: updatedStore, error: updateError } = await supabaseAdmin
         .from('stores')
@@ -152,8 +180,16 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Skip webhook registration for now - can be done later
-    console.log('Skipping webhook registration for now');
+    // Register webhooks for inventory tracking
+    try {
+      console.log('Registering webhooks...');
+      await registerWebhooks(session.shop, session.accessToken);
+      console.log('Webhooks registered successfully');
+    } catch (webhookError) {
+      console.error('Failed to register webhooks:', webhookError);
+      // Don't fail the auth flow if webhook registration fails
+      // Webhooks can be registered manually later
+    }
 
     // Generate session token
     const token = generateSessionToken(session.shop, session.accessToken);

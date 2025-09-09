@@ -28,17 +28,43 @@ export default function SyncProductsButton({ shop }: SyncProductsButtonProps) {
       const data = await response.json();
 
       if (response.ok) {
-        setBannerMessage(`Successfully synced ${data.count} products from Shopify`);
+        let message = `Successfully synced ${data.count} products`;
+        
+        if (data.syncInfo) {
+          if (data.syncInfo.newProductsSynced > 0) {
+            message = `Synced ${data.syncInfo.newProductsSynced} new products and updated ${data.syncInfo.existingProductsUpdated} existing products`;
+          } else {
+            message = `Updated ${data.syncInfo.existingProductsUpdated} existing products`;
+          }
+          
+          if (data.syncInfo.warning) {
+            message += `. ${data.syncInfo.warning}`;
+            setBannerError(false); // Use warning tone instead of error
+          }
+          
+          message += `. (${data.syncInfo.currentTotalProducts}/${data.syncInfo.maxAllowed} products used on ${data.syncInfo.plan} plan)`;
+        }
+        
+        setBannerMessage(message);
         setBannerError(false);
         setBannerActive(true);
         
         // Refresh the page to show updated products
         router.refresh();
         
-        // Hide banner after 3 seconds
-        setTimeout(() => setBannerActive(false), 3000);
+        // Hide banner after 5 seconds for longer messages
+        setTimeout(() => setBannerActive(false), data.syncInfo?.warning ? 5000 : 3000);
       } else {
-        setBannerMessage(data.error || 'Failed to sync products');
+        // Handle specific error cases
+        if (response.status === 401 && data.requiresReauth) {
+          setBannerMessage('Authentication failed. Please reinstall the app or contact support.');
+        } else if (response.status === 403) {
+          setBannerMessage(data.error || 'Permission denied. The app may not have the required permissions.');
+        } else if (response.status === 429) {
+          setBannerMessage('Too many requests. Please try again in a few moments.');
+        } else {
+          setBannerMessage(data.error || 'Failed to sync products');
+        }
         setBannerError(true);
         setBannerActive(true);
       }
