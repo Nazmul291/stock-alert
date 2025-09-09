@@ -120,26 +120,22 @@ export default function SettingsForm({ settings: initialSettings, plan, shop }: 
           />
         )}
 
-        {plan === 'pro' && (
-          <>
-            <Checkbox
-              label="Slack notifications (Pro)"
-              checked={settings.slack_notifications}
-              onChange={(value) => setSettings({ ...settings, slack_notifications: value })}
-            />
-            
-            {settings.slack_notifications && (
-              <TextField
-                label="Slack webhook URL"
-                type="url"
-                value={settings.slack_webhook_url || ''}
-                onChange={(value) => setSettings({ ...settings, slack_webhook_url: value })}
-                placeholder="https://hooks.slack.com/services/..."
-                helpText="Get this from your Slack app settings"
-                autoComplete="url"
-              />
-            )}
-          </>
+        <Checkbox
+          label="Slack notifications"
+          checked={settings.slack_notifications}
+          onChange={(value) => setSettings({ ...settings, slack_notifications: value })}
+        />
+        
+        {settings.slack_notifications && (
+          <TextField
+            label="Slack webhook URL"
+            type="url"
+            value={settings.slack_webhook_url || ''}
+            onChange={(value) => setSettings({ ...settings, slack_webhook_url: value })}
+            placeholder="https://hooks.slack.com/services/..."
+            helpText="Get this from your Slack app settings"
+            autoComplete="url"
+          />
         )}
 
         <Button

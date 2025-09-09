@@ -101,7 +101,7 @@ export default function BillingContent({
       title="Billing & Plans"
       backAction={{
         content: 'Dashboard',
-        url: `/dashboard?shop=${searchParams.shop}&host=${searchParams.host}`,
+        url: `/?shop=${searchParams.shop}&host=${searchParams.host}&embedded=1`,
       }}
     >
       <Layout>

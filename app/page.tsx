@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import { supabaseAdmin } from '@/lib/supabase';
+import DashboardClient from './dashboard/dashboard-client';
 
-// Server Component - handles redirects on the server
+// Server Component - serves as both landing page and dashboard
 export default async function HomePage({
   searchParams,
 }: {
@@ -19,58 +20,47 @@ export default async function HomePage({
   // Await searchParams as required in Next.js 15
   const params = await searchParams;
   
-  // Check if we're in embedded context
+  // Check if we're in embedded context (Shopify admin)
   const isEmbedded = params.embedded === '1' || params.host;
   
-  // If embedded, check if we have a valid session
+  // If embedded with shop param, show dashboard
   if (isEmbedded && params.shop) {
     // Check if store exists in database (has completed OAuth)
     const { data: store } = await supabaseAdmin
       .from('stores')
-      .select('id, access_token, plan, shop_domain')
+      .select('*')
       .eq('shop_domain', params.shop)
       .single();
     
     // If no store or no access token, need to complete OAuth
     if (!store || !store.access_token) {
-      console.log('Store not found or no access token, redirecting to OAuth');
       redirect(`/api/auth?shop=${params.shop}&embedded=1`);
     }
     
-    // Fetch setup progress
-    let setupProgress = null;
-    try {
-      const { data: progress } = await supabaseAdmin
-        .from('setup_progress')
-        .select('*')
-        .eq('store_id', store.id)
-        .single();
-      
-      if (!progress) {
-        // Create initial setup progress
-        const { data: newProgress } = await supabaseAdmin
-          .from('setup_progress')
-          .insert({
-            store_id: store.id,
-            app_installed: true,
-            global_settings_configured: false,
-            notifications_configured: false,
-            product_thresholds_configured: false,
-            first_product_tracked: false
-          })
-          .select()
-          .single();
-        setupProgress = newProgress;
-      } else {
-        setupProgress = progress;
-      }
-    } catch (error) {
-      console.error('Error fetching setup progress:', error);
-    }
+    // Fetch all dashboard data in parallel
+    const [
+      inventoryStats,
+      setupProgress,
+      storeSettings,
+      recentAlerts
+    ] = await Promise.all([
+      getInventoryStats(store.id),
+      getSetupProgress(store.id),
+      getStoreSettings(store.id),
+      getRecentAlerts(store.id)
+    ]);
     
-    // All good, redirect to dashboard with all params
-    const queryString = new URLSearchParams(params as any).toString();
-    return redirect(`/dashboard?${queryString}`);
+    // Return dashboard directly
+    return (
+      <DashboardClient
+        store={store}
+        stats={inventoryStats}
+        setupProgress={setupProgress}
+        settings={storeSettings}
+        recentAlerts={recentAlerts}
+        searchParams={params}
+      />
+    );
   }
   
   // Default landing page for non-embedded context
@@ -114,4 +104,131 @@ export default async function HomePage({
       </div>
     </div>
   );
+}
+
+// Helper functions for dashboard data
+async function getInventoryStats(storeId: string) {
+  try {
+    // TODO: After migration, use: await supabaseAdmin.rpc('get_inventory_stats', { p_store_id: storeId })
+    // For now, use separate queries until migration is applied
+    const [
+      { count: totalProducts },
+      { count: lowStock },
+      { count: outOfStock },
+      { count: hidden }
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('inventory_tracking')
+        .select('*', { count: 'exact', head: true })
+        .eq('store_id', storeId),
+      
+      supabaseAdmin
+        .from('inventory_tracking')
+        .select('*', { count: 'exact', head: true })
+        .eq('store_id', storeId)
+        .lt('current_quantity', 5)
+        .gt('current_quantity', 0),
+      
+      supabaseAdmin
+        .from('inventory_tracking')
+        .select('*', { count: 'exact', head: true })
+        .eq('store_id', storeId)
+        .eq('current_quantity', 0),
+      
+      supabaseAdmin
+        .from('inventory_tracking')
+        .select('*', { count: 'exact', head: true })
+        .eq('store_id', storeId)
+        .eq('is_hidden', true)
+    ]);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const { count: alertsToday } = await supabaseAdmin
+      .from('alert_history')
+      .select('*', { count: 'exact', head: true })
+      .eq('store_id', storeId)
+      .gte('sent_at', today.toISOString());
+
+    return {
+      totalProducts: totalProducts || 0,
+      lowStock: lowStock || 0,
+      outOfStock: outOfStock || 0,
+      hidden: hidden || 0,
+      alertsToday: alertsToday || 0
+    };
+  } catch (error) {
+    console.error('Error fetching inventory stats:', error);
+    return {
+      totalProducts: 0,
+      lowStock: 0,
+      outOfStock: 0,
+      hidden: 0,
+      alertsToday: 0
+    };
+  }
+}
+
+async function getSetupProgress(storeId: string) {
+  try {
+    const { data: progress } = await supabaseAdmin
+      .from('setup_progress')
+      .select('*')
+      .eq('store_id', storeId)
+      .single();
+
+    if (!progress) {
+      const { data: newProgress } = await supabaseAdmin
+        .from('setup_progress')
+        .insert({
+          store_id: storeId,
+          app_installed: true,
+          global_settings_configured: false,
+          notifications_configured: false,
+          product_thresholds_configured: false,
+          first_product_tracked: false
+        })
+        .select()
+        .single();
+      
+      return newProgress;
+    }
+
+    return progress;
+  } catch (error) {
+    console.error('Error fetching setup progress:', error);
+    return null;
+  }
+}
+
+async function getStoreSettings(storeId: string) {
+  try {
+    const { data: settings } = await supabaseAdmin
+      .from('store_settings')
+      .select('*')
+      .eq('store_id', storeId)
+      .single();
+
+    return settings;
+  } catch (error) {
+    console.error('Error fetching store settings:', error);
+    return null;
+  }
+}
+
+async function getRecentAlerts(storeId: string) {
+  try {
+    const { data: alerts } = await supabaseAdmin
+      .from('alert_history')
+      .select('*')
+      .eq('store_id', storeId)
+      .order('sent_at', { ascending: false })
+      .limit(5);
+
+    return alerts || [];
+  } catch (error) {
+    console.error('Error fetching recent alerts:', error);
+    return [];
+  }
 }

@@ -21,12 +21,16 @@ export async function sendLowStockAlert(
   threshold: number,
   settings: StoreSettings
 ) {
+  // Handle product-level tracking where variant might be null
+  const variantTitle = variant?.title || 'All Variants';
+  const sku = variant?.sku || product?.sku || 'N/A';
+  
   const message = `
     Low Stock Alert for ${store.shop_domain}
     
     Product: ${product.title}
-    Variant: ${variant.title || 'Default'}
-    SKU: ${variant.sku || 'N/A'}
+    Variant: ${variantTitle}
+    SKU: ${sku}
     Current Quantity: ${currentQuantity}
     Threshold: ${threshold}
     
@@ -36,8 +40,8 @@ export async function sendLowStockAlert(
   const htmlMessage = `
     <h2>Low Stock Alert for ${store.shop_domain}</h2>
     <p><strong>Product:</strong> ${product.title}</p>
-    <p><strong>Variant:</strong> ${variant.title || 'Default'}</p>
-    <p><strong>SKU:</strong> ${variant.sku || 'N/A'}</p>
+    <p><strong>Variant:</strong> ${variantTitle}</p>
+    <p><strong>SKU:</strong> ${sku}</p>
     <p><strong>Current Quantity:</strong> ${currentQuantity}</p>
     <p><strong>Threshold:</strong> ${threshold}</p>
     <p><a href="https://${store.shop_domain}/admin/products/${product.id}">View Product in Shopify Admin</a></p>
@@ -62,7 +66,7 @@ export async function sendLowStockAlert(
           .insert({
             store_id: store.id,
             product_id: product.id,
-            variant_id: variant.id,
+            variant_id: variant?.id || null,
             alert_type: 'low_stock',
             alert_channel: 'email',
             quantity_at_alert: currentQuantity,
@@ -76,7 +80,15 @@ export async function sendLowStockAlert(
   }
 
   // Send Slack notification (Pro plan only)
+  console.log('Slack notification check:', {
+    slack_notifications: settings.slack_notifications,
+    store_plan: store.plan,
+    has_webhook_url: !!settings.slack_webhook_url,
+    webhook_url: settings.slack_webhook_url?.substring(0, 50) + '...'
+  });
+  
   if (settings.slack_notifications && store.plan === 'pro' && settings.slack_webhook_url) {
+    console.log('Sending Slack notification...');
     try {
       const webhook = new IncomingWebhook(settings.slack_webhook_url);
       
@@ -99,11 +111,11 @@ export async function sendLowStockAlert(
               },
               {
                 type: 'mrkdwn',
-                text: `*Variant:*\n${variant.title || 'Default'}`,
+                text: `*Variant:*\n${variantTitle}`,
               },
               {
                 type: 'mrkdwn',
-                text: `*SKU:*\n${variant.sku || 'N/A'}`,
+                text: `*SKU:*\n${sku}`,
               },
               {
                 type: 'mrkdwn',
@@ -126,6 +138,8 @@ export async function sendLowStockAlert(
           },
         ],
       });
+      
+      console.log('Slack notification sent successfully');
 
       // Log alert in database
       await supabaseAdmin
@@ -133,7 +147,7 @@ export async function sendLowStockAlert(
         .insert({
           store_id: store.id,
           product_id: product.id,
-          variant_id: variant.id,
+          variant_id: variant?.id || null,
           alert_type: 'low_stock',
           alert_channel: 'slack',
           quantity_at_alert: currentQuantity,
@@ -141,8 +155,11 @@ export async function sendLowStockAlert(
           message: message,
         });
     } catch (error) {
-      console.error('Slack send error:', error);
+      console.error('Slack send error - Full details:', error);
+      console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');
     }
+  } else {
+    console.log('Slack notification skipped - conditions not met');
   }
 }
 
@@ -152,12 +169,16 @@ export async function sendOutOfStockAlert(
   variant: any,
   settings: StoreSettings
 ) {
+  // Handle product-level tracking where variant might be null
+  const variantTitle = variant?.title || 'All Variants';
+  const sku = variant?.sku || product?.sku || 'N/A';
+  
   const message = `
     Out of Stock Alert for ${store.shop_domain}
     
     Product: ${product.title}
-    Variant: ${variant.title || 'Default'}
-    SKU: ${variant.sku || 'N/A'}
+    Variant: ${variantTitle}
+    SKU: ${sku}
     
     This product has been automatically hidden from your store.
     
@@ -167,8 +188,8 @@ export async function sendOutOfStockAlert(
   const htmlMessage = `
     <h2>Out of Stock Alert for ${store.shop_domain}</h2>
     <p><strong>Product:</strong> ${product.title}</p>
-    <p><strong>Variant:</strong> ${variant.title || 'Default'}</p>
-    <p><strong>SKU:</strong> ${variant.sku || 'N/A'}</p>
+    <p><strong>Variant:</strong> ${variantTitle}</p>
+    <p><strong>SKU:</strong> ${sku}</p>
     <p style="color: red;"><strong>This product has been automatically hidden from your store.</strong></p>
     <p><a href="https://${store.shop_domain}/admin/products/${product.id}">View Product in Shopify Admin</a></p>
   `;
@@ -192,7 +213,7 @@ export async function sendOutOfStockAlert(
           .insert({
             store_id: store.id,
             product_id: product.id,
-            variant_id: variant.id,
+            variant_id: variant?.id || null,
             alert_type: 'out_of_stock',
             alert_channel: 'email',
             quantity_at_alert: 0,
@@ -228,11 +249,11 @@ export async function sendOutOfStockAlert(
               },
               {
                 type: 'mrkdwn',
-                text: `*Variant:*\n${variant.title || 'Default'}`,
+                text: `*Variant:*\n${variantTitle}`,
               },
               {
                 type: 'mrkdwn',
-                text: `*SKU:*\n${variant.sku || 'N/A'}`,
+                text: `*SKU:*\n${sku}`,
               },
               {
                 type: 'mrkdwn',
@@ -262,7 +283,7 @@ export async function sendOutOfStockAlert(
         .insert({
           store_id: store.id,
           product_id: product.id,
-          variant_id: variant.id,
+          variant_id: variant?.id || null,
           alert_type: 'out_of_stock',
           alert_channel: 'slack',
           quantity_at_alert: 0,

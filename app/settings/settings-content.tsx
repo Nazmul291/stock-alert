@@ -1,9 +1,10 @@
 'use client';
 
-import { Page, Layout, Card, Banner } from '@shopify/polaris';
+import { Page, Layout, Card, Banner, Text, ProgressBar } from '@shopify/polaris';
 import SettingsForm from './settings-form';
 import ProductsTable from '../products/products-table';
 import SyncProductsButton from './sync-products-button';
+import { PLAN_LIMITS } from '@/lib/plan-limits';
 
 interface SettingsContentProps {
   store: any;
@@ -26,6 +27,15 @@ export default function SettingsContent({
   products,
   searchParams 
 }: SettingsContentProps) {
+  // Calculate current product usage
+  const plan = store?.plan || 'free';
+  const planLimits = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS];
+  const maxProducts = planLimits.maxProducts;
+  
+  // Count distinct products (not variants)
+  const distinctProductIds = new Set(products.map(p => p.product_id));
+  const currentProducts = distinctProductIds.size;
+  const usagePercentage = (currentProducts / maxProducts) * 100;
   return (
     <Page
       title="Settings"
@@ -64,6 +74,26 @@ export default function SettingsContent({
                 <h2 style={{ margin: 0 }}>Product Threshold Settings</h2>
                 <SyncProductsButton shop={searchParams.shop || ''} />
               </div>
+              
+              {/* Product Quota Display */}
+              <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <Text variant="bodyMd" fontWeight="semibold">Product Usage</Text>
+                  <Text variant="bodySm" tone="subdued">
+                    {currentProducts}/{maxProducts} products ({plan.toUpperCase()} plan)
+                  </Text>
+                </div>
+                <ProgressBar 
+                  progress={usagePercentage} 
+                  tone={usagePercentage >= 90 ? 'critical' : usagePercentage >= 70 ? 'warning' : 'success'}
+                />
+                {usagePercentage >= 90 && (
+                  <Text variant="bodySm" tone="critical" as="p" style={{ marginTop: '8px' }}>
+                    You're approaching your product limit. Consider upgrading to Pro for unlimited products.
+                  </Text>
+                )}
+              </div>
+              
               <p style={{ marginBottom: '15px', color: '#6b7280' }}>
                 Configure custom thresholds and settings for individual products. These settings override the global settings above.
               </p>

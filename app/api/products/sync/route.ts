@@ -65,11 +65,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Fetch products from Shopify
-    console.log(`Token valid. Fetching products from Shopify for ${shop}...`);
+    // Fetch products from Shopify with reasonable limit for plan
+    const fetchLimit = plan === 'free' ? 50 : 250; // Free plans don't need to fetch as many
+    console.log(`Token valid. Fetching up to ${fetchLimit} products from Shopify for ${shop} (${plan} plan)...`);
     
     const productsResponse = await fetch(
-      `https://${shop}/admin/api/2024-01/products.json?limit=250`,
+      `https://${shop}/admin/api/2024-01/products.json?limit=${fetchLimit}`,
       {
         headers: {
           'X-Shopify-Access-Token': store.access_token,
@@ -121,12 +122,17 @@ export async function GET(req: NextRequest) {
     // Calculate how many products we can sync based on plan limits
     const remainingSlots = Math.max(0, maxProducts - existingProductCount);
     
-    if (remainingSlots === 0 && plan === 'free') {
+    if (remainingSlots === 0) {
+      const upgradeMessage = plan === 'free' 
+        ? 'Please upgrade to Professional to sync more products.'
+        : 'You have reached the maximum products for your plan.';
+        
       return NextResponse.json({ 
-        error: `Product limit reached. You have already synced ${maxProducts} products on the Free plan. Please upgrade to Professional to sync more products.`,
+        error: `Product limit reached. You have already synced ${existingProductCount}/${maxProducts} products on the ${plan} plan. ${upgradeMessage}`,
         currentCount: existingProductCount,
         maxProducts: maxProducts,
-        plan: plan
+        plan: plan,
+        quotaFull: true
       }, { status: 403 });
     }
 
@@ -150,37 +156,118 @@ export async function GET(req: NextRequest) {
 
     console.log(`Will sync ${productsToSync.length} products (${newProductCount} new, ${productsToSync.length - newProductCount} updates)`);
     
+    // Collect inventory mappings for webhook optimization
+    const inventoryMappings = [];
+    
+    // PRODUCT-LEVEL TRACKING: Store one row per product, not per variant
     for (const product of productsToSync) {
+      // Calculate total quantity across all variants
+      let totalQuantity = 0;
+      const skus = [];
+      
       for (const variant of product.variants) {
-        inventoryData.push({
-          store_id: store.id,
-          product_id: product.id,
-          variant_id: variant.id,
-          product_title: product.title,
-          variant_title: variant.title !== 'Default Title' ? variant.title : null,
-          sku: variant.sku || null,
-          current_quantity: variant.inventory_quantity || 0,
-          previous_quantity: variant.inventory_quantity || 0,
-          is_hidden: false,
-          last_checked_at: new Date().toISOString(),
-        });
+        totalQuantity += variant.inventory_quantity || 0;
+        if (variant.sku) skus.push(variant.sku);
+        
+        // Collect inventory item mappings for fast webhook lookups
+        if (variant.inventory_item_id) {
+          inventoryMappings.push({
+            inventory_item_id: variant.inventory_item_id,
+            product_id: product.id,
+            variant_id: variant.id,
+            store_id: store.id,
+            updated_at: new Date().toISOString()
+          });
+        }
+      }
+      
+      inventoryData.push({
+        store_id: store.id,
+        product_id: product.id,
+        product_title: product.title,
+        variant_title: null, // Not tracking individual variants anymore
+        sku: skus.join(', ') || null, // Combine all SKUs
+        current_quantity: totalQuantity,
+        previous_quantity: totalQuantity,
+        is_hidden: false,
+        last_checked_at: new Date().toISOString(),
+      });
+    }
+    
+    // Batch upsert inventory mappings for webhook optimization (if table exists)
+    if (inventoryMappings.length > 0) {
+      try {
+        const { error: mappingError } = await supabaseAdmin
+          .from('inventory_item_mapping')
+          .upsert(inventoryMappings, { onConflict: 'inventory_item_id' });
+        
+        if (mappingError) {
+          // Table might not exist yet - this is OK, will work after migration
+          console.log('Note: inventory_item_mapping table not yet created. Run migration 002_performance_indexes.sql');
+        }
+      } catch (error) {
+        // Silently skip if table doesn't exist
+        console.log('Skipping inventory mappings (table not yet created)');
       }
     }
 
-    // Upsert inventory data
+    // Batch upsert inventory data - much faster than individual operations
     if (inventoryData.length > 0) {
-      const { error: upsertError } = await supabaseAdmin
+      // Get all existing products in one query
+      const { data: existingProducts } = await supabaseAdmin
         .from('inventory_tracking')
-        .upsert(inventoryData.map(item => ({
-          ...item,
-          updated_at: new Date().toISOString()
-        })), {
-          onConflict: 'store_id,variant_id'
-        });
+        .select('id, product_id')
+        .eq('store_id', store.id)
+        .in('product_id', inventoryData.map(item => item.product_id));
 
-      if (upsertError) {
-        console.error('Error upserting inventory data:', upsertError);
-        return NextResponse.json({ error: 'Failed to save inventory data' }, { status: 500 });
+      // Create a map for quick lookups
+      const existingMap = new Map(
+        existingProducts?.map(p => [p.product_id, p.id]) || []
+      );
+
+      // Separate into updates and inserts
+      const updates = [];
+      const inserts = [];
+
+      for (const item of inventoryData) {
+        const existingId = existingMap.get(item.product_id);
+        if (existingId) {
+          updates.push({
+            ...item,
+            id: existingId,
+            updated_at: new Date().toISOString()
+          });
+        } else {
+          inserts.push({
+            ...item,
+            updated_at: new Date().toISOString()
+          });
+        }
+      }
+
+      // Perform batch operations
+      const errors = [];
+
+      // Batch insert new products
+      if (inserts.length > 0) {
+        const { error } = await supabaseAdmin
+          .from('inventory_tracking')
+          .insert(inserts);
+        if (error) errors.push(`Insert error: ${error.message}`);
+      }
+
+      // Batch update existing products (Supabase upsert handles this)
+      if (updates.length > 0) {
+        const { error } = await supabaseAdmin
+          .from('inventory_tracking')
+          .upsert(updates);
+        if (error) errors.push(`Update error: ${error.message}`);
+      }
+
+      if (errors.length > 0) {
+        console.error('Batch operation errors:', errors);
+      } else {
+        console.log(`Successfully synced ${inventoryData.length} products (${inserts.length} new, ${updates.length} updated)`);
       }
     }
 

@@ -58,6 +58,21 @@ export default function SyncProductsButton({ shop }: SyncProductsButtonProps) {
         // Handle specific error cases
         if (response.status === 401 && data.requiresReauth) {
           setBannerMessage('Authentication failed. Please reinstall the app or contact support.');
+        } else if (response.status === 403 && data.quotaFull) {
+          // Handle quota full scenario with upgrade option
+          const upgradeMessage = data.plan === 'free' 
+            ? `${data.error}\n\nWould you like to upgrade to Professional now?`
+            : data.error;
+            
+          if (data.plan === 'free' && confirm(upgradeMessage)) {
+            // Redirect to billing page for upgrade
+            const params = new URLSearchParams(window.location.search);
+            const billingUrl = `/billing?${params.toString()}`;
+            window.location.href = billingUrl;
+            return;
+          } else {
+            setBannerMessage(data.error);
+          }
         } else if (response.status === 403) {
           setBannerMessage(data.error || 'Permission denied. The app may not have the required permissions.');
         } else if (response.status === 429) {

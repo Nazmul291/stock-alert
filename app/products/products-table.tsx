@@ -10,6 +10,9 @@ import {
   Modal,
   FormLayout,
   Checkbox,
+  InlineStack,
+  Text,
+  List,
 } from '@shopify/polaris';
 import { updateProductSettings } from '@/app/actions/settings';
 
@@ -31,6 +34,8 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [modalActive, setModalActive] = useState(false);
+  const [skuModalActive, setSkuModalActive] = useState(false);
+  const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
   const [productSettings, setProductSettings] = useState({
     custom_threshold: '',
     exclude_from_auto_hide: false,
@@ -73,25 +78,48 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
     });
   };
 
+  const handleShowSkus = (skus: string[]) => {
+    setSelectedSkus(skus);
+    setSkuModalActive(true);
+  };
+
   const filteredProducts = products.filter(
     (product) =>
       product.product_title?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const productRows = filteredProducts.map((product) => [
-    product.product_title,
-    product.variants.length.toString(),
-    product.total_quantity.toString(),
-    product.total_quantity === 0 ? (
-      <Badge tone="critical">Out of Stock</Badge>
-    ) : product.total_quantity <= 5 ? (
-      <Badge tone="warning">Low Stock</Badge>
-    ) : (
-      <Badge tone="success">In Stock</Badge>
-    ),
-    product.settings?.custom_threshold || '-',
-    <Button onClick={() => handleEditProduct(product)}>Edit Settings</Button>,
-  ]);
+  const productRows = filteredProducts.map((product) => {
+    // Get SKU from the first variant (SKU is stored as comma-separated string)
+    const skuString = product.variants[0]?.sku || '';
+    const skuArray = skuString ? skuString.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+    const firstSku = skuArray[0] || '-';
+    const hasMultipleSkus = skuArray.length > 1;
+
+    return [
+      product.product_title,
+      // Show first SKU with "See all" button if there are multiple
+      hasMultipleSkus ? (
+        <InlineStack gap="200" align="start">
+          <Text as="span">{firstSku}</Text>
+          <Button size="slim" variant="plain" onClick={() => handleShowSkus(skuArray)}>
+            See all ({skuArray.length})
+          </Button>
+        </InlineStack>
+      ) : (
+        firstSku
+      ),
+      product.total_quantity.toString(),
+      product.total_quantity === 0 ? (
+        <Badge tone="critical">Out of Stock</Badge>
+      ) : product.total_quantity <= 5 ? (
+        <Badge tone="warning">Low Stock</Badge>
+      ) : (
+        <Badge tone="success">In Stock</Badge>
+      ),
+      product.settings?.custom_threshold || '-',
+      <Button onClick={() => handleEditProduct(product)}>Edit Settings</Button>,
+    ];
+  });
 
   return (
     <>
@@ -108,8 +136,8 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
       <div style={{ padding: '20px' }}>
         {filteredProducts.length > 0 ? (
           <DataTable
-            columnContentTypes={['text', 'numeric', 'numeric', 'text', 'text', 'text']}
-            headings={['Product', 'Variants', 'Total Stock', 'Status', 'Custom Threshold', 'Actions']}
+            columnContentTypes={['text', 'text', 'numeric', 'text', 'text', 'text']}
+            headings={['Product', 'SKU', 'Total Stock', 'Status', 'Custom Threshold', 'Actions']}
             rows={productRows}
           />
         ) : (
@@ -164,6 +192,35 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
               helpText="Don't send alerts for this product"
             />
           </FormLayout>
+        </Modal.Section>
+      </Modal>
+
+      <Modal
+        open={skuModalActive}
+        onClose={() => setSkuModalActive(false)}
+        title="All SKUs"
+        secondaryActions={[
+          {
+            content: 'Close',
+            onAction: () => setSkuModalActive(false),
+          },
+        ]}
+      >
+        <Modal.Section>
+          <Text as="p" variant="bodyMd">
+            This product has {selectedSkus.length} SKU{selectedSkus.length !== 1 ? 's' : ''}:
+          </Text>
+          <div style={{ marginTop: '12px' }}>
+            <List type="bullet">
+              {selectedSkus.map((sku, index) => (
+                <List.Item key={index}>
+                  <Text as="span" variant="bodyMd" fontWeight="medium">
+                    {sku}
+                  </Text>
+                </List.Item>
+              ))}
+            </List>
+          </div>
         </Modal.Section>
       </Modal>
     </>
