@@ -29,7 +29,6 @@ export async function GET(req: NextRequest) {
     
     return NextResponse.json({ authenticated: false });
   } catch (error) {
-    console.error('Auth verification error:', error);
     return NextResponse.json({ authenticated: false });
   }
 }

@@ -39,9 +39,8 @@ export async function sendLowStockEmail(
       text: message,
       html: htmlMessage,
     });
-    console.log(`Email sent to ${toEmail} for product ${productTitle}`);
   } catch (error) {
-    console.error('Email send error:', error);
+    // Email send error handling preserved
     throw error;
   }
 }

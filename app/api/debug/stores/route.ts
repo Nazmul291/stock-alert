@@ -10,7 +10,6 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Database error:', error);
       return NextResponse.json({ 
         error: 'Database error', 
         details: error.message,
@@ -36,7 +35,6 @@ export async function GET(req: NextRequest) {
       database_connected: true
     });
   } catch (error) {
-    console.error('Unexpected error:', error);
     return NextResponse.json({ 
       error: 'Unexpected error', 
       details: error instanceof Error ? error.message : 'Unknown error' 

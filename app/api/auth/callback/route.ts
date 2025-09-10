@@ -11,10 +11,7 @@ export async function GET(req: NextRequest) {
     const state = searchParams.get('state');
     const hmac = searchParams.get('hmac');
     
-    console.log('OAuth Callback received:', { shop, hasCode: !!code, state, hmac });
-    
     if (!code || !shop) {
-      console.error('Missing code or shop in callback');
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
     
@@ -32,7 +29,6 @@ export async function GET(req: NextRequest) {
     });
     
     if (!accessTokenResponse.ok) {
-      console.error('Failed to get access token:', accessTokenResponse.status);
       return NextResponse.json({ error: 'Failed to get access token' }, { status: 500 });
     }
     
@@ -40,20 +36,12 @@ export async function GET(req: NextRequest) {
     const accessToken = tokenData.access_token;
     const scope = tokenData.scope;
     
-    console.log('Access token obtained successfully');
-    
     // Create session object compatible with rest of the code
     const session = {
       shop,
       accessToken,
       scope,
     };
-
-    console.log('OAuth Callback - Session received:', {
-      shop: session.shop,
-      scope: session.scope,
-      hasAccessToken: !!session.accessToken
-    });
 
     // Store shop data in Supabase
     const { data: existingStore, error: fetchError } = await supabaseAdmin
@@ -63,28 +51,21 @@ export async function GET(req: NextRequest) {
       .single();
 
     if (fetchError && fetchError.code !== 'PGRST116') {
-      console.error('Error fetching store:', fetchError);
       throw fetchError;
     }
 
     let storeId: string;
 
     if (existingStore) {
-      console.log('Updating existing store:', existingStore.id);
-      
       // Clean up old inventory data when reinstalling
       // This handles cases where the uninstall webhook might not have fired
-      console.log('Cleaning up old inventory data for store:', existingStore.id);
       const { error: cleanupError } = await supabaseAdmin
         .from('inventory_tracking')
         .delete()
         .eq('store_id', existingStore.id);
       
       if (cleanupError) {
-        console.error('Error cleaning up inventory data:', cleanupError);
         // Continue anyway - not critical
-      } else {
-        console.log('Old inventory data cleaned up successfully');
       }
       
       // Also clean up product settings
@@ -94,7 +75,6 @@ export async function GET(req: NextRequest) {
         .eq('store_id', existingStore.id);
       
       if (settingsCleanupError) {
-        console.error('Error cleaning up product settings:', settingsCleanupError);
         // Continue anyway - not critical
       }
       
@@ -111,14 +91,11 @@ export async function GET(req: NextRequest) {
         .single();
       
       if (updateError) {
-        console.error('Error updating store:', updateError);
         throw updateError;
       }
       
       storeId = updatedStore!.id;
-      console.log('Store updated successfully:', storeId);
     } else {
-      console.log('Creating new store for:', session.shop);
       // Create new store
       const { data: newStore, error: insertError } = await supabaseAdmin
         .from('stores')
@@ -134,12 +111,10 @@ export async function GET(req: NextRequest) {
         .single();
       
       if (insertError) {
-        console.error('Error creating store:', insertError);
         throw insertError;
       }
       
       storeId = newStore!.id;
-      console.log('Store created successfully:', storeId);
 
       // Create default settings for new store
       const { error: settingsError } = await supabaseAdmin
@@ -154,10 +129,7 @@ export async function GET(req: NextRequest) {
         });
 
       if (settingsError) {
-        console.error('Error creating store settings:', settingsError);
         // Don't throw here, settings can be created later
-      } else {
-        console.log('Store settings created successfully');
       }
 
       // Create initial setup progress for new store
@@ -173,20 +145,14 @@ export async function GET(req: NextRequest) {
         });
 
       if (progressError) {
-        console.error('Error creating setup progress:', progressError);
         // Don't throw here, can be created later
-      } else {
-        console.log('Setup progress created successfully');
       }
     }
 
     // Register webhooks for inventory tracking
     try {
-      console.log('Registering webhooks...');
       await registerWebhooks(session.shop, session.accessToken);
-      console.log('Webhooks registered successfully');
     } catch (webhookError) {
-      console.error('Failed to register webhooks:', webhookError);
       // Don't fail the auth flow if webhook registration fails
       // Webhooks can be registered manually later
     }
@@ -210,10 +176,6 @@ export async function GET(req: NextRequest) {
 
     return response;
   } catch (error) {
-    console.error('OAuth callback error:', error);
-    console.error('Error details:', error instanceof Error ? error.message : 'Unknown error');
-    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
-    
     // Return a user-friendly error page
     const errorHtml = `
       <!DOCTYPE html>

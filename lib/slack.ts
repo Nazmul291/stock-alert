@@ -10,10 +10,8 @@ export async function sendSlackNotification(
     await webhook.send({
       text: message,
     });
-    
-    console.log('Slack notification sent successfully');
   } catch (error) {
-    console.error('Slack send error:', error);
+    // Slack send error handling preserved
     throw error;
   }
 }

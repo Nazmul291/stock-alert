@@ -159,7 +159,6 @@ async function getInventoryStats(storeId: string) {
       alertsToday: alertsToday || 0
     };
   } catch (error) {
-    console.error('Error fetching inventory stats:', error);
     return {
       totalProducts: 0,
       lowStock: 0,
@@ -197,7 +196,6 @@ async function getSetupProgress(storeId: string) {
 
     return progress;
   } catch (error) {
-    console.error('Error fetching setup progress:', error);
     return null;
   }
 }
@@ -212,7 +210,6 @@ async function getStoreSettings(storeId: string) {
 
     return settings;
   } catch (error) {
-    console.error('Error fetching store settings:', error);
     return null;
   }
 }
@@ -228,7 +225,6 @@ async function getRecentAlerts(storeId: string) {
 
     return alerts || [];
   } catch (error) {
-    console.error('Error fetching recent alerts:', error);
     return [];
   }
 }

@@ -22,7 +22,6 @@ export async function GET(req: NextRequest) {
     }
 
     // Fetch registered webhooks from Shopify
-    console.log(`Fetching webhooks for ${shop}...`);
     
     const response = await fetch(
       `https://${shop}/admin/api/2024-01/webhooks.json`,
@@ -35,7 +34,6 @@ export async function GET(req: NextRequest) {
     );
 
     if (!response.ok) {
-      console.error('Failed to fetch webhooks:', response.status);
       return NextResponse.json({ 
         error: `Failed to fetch webhooks from Shopify (${response.status})` 
       }, { status: 500 });
@@ -65,7 +63,6 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error listing webhooks:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

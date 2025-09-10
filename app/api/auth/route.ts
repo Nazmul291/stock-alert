@@ -22,8 +22,6 @@ export async function GET(req: NextRequest) {
     const scopes = process.env.SHOPIFY_SCOPES || 'read_products,write_products,read_inventory,write_inventory';
     const apiKey = process.env.SHOPIFY_API_KEY;
     
-    console.log('OAuth Scopes from env:', process.env.SHOPIFY_SCOPES);
-    console.log('Using scopes:', scopes);
     
     // Generate a random nonce for security
     const nonce = Math.random().toString(36).substring(2, 15);
@@ -35,7 +33,6 @@ export async function GET(req: NextRequest) {
       `redirect_uri=${encodeURIComponent(redirectUri)}&` +
       `state=${nonce}`;
     
-    console.log('OAuth URL:', authUrl);
     
     // For embedded apps, we need to redirect in the parent frame (Shopify admin)
     // Return an HTML page that breaks out of the iframe
@@ -72,7 +69,6 @@ export async function GET(req: NextRequest) {
     // For non-embedded, do a normal redirect
     return NextResponse.redirect(authUrl);
   } catch (error) {
-    console.error('OAuth begin error:', error);
     return NextResponse.json({ error: 'Failed to start OAuth flow' }, { status: 500 });
   }
 }

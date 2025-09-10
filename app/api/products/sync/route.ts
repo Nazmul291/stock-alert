@@ -37,10 +37,8 @@ export async function GET(req: NextRequest) {
     const distinctProductIds = new Set(currentProducts?.map(p => p.product_id) || []);
     const currentProductCount = distinctProductIds.size;
 
-    console.log(`Store ${shop} on ${plan} plan - Current products: ${currentProductCount}, Limit: ${maxProducts}`);
 
     // First, verify the access token is valid with a lightweight API call
-    console.log(`Verifying token for ${shop}...`);
     const shopInfoResponse = await fetch(
       `https://${shop}/admin/api/2024-01/shop.json`,
       {
@@ -52,10 +50,6 @@ export async function GET(req: NextRequest) {
     );
 
     if (!shopInfoResponse.ok) {
-      console.error('Token validation failed:', {
-        status: shopInfoResponse.status,
-        shop: shop
-      });
       
       if (shopInfoResponse.status === 401) {
         return NextResponse.json({ 
@@ -67,7 +61,6 @@ export async function GET(req: NextRequest) {
 
     // Fetch products from Shopify with reasonable limit for plan
     const fetchLimit = plan === 'free' ? 50 : 250; // Free plans don't need to fetch as many
-    console.log(`Token valid. Fetching up to ${fetchLimit} products from Shopify for ${shop} (${plan} plan)...`);
     
     const productsResponse = await fetch(
       `https://${shop}/admin/api/2024-01/products.json?limit=${fetchLimit}`,
@@ -80,12 +73,6 @@ export async function GET(req: NextRequest) {
     );
 
     if (!productsResponse.ok) {
-      console.error('Failed to fetch products from Shopify:', {
-        status: productsResponse.status,
-        statusText: productsResponse.statusText,
-        shop: shop,
-        hasToken: !!store.access_token
-      });
       
       // Handle specific error cases
       if (productsResponse.status === 401) {
@@ -113,7 +100,6 @@ export async function GET(req: NextRequest) {
     }
 
     const { products } = await productsResponse.json();
-    console.log(`Fetched ${products.length} products from Shopify`);
 
     // We already have the distinct product IDs from above
     const existingProductIds = distinctProductIds;
@@ -154,7 +140,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    console.log(`Will sync ${productsToSync.length} products (${newProductCount} new, ${productsToSync.length - newProductCount} updates)`);
     
     // Collect inventory mappings for webhook optimization
     const inventoryMappings = [];
@@ -203,11 +188,9 @@ export async function GET(req: NextRequest) {
         
         if (mappingError) {
           // Table might not exist yet - this is OK, will work after migration
-          console.log('Note: inventory_item_mapping table not yet created. Run migration 002_performance_indexes.sql');
         }
       } catch (error) {
         // Silently skip if table doesn't exist
-        console.log('Skipping inventory mappings (table not yet created)');
       }
     }
 
@@ -265,9 +248,7 @@ export async function GET(req: NextRequest) {
       }
 
       if (errors.length > 0) {
-        console.error('Batch operation errors:', errors);
-      } else {
-        console.log(`Successfully synced ${inventoryData.length} products (${inserts.length} new, ${updates.length} updated)`);
+        // Handle batch operation errors silently
       }
     }
 
@@ -330,7 +311,6 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error in GET /api/products/sync:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

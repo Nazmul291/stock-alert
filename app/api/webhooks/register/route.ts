@@ -22,7 +22,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Store not found or not authenticated' }, { status: 404 });
     }
 
-    console.log(`Manually registering webhooks for ${shop}...`);
 
     // Register webhooks
     await registerWebhooks(shop, store.access_token);
@@ -60,7 +59,6 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error registering webhooks:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -4,7 +4,6 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export async function requireAuth(shop: string | undefined) {
   if (!shop) {
-    console.log('No shop parameter, redirecting to home');
     redirect('/');
   }
 
@@ -17,7 +16,6 @@ export async function requireAuth(shop: string | undefined) {
   
   // If no store or no access token, need to complete OAuth
   if (!store || !store.access_token) {
-    console.log('Store not found or no access token, redirecting to OAuth');
     redirect(`/api/auth?shop=${shop}&embedded=1`);
   }
   

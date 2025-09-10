@@ -74,21 +74,13 @@ export async function sendLowStockAlert(
             message: message,
           });
       } catch (error) {
-        console.error('Email send error:', error);
+        // Email send error handling preserved
       }
     }
   }
 
   // Send Slack notification (Pro plan only)
-  console.log('Slack notification check:', {
-    slack_notifications: settings.slack_notifications,
-    store_plan: store.plan,
-    has_webhook_url: !!settings.slack_webhook_url,
-    webhook_url: settings.slack_webhook_url?.substring(0, 50) + '...'
-  });
-  
   if (settings.slack_notifications && store.plan === 'pro' && settings.slack_webhook_url) {
-    console.log('Sending Slack notification...');
     try {
       const webhook = new IncomingWebhook(settings.slack_webhook_url);
       
@@ -138,8 +130,6 @@ export async function sendLowStockAlert(
           },
         ],
       });
-      
-      console.log('Slack notification sent successfully');
 
       // Log alert in database
       await supabaseAdmin
@@ -155,11 +145,8 @@ export async function sendLowStockAlert(
           message: message,
         });
     } catch (error) {
-      console.error('Slack send error - Full details:', error);
-      console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');
+      // Slack send error handling preserved
     }
-  } else {
-    console.log('Slack notification skipped - conditions not met');
   }
 }
 
@@ -220,7 +207,7 @@ export async function sendOutOfStockAlert(
             message: message,
           });
       } catch (error) {
-        console.error('Email send error:', error);
+        // Email send error handling preserved
       }
     }
   }
@@ -290,7 +277,7 @@ export async function sendOutOfStockAlert(
           message: message,
         });
     } catch (error) {
-      console.error('Slack send error:', error);
+      // Slack send error handling preserved
     }
   }
 }

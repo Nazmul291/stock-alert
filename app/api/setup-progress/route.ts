@@ -45,13 +45,11 @@ export async function GET(req: NextRequest) {
         .single();
 
       if (createError) {
-        console.error('Error creating setup progress:', createError);
         return NextResponse.json({ error: 'Failed to create setup progress' }, { status: 500 });
       }
 
       progress = newProgress;
     } else if (error) {
-      console.error('Error fetching setup progress:', error);
       return NextResponse.json({ error: 'Failed to fetch setup progress' }, { status: 500 });
     }
 
@@ -126,7 +124,6 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error in GET /api/setup-progress:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -166,14 +163,12 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) {
-      console.error('Error updating setup progress:', error);
       return NextResponse.json({ error: 'Failed to update setup progress' }, { status: 500 });
     }
 
     return NextResponse.json({ progress });
 
   } catch (error) {
-    console.error('Error in POST /api/setup-progress:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -21,7 +21,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Store not found' }, { status: 404 });
     }
 
-    console.log(`Resetting product data for store ${shop} (ID: ${store.id})`);
 
     // Delete all inventory tracking data for this store
     const { error: inventoryError, count: deletedInventory } = await supabaseAdmin
@@ -30,7 +29,6 @@ export async function POST(req: NextRequest) {
       .eq('store_id', store.id);
 
     if (inventoryError) {
-      console.error('Error deleting inventory data:', inventoryError);
       return NextResponse.json({ 
         error: 'Failed to reset inventory data',
         details: inventoryError.message 
@@ -44,7 +42,6 @@ export async function POST(req: NextRequest) {
       .eq('store_id', store.id);
 
     if (settingsError) {
-      console.error('Error deleting product settings:', settingsError);
       return NextResponse.json({ 
         error: 'Failed to reset product settings',
         details: settingsError.message 
@@ -58,11 +55,9 @@ export async function POST(req: NextRequest) {
       .eq('store_id', store.id);
 
     if (alertError) {
-      console.error('Error deleting alert history:', alertError);
       // Not critical, continue
     }
 
-    console.log(`Reset complete - Deleted inventory: ${deletedInventory}, settings: ${deletedSettings}, alerts: ${deletedAlerts}`);
 
     return NextResponse.json({
       success: true,
@@ -75,7 +70,6 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error in POST /api/products/reset:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -108,7 +102,6 @@ export async function GET(req: NextRequest) {
       .eq('store_id', store.id);
 
     if (countError) {
-      console.error('Error counting products:', countError);
       return NextResponse.json({ error: 'Failed to count products' }, { status: 500 });
     }
 
@@ -128,7 +121,6 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Error in GET /api/products/reset:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

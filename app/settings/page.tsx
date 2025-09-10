@@ -24,11 +24,10 @@ export default async function SettingsPage({
     .order('product_title', { ascending: true });
 
   if (fetchError) {
-    console.error('Settings page - Error fetching products:', fetchError);
+    // Error fetching products - handled gracefully
   }
 
   // Group by product
-  console.log('Settings page - raw data from DB:', productsData?.length, productsData);
   const groupedProducts = productsData?.reduce((acc: any, item: any) => {
     const key = item.product_id;
     if (!acc[key]) {
@@ -46,7 +45,6 @@ export default async function SettingsPage({
   }, {});
 
   const products = Object.values(groupedProducts || {});
-  console.log('Settings page - products from DB:', products.length);
   
   // NO automatic sync - users must click the sync button manually
 

@@ -3,23 +3,16 @@ import { getShopifyClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function GET(req: NextRequest) {
-  console.log('🟢 BILLING CALLBACK START');
-  console.log('URL:', req.url);
-  console.log('Method:', req.method);
-  console.log('Headers:', Object.fromEntries(req.headers.entries()));
   
   const searchParams = req.nextUrl.searchParams;
   const shop = searchParams.get('shop');
   const chargeId = searchParams.get('charge_id');
   const host = searchParams.get('host');
   
-  console.log('📝 Callback params:', { shop, chargeId, host });
-  console.log('All search params:', Object.fromEntries(searchParams.entries()));
   
   try {
     
     if (!shop || !chargeId) {
-      console.log('❌ Missing required parameters');
       return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
     }
 
@@ -36,7 +29,6 @@ export async function GET(req: NextRequest) {
 
     const client = await getShopifyClient(shop, store.access_token);
 
-    console.log('💳 Activating charge:', chargeId);
     
     // Activate the charge
     const chargeResponse = await client.post({
@@ -45,11 +37,6 @@ export async function GET(req: NextRequest) {
     });
 
     const charge = chargeResponse.body.recurring_application_charge;
-    console.log('✅ Charge activated:', {
-      id: charge.id,
-      status: charge.status,
-      billing_on: charge.billing_on
-    });
 
     // Update billing record
     await supabaseAdmin
@@ -73,10 +60,8 @@ export async function GET(req: NextRequest) {
     if (host) redirectUrl.searchParams.set('host', host);
     redirectUrl.searchParams.set('upgraded', 'true');
 
-    console.log('🚀 Redirecting to:', redirectUrl.toString());
     return NextResponse.redirect(redirectUrl);
   } catch (error) {
-    console.error('Billing callback error:', error);
     
     // Redirect to billing page with error message
     const redirectUrl = new URL('/billing', process.env.NEXT_PUBLIC_HOST);

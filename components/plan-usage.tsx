@@ -42,10 +42,10 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
           const data = await response.json();
           setUsage(data);
         } else {
-          console.error('Failed to fetch usage:', response.status);
+          // Failed to fetch usage
         }
       } catch (error) {
-        console.error('Error fetching usage:', error);
+        // Error fetching usage
       } finally {
         setLoading(false);
       }

@@ -1,33 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { shopify, verifySessionToken, getShopifyClient } from '@/lib/shopify';
+import { verifySessionToken, getShopifyClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
-  console.log('🔵 BILLING REQUEST START');
-  console.log('URL:', req.url);
-  console.log('Method:', req.method);
-  console.log('Headers:', Object.fromEntries(req.headers.entries()));
   
   try {
     const { plan } = await req.json();
     const sessionToken = req.cookies.get('shopify-session')?.value;
     const host = req.nextUrl.searchParams.get('host') || req.headers.get('shopify-app-host');
     
-    console.log('📝 Request data:', { plan, hasSessionToken: !!sessionToken, host });
     
     if (!sessionToken) {
-      console.log('❌ No session token found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const session = verifySessionToken(sessionToken);
     if (!session) {
-      console.log('❌ Invalid session token');
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
     const { shop, accessToken } = session;
-    console.log('✅ Session verified for shop:', shop);
 
     // Get store from database
     const { data: store } = await supabaseAdmin
@@ -44,12 +36,8 @@ export async function POST(req: NextRequest) {
 
     if (plan === 'pro') {
       // Create recurring charge for Pro plan
-      console.log(`💳 Creating TEST billing charge for ${shop}`);
-      console.log('Return URL will be:', `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}${host ? `&host=${host}` : ''}`);
-      
       let recurringCharge;
       try {
-        console.log('📞 Calling Shopify billing API...');
         recurringCharge = await client.post({
           path: 'recurring_application_charges',
           data: {
@@ -65,19 +53,12 @@ export async function POST(req: NextRequest) {
           },
         });
       } catch (billingError: any) {
-        console.error('💥 Billing API Error:', billingError.message || billingError);
-        console.error('Full error:', billingError);
         return NextResponse.json({ 
           error: `Failed to create billing charge: ${billingError.message || 'Unknown error'}` 
         }, { status: 500 });
       }
 
       const charge = recurringCharge.body.recurring_application_charge;
-      console.log('✅ Billing charge created successfully:', {
-        id: charge.id,
-        status: charge.status,
-        confirmation_url: charge.confirmation_url
-      });
       
       // Store charge info in database
       await supabaseAdmin
@@ -91,7 +72,6 @@ export async function POST(req: NextRequest) {
           currency: 'USD',
         });
 
-      console.log('🚀 Returning confirmation URL to frontend:', charge.confirmation_url);
       return NextResponse.json({ 
         confirmation_url: charge.confirmation_url 
       });
@@ -111,7 +91,6 @@ export async function POST(req: NextRequest) {
             path: `recurring_application_charges/${billingRecord.charge_id}`,
           });
         } catch (cancelError) {
-          console.error('Error cancelling charge (might be a test charge):', cancelError);
           // Continue anyway - charge might not exist or be a test charge
         }
 
@@ -142,7 +121,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
   } catch (error) {
-    console.error('Billing error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

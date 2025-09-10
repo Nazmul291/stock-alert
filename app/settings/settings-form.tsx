@@ -47,7 +47,6 @@ export default function SettingsForm({ settings: initialSettings, plan, shop }: 
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
       } catch (err) {
-        console.error('Settings save error:', err);
         setError(`Failed to save settings: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
     });

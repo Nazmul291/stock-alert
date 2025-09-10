@@ -23,7 +23,6 @@ export default function ShopifyAppBridge() {
         }
         
         if (!window.shopify || !window.shopify.app) {
-          console.log('App Bridge not available');
           return;
         }
         
@@ -50,7 +49,7 @@ export default function ShopifyAppBridge() {
         }
         
       } catch (error) {
-        console.error('Error initializing App Bridge:', error);
+        // Error initializing App Bridge
       }
     };
     

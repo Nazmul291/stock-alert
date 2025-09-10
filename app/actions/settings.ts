@@ -5,7 +5,6 @@ import { requireAuth } from '@/lib/auth-server';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function updateStoreSettings(formData: FormData, shop: string) {
-  console.log('updateStoreSettings called with shop:', shop);
   
   // Get store directly from database using shop parameter
   const { data: store, error: storeError } = await supabaseAdmin
@@ -14,10 +13,7 @@ export async function updateStoreSettings(formData: FormData, shop: string) {
     .eq('shop_domain', shop)
     .single();
 
-  console.log('Store lookup result:', { store, storeError });
-
   if (storeError) {
-    console.error('Store lookup error:', storeError);
     throw new Error(`Failed to find store: ${storeError.message}`);
   }
 
@@ -41,7 +37,7 @@ export async function updateStoreSettings(formData: FormData, shop: string) {
     notification_email: formData.get('notification_email') as string || null,
   };
 
-  console.log('Upserting settings:', { store_id: session.storeId, ...settings });
+  // Upserting settings
   
   const { error } = await supabaseAdmin
     .from('store_settings')
@@ -54,11 +50,8 @@ export async function updateStoreSettings(formData: FormData, shop: string) {
     });
 
   if (error) {
-    console.error('Settings upsert error:', error);
     throw new Error(`Failed to update settings: ${error.message}`);
   }
-  
-  console.log('Settings updated successfully');
 
   // Update setup progress
   const progressUpdates: any = {

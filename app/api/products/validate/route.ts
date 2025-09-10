@@ -29,7 +29,6 @@ export async function GET(request: NextRequest) {
       .eq('store_id', store.id);
 
     if (countError) {
-      console.error('Error counting products:', countError);
       return NextResponse.json({ error: 'Failed to count products' }, { status: 500 });
     }
 
@@ -55,7 +54,6 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Product validation error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -120,7 +118,6 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Product validation error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

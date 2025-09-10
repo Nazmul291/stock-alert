@@ -11,7 +11,7 @@ async function getProductsData(storeId: string) {
     .order('product_title', { ascending: true });
 
   if (fetchError) {
-    console.error('Products page - Error fetching products:', fetchError);
+    // Error fetching products - handled gracefully by returning empty array
   }
     
   // Return whatever is in the database (empty array if no products)
@@ -19,7 +19,6 @@ async function getProductsData(storeId: string) {
 }
 
 function groupProducts(productsData: any) {
-  console.log('Products page - raw data from DB:', productsData?.length, productsData);
   // Since we're now storing product-level data, no grouping needed
   // Just transform the data for the client component
   return productsData?.map((item: any) => ({
@@ -39,14 +38,10 @@ export default async function ProductsPage({
 }) {
   const params = await searchParams;
   
-  console.log('Products page - params:', params);
-  
   // Require authentication with shop parameter
   const store = await requireAuth(params.shop);
-  console.log('Products page - authenticated store:', store.id);
   
   const products = await getProductsData(store.id);
-  console.log('Products page - fetched products:', products.length);
 
   return (
     <ProductsContent 

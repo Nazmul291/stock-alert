@@ -19,7 +19,6 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
     },
   ];
 
-  console.log(`Registering webhooks for ${shop}...`);
 
   for (const webhook of webhooks) {
     try {
@@ -41,7 +40,6 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
         );
 
         if (exists) {
-          console.log(`Webhook ${webhook.topic} already registered`);
           continue;
         }
       }
@@ -67,25 +65,19 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
 
       if (response.ok) {
         const webhookData = await response.json();
-        console.log(`Successfully registered webhook: ${webhook.topic} with ID: ${webhookData.webhook.id}`);
-        console.log(`Webhook address: ${webhookData.webhook.address}`);
       } else {
         const errorText = await response.text();
-        console.error(`Failed to register webhook ${webhook.topic}:`, errorText);
-        console.error(`Status: ${response.status}, URL: ${webhook.address}`);
         
         // Try to parse error for more details
         try {
           const errorJson = JSON.parse(errorText);
-          console.error('Error details:', errorJson);
         } catch {
-          // Not JSON, already logged as text
+          // Not JSON, continue silently
         }
       }
     } catch (error) {
-      console.error(`Error registering webhook ${webhook.topic}:`, error);
+      // Handle error silently
     }
   }
 
-  console.log('Webhook registration complete');
 }

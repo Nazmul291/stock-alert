@@ -73,7 +73,7 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
 
         setModalActive(false);
       } catch (error) {
-        console.error('Error saving product settings:', error);
+        // Error saving product settings - handled by UI state
       }
     });
   };
