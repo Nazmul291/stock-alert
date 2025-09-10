@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getShopifyClient } from '@/lib/shopify';
+import { getShopifyClient, getGraphQLClient, ShopifyResponse } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 import { sendLowStockAlert, sendOutOfStockAlert } from '@/lib/notifications';
 import crypto from 'crypto';
@@ -34,27 +34,40 @@ export async function POST(req: NextRequest) {
     const data = JSON.parse(body);
     const shop = req.headers.get('x-shopify-shop-domain');
     
-    console.log('📊 Webhook data:', {
-      shop,
-      inventory_item_id: data.inventory_item_id || data.id,
-      location_id: data.location_id,
-      available: data.available
-    });
+    console.log('📊 Webhook data:', data);
     
     if (!shop) {
       return NextResponse.json({ error: 'Missing shop domain' }, { status: 400 });
     }
-
+    
     // Get store from database
     const { data: store } = await supabaseAdmin
-      .from('stores')
-      .select('*')
-      .eq('shop_domain', shop)
-      .single();
-
+    .from('stores')
+    .select('*')
+    .eq('shop_domain', shop)
+    .single();
+    
     if (!store) {
       return NextResponse.json({ error: 'Store not found' }, { status: 404 });
     }
+    const graphqlClient = await getGraphQLClient(shop, store.access_token)
+
+    const query = `
+      query {
+        inventoryItem(id: "gid://shopify/InventoryItem/${data.inventory_item_id}") {
+          variant {
+            product {
+              id
+            }
+          }
+        }
+      }`
+    
+    const response = await graphqlClient.query({ data: query });
+
+    // console.log('GraphQL response:', response.body);
+
+    const productGID = (response as ShopifyResponse).body?.data.inventoryItem?.variant?.product?.id;
 
     // Get store settings
     const { data: settings } = await supabaseAdmin
@@ -81,7 +94,7 @@ export async function POST(req: NextRequest) {
     const client = await getShopifyClient(shop, store.access_token);
     
     // Find which product this inventory_item_id belongs to
-    let productId = null;
+    let productId = productGID.split('/').pop();
     let product = null;
     
     try {
@@ -89,36 +102,15 @@ export async function POST(req: NextRequest) {
       
       // Fetch all products to find the one with this inventory_item_id
       const searchResponse = await client.get({
-        path: `products`,
-        query: { 
-          fields: 'id,title,status,variants',
-          limit: 250
+        path: `products/${productId}`,
+        query: {
+          fields: 'id,title,status,variants'
         }
       });
       
-      const products = searchResponse.body.products;
-      console.log(`Searching through ${products.length} products...`);
-      
-      // Find the product containing this inventory_item_id
-      for (const prod of products) {
-        for (const variant of prod.variants) {
-          if (variant.inventory_item_id === inventory_item_id || 
-              variant.inventory_item_id === String(inventory_item_id)) {
-            console.log(`✅ Found product ${prod.id} for inventory item ${inventory_item_id}`);
-            
-            // Fetch the complete product with all variants
-            const fullProductResponse = await client.get({
-              path: `products/${prod.id}`,
-              query: { fields: 'id,title,status,variants' }
-            });
-            
-            product = fullProductResponse.body.product;
-            productId = product.id;
-            break;
-          }
-        }
-        if (productId) break;
-      }
+      console.log(`Searching through`, searchResponse.body);
+      product = searchResponse.body.product;
+
     } catch (apiError: any) {
       console.error('Error fetching Shopify data:', apiError);
     }
@@ -167,7 +159,7 @@ export async function POST(req: NextRequest) {
         info: 'Quantity unchanged, notifications skipped'
       }, { status: 200 });
     }
-    
+
     // Update product-level inventory (no variant_id!)
     const updateData = {
       store_id: store.id,

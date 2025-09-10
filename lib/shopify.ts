@@ -2,6 +2,10 @@ import { shopifyApi, ApiVersion, Session } from '@shopify/shopify-api';
 import '@shopify/shopify-api/adapters/node';
 import jwt from 'jsonwebtoken';
 
+export interface ShopifyResponse {
+  body: any;
+}
+
 export const shopify = shopifyApi({
   apiKey: process.env.SHOPIFY_API_KEY || '38a870cdc7f41175fd49a52689539f9d',
   apiSecretKey: process.env.SHOPIFY_API_SECRET || '',
