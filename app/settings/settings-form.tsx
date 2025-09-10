@@ -127,15 +127,39 @@ export default function SettingsForm({ settings: initialSettings, plan, shop }: 
         />
         
         {settings.slack_notifications && (
-          <TextField
-            label="Slack webhook URL"
-            type="url"
-            value={settings.slack_webhook_url || ''}
-            onChange={(value) => setSettings({ ...settings, slack_webhook_url: value })}
-            placeholder="https://hooks.slack.com/services/..."
-            helpText="Get this from your Slack app settings"
-            autoComplete="url"
-          />
+          <>
+            {plan === 'free' && (
+              <Banner tone="warning">
+                Your current free plan doesn't support Slack notifications. To receive Slack notifications, please upgrade to Pro.
+              </Banner>
+            )}
+            <TextField
+              label="Slack webhook URL"
+              type="url"
+              value={settings.slack_webhook_url || ''}
+              onChange={(value) => setSettings({ ...settings, slack_webhook_url: value })}
+              placeholder="https://hooks.slack.com/services/..."
+              disabled={plan === 'free'}
+              helpText={
+                <>
+                  Follow these steps to obtain a Slack webhook URL:
+                  <br />
+                  1. Go to <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer" style={{ color: '#0066CC', textDecoration: 'underline' }}>https://api.slack.com/messaging/webhooks</a>
+                  <br />
+                  2. Click "Create your Slack app"
+                  <br />
+                  3. Select "From scratch", give it a name, and choose your workspace
+                  <br />
+                  4. Go to "Incoming Webhooks" → Enable it
+                  <br />
+                  5. Click "Add New Webhook to Workspace"
+                  <br />
+                  6. Choose a channel and copy the Webhook URL
+                </>
+              }
+              autoComplete="url"
+            />
+          </>
         )}
 
         <Button

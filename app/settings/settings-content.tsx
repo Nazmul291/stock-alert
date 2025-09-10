@@ -89,7 +89,7 @@ export default function SettingsContent({
                 />
                 {usagePercentage >= 90 && (
                   <Text variant="bodySm" tone="critical" as="p" style={{ marginTop: '8px' }}>
-                    You're approaching your product limit. Consider upgrading to Pro for unlimited products.
+                    You're approaching your product limit. Consider upgrading to Pro for up to 10,000 products.
                   </Text>
                 )}
               </div>
