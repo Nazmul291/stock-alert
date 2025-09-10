@@ -159,6 +159,15 @@ export async function POST(req: NextRequest) {
 
     const previousQuantity = existingTracking?.current_quantity || 0;
     
+    // Check if quantity actually changed - skip notifications if same
+    if (totalQuantity === previousQuantity) {
+      console.log(`ℹ️ Product ${productId} quantity unchanged (${totalQuantity} units) - skipping notifications`);
+      return NextResponse.json({ 
+        success: true,
+        info: 'Quantity unchanged, notifications skipped'
+      }, { status: 200 });
+    }
+    
     // Update product-level inventory (no variant_id!)
     const updateData = {
       store_id: store.id,
