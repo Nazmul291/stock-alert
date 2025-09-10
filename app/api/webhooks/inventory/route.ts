@@ -17,24 +17,19 @@ async function verifyWebhook(req: NextRequest, body: string): Promise<boolean> {
 }
 
 export async function POST(req: NextRequest) {
-  console.log('📦 INVENTORY WEBHOOK RECEIVED');
-  console.log('Headers:', Object.fromEntries(req.headers.entries()));
   
   try {
     const body = await req.text();
-    console.log('Body:', body);
     
     // Verify webhook
     const isValid = await verifyWebhook(req, body);
     if (!isValid) {
-      console.error('❌ Webhook verification failed');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const data = JSON.parse(body);
     const shop = req.headers.get('x-shopify-shop-domain');
     
-    console.log('📊 Webhook data:', data);
     
     if (!shop) {
       return NextResponse.json({ error: 'Missing shop domain' }, { status: 400 });
@@ -65,7 +60,6 @@ export async function POST(req: NextRequest) {
     
     const response = await graphqlClient.query({ data: query });
 
-    // console.log('GraphQL response:', response.body);
 
     const productGID = (response as ShopifyResponse).body?.data.inventoryItem?.variant?.product?.id;
 
@@ -90,7 +84,6 @@ export async function POST(req: NextRequest) {
         processed: false,
       });
 
-    const inventory_item_id = data.inventory_item_id || data.id;
     const client = await getShopifyClient(shop, store.access_token);
     
     // Find which product this inventory_item_id belongs to
@@ -98,7 +91,6 @@ export async function POST(req: NextRequest) {
     let product = null;
     
     try {
-      console.log(`Searching for product with inventory_item_id: ${inventory_item_id}...`);
       
       // Fetch all products to find the one with this inventory_item_id
       const searchResponse = await client.get({
@@ -108,15 +100,12 @@ export async function POST(req: NextRequest) {
         }
       });
       
-      console.log(`Searching through`, searchResponse.body);
       product = searchResponse.body.product;
 
     } catch (apiError: any) {
-      console.error('Error fetching Shopify data:', apiError);
     }
     
     if (!productId || !product) {
-      console.error('Could not find product for inventory_item_id:', inventory_item_id);
       return NextResponse.json({ 
         warning: 'Could not determine product for inventory update' 
       }, { status: 200 });
@@ -135,11 +124,6 @@ export async function POST(req: NextRequest) {
       });
     }
     
-    console.log(`Product ${productId} (${product.title}) inventory:`, {
-      total_quantity: totalQuantity,
-      variant_count: product.variants.length,
-      variants: variantDetails
-    });
     
     // Get existing product tracking
     const { data: existingTracking } = await supabaseAdmin
@@ -153,7 +137,6 @@ export async function POST(req: NextRequest) {
     
     // Check if quantity actually changed - skip notifications if same
     if (totalQuantity === previousQuantity) {
-      console.log(`ℹ️ Product ${productId} quantity unchanged (${totalQuantity} units) - skipping notifications`);
       return NextResponse.json({ 
         success: true,
         info: 'Quantity unchanged, notifications skipped'
@@ -190,14 +173,12 @@ export async function POST(req: NextRequest) {
         .eq('id', existingProduct.id);
       
       if (updateError) {
-        console.error('Error updating product inventory:', updateError);
         // Still return success to avoid webhook retries
         return NextResponse.json({ 
           success: true,
           warning: 'Database update failed, but webhook accepted'
         }, { status: 200 });
       }
-      console.log(`✅ Updated product ${productId}: ${previousQuantity} -> ${totalQuantity} total units`);
     } else {
       // Insert new product
       const { error: insertError } = await supabaseAdmin
@@ -205,15 +186,12 @@ export async function POST(req: NextRequest) {
         .insert(updateData);
       
       if (insertError) {
-        console.error('Could not insert product:', insertError);
         // Still return success to Shopify - we don't want retries
-        console.log('⚠️ Product not tracked in database, but returning success to avoid webhook retries');
         return NextResponse.json({ 
           success: true,
           warning: 'Product not in database, skipping update'
         }, { status: 200 });
       }
-      console.log(`✅ Inserted new product ${productId} with ${totalQuantity} units`);
     }
     
     // Get product-specific settings
@@ -230,7 +208,6 @@ export async function POST(req: NextRequest) {
     
     // Handle auto-hide for completely out of stock products
     if (totalQuantity === 0 && settings.auto_hide_enabled && !excludeFromAutoHide) {
-      console.log(`🚫 Product ${productId} is completely out of stock - setting to draft`);
       
       await client.put({
         path: `products/${productId}`,
@@ -257,7 +234,6 @@ export async function POST(req: NextRequest) {
     // Handle auto-republish when restocked
     else if (previousQuantity === 0 && totalQuantity > 0 && settings.auto_republish_enabled) {
       if (existingTracking?.is_hidden) {
-        console.log(`✅ Product ${productId} is back in stock - republishing`);
         
         await client.put({
           path: `products/${productId}`,
@@ -284,24 +260,8 @@ export async function POST(req: NextRequest) {
       const shouldSendAlert = !existingTracking?.last_alert_sent_at || 
         new Date().getTime() - new Date(existingTracking.last_alert_sent_at).getTime() > cooldownMs;
       
-      console.log('Alert check:', {
-        totalQuantity,
-        threshold,
-        lastAlertSent: existingTracking?.last_alert_sent_at,
-        timeSinceLastAlert: existingTracking?.last_alert_sent_at 
-          ? Math.round((new Date().getTime() - new Date(existingTracking.last_alert_sent_at).getTime()) / 1000) + ' seconds'
-          : 'never',
-        shouldSendAlert
-      });
       
       if (shouldSendAlert) {
-        console.log(`⚠️ Low stock alert: Product ${productId} has ${totalQuantity} units (threshold: ${threshold})`);
-        console.log('Settings for notification:', {
-          slack_notifications: settings.slack_notifications,
-          has_slack_webhook: !!settings.slack_webhook_url,
-          slack_webhook_preview: settings.slack_webhook_url ? settings.slack_webhook_url.substring(0, 50) + '...' : 'not set',
-          store_plan: store.plan
-        });
         // Pass product with SKU for notification
         const productWithSku = { ...product, sku: existingTracking?.sku || updateData.sku };
         await sendLowStockAlert(store, productWithSku, null, totalQuantity, threshold, settings);
@@ -323,10 +283,8 @@ export async function POST(req: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(1);
 
-    console.log('✅ Inventory webhook processed successfully');
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
-    console.error('❌ Inventory webhook error:', error);
     // IMPORTANT: Return 200 to prevent Shopify from retrying
     // We log the error but don't want webhook retries for internal issues
     return NextResponse.json({ 
