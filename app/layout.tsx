@@ -4,6 +4,7 @@ import "./globals.css";
 import PolarisProvider from '@/components/polaris-provider';
 import AppBridgeProvider from '@/components/app-bridge-provider';
 import ReduxProvider from '@/components/redux-provider';
+import SessionTokenTest from '@/components/session-token-test';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -32,6 +33,7 @@ export default function RootLayout({
           <AppBridgeProvider>
             <PolarisProvider>
               {children}
+              <SessionTokenTest />
             </PolarisProvider>
           </AppBridgeProvider>
         </ReduxProvider>
