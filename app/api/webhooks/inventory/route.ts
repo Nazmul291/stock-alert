@@ -102,16 +102,46 @@ export async function POST(req: NextRequest) {
     let product = null;
     
     try {
-      
-      // Fetch all products to find the one with this inventory_item_id
-      const searchResponse = await client.get({
-        path: `products/${productId}.json`,
-        query: {
-          fields: 'id,title,status,variants'
-        }
+
+      // Fetch product using GraphQL to avoid REST API deprecation
+      const productQuery = `
+        query getProduct($id: ID!) {
+          product(id: $id) {
+            id
+            title
+            status
+            variants(first: 250) {
+              edges {
+                node {
+                  id
+                  title
+                  sku
+                  inventoryQuantity
+                }
+              }
+            }
+          }
+        }`;
+
+      const productResponse = await graphqlClient.request(productQuery, {
+        id: productGID
       });
-      
-      product = searchResponse.body.product;
+
+      if (productResponse?.data?.product) {
+        // Convert GraphQL response to REST format for compatibility
+        const gqlProduct = productResponse.data.product;
+        product = {
+          id: gqlProduct.id.split('/').pop(),
+          title: gqlProduct.title,
+          status: gqlProduct.status.toLowerCase(),
+          variants: gqlProduct.variants.edges.map((edge: any) => ({
+            id: edge.node.id.split('/').pop(),
+            title: edge.node.title,
+            sku: edge.node.sku,
+            inventory_quantity: edge.node.inventoryQuantity || 0
+          }))
+        };
+      }
 
     } catch (apiError: any) {
     }
