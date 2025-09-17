@@ -3,13 +3,37 @@ import { verifySessionToken, getShopifyClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
-  
+
   try {
-    const { plan } = await req.json();
+    // Parse request body with proper error handling for production environments
+    let plan;
+    try {
+      const body = await req.json();
+      plan = body.plan;
+    } catch (parseError) {
+      // This catches "Unexpected end of JSON input" errors when body is empty/malformed
+      console.error('Failed to parse request body:', parseError);
+      return NextResponse.json({
+        error: 'Invalid request body. Please ensure you are sending valid JSON.'
+      }, { status: 400 });
+    }
+
+    if (!plan) {
+      return NextResponse.json({
+        error: 'Plan parameter is required'
+      }, { status: 400 });
+    }
     const sessionToken = req.cookies.get('shopify-session')?.value;
+    // Ensure NEXT_PUBLIC_HOST is set in production environment (required for Shopify redirect URLs)
     const host = process.env.NEXT_PUBLIC_HOST;
-    
-    
+
+    if (!host) {
+      console.error('NEXT_PUBLIC_HOST is not set in environment variables');
+      return NextResponse.json({
+        error: 'Server configuration error: NEXT_PUBLIC_HOST environment variable is missing'
+      }, { status: 500 });
+    }
+
     if (!sessionToken) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -21,22 +45,44 @@ export async function POST(req: NextRequest) {
 
     const { shop, accessToken } = session;
 
-    // Get store from database
-    const { data: store } = await supabaseAdmin
-      .from('stores')
-      .select('*')
-      .eq('shop_domain', shop)
-      .single();
+    // Get store from database with proper error handling
+    let store;
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('stores')
+        .select('*')
+        .eq('shop_domain', shop)
+        .single();
+
+      if (error) {
+        console.error('Database error fetching store:', error);
+        return NextResponse.json({
+          error: `Database error: ${error.message}`
+        }, { status: 500 });
+      }
+
+      store = data;
+    } catch (dbError: any) {
+      console.error('Failed to fetch store:', dbError);
+      return NextResponse.json({
+        error: `Failed to fetch store: ${dbError.message}`
+      }, { status: 500 });
+    }
 
     if (!store) {
       return NextResponse.json({ error: 'Store not found' }, { status: 404 });
     }
 
-    const client = await getShopifyClient(shop, accessToken);
+    let client;
+    try {
+      client = await getShopifyClient(shop, accessToken);
+    } catch (clientError: any) {
+      console.error('Failed to create Shopify client:', clientError);
+      return NextResponse.json({
+        error: `Failed to create Shopify client: ${clientError.message}`
+      }, { status: 500 });
+    }
 
-    console.log('NEXT_PUBLIC_HOST: ', process.env.NEXT_PUBLIC_HOST);
-    console.log('shop: ', shop);
-    console.log('host: ', host);
 
     if (plan === 'pro') {
       // Create recurring charge for Pro plan
@@ -48,7 +94,7 @@ export async function POST(req: NextRequest) {
             recurring_application_charge: {
               name: 'Stock Alert Pro',
               price: 9.99,
-              return_url: `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}${host ? `&host=${host}` : ''}`,
+              return_url: `${host}/api/billing/callback?shop=${shop}`,
               test: true,
               trial_days: 7,
               capped_amount: 9.99,
@@ -63,21 +109,31 @@ export async function POST(req: NextRequest) {
       }
 
       const charge = recurringCharge.body.recurring_application_charge;
-      
-      // Store charge info in database
-      await supabaseAdmin
-        .from('billing_records')
-        .insert({
-          store_id: store.id,
-          charge_id: charge.id,
-          plan: 'pro',
-          status: 'pending',
-          amount: 9.99,
-          currency: 'USD',
-        });
 
-      return NextResponse.json({ 
-        confirmation_url: charge.confirmation_url 
+      // Store charge info in database
+      try {
+        const { error: insertError } = await supabaseAdmin
+          .from('billing_records')
+          .insert({
+            store_id: store.id,
+            charge_id: charge.id,
+            plan: 'pro',
+            status: 'pending',
+            amount: 9.99,
+            currency: 'USD',
+          });
+
+        if (insertError) {
+          console.error('Failed to insert billing record:', insertError);
+          // Continue anyway - the charge was created successfully
+        }
+      } catch (dbInsertError: any) {
+        console.error('Database insert error:', dbInsertError);
+        // Continue anyway - the charge was created successfully
+      }
+
+      return NextResponse.json({
+        confirmation_url: charge.confirmation_url
       });
     } else if (plan === 'free') {
       // Downgrade to free plan (cancel existing charge if any)
@@ -124,7 +180,12 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
-  } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (error: any) {
+    // Comprehensive error logging for debugging production issues
+    console.error('Billing route error:', error);
+    console.error('Error stack:', error.stack);
+    return NextResponse.json({
+      error: `Internal server error: ${error.message || 'Unknown error occurred'}`
+    }, { status: 500 });
   }
 }
