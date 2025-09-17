@@ -9,24 +9,38 @@ export function useAuthenticatedFetch() {
 
   const authenticatedFetch = useCallback(
     async (url: string, options: RequestInit = {}) => {
-      if (!isReady || !appBridge) {
-        throw new Error('App Bridge not initialized');
-      }
-
-      const sessionToken = await getSessionToken(appBridge);
-      if (!sessionToken) {
-        throw new Error('Failed to get session token');
-      }
-
       const headers = new Headers(options.headers);
-      headers.set('Authorization', `Bearer ${sessionToken}`);
+
+      // Try to get session token if App Bridge is available
+      if (isReady && appBridge) {
+        try {
+          const sessionToken = await getSessionToken(appBridge);
+          if (sessionToken) {
+            headers.set('Authorization', `Bearer ${sessionToken}`);
+          }
+        } catch (error) {
+          console.warn('Failed to get session token:', error);
+          // Continue without session token
+        }
+      }
+
+      // Always set Content-Type if not provided
       if (!headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json');
       }
 
-      return fetch(url, {
+      // Add shop parameter to URL if available and not already present
+      const urlObj = new URL(url, window.location.origin);
+      const params = new URLSearchParams(window.location.search);
+      const shop = params.get('shop');
+      if (shop && !urlObj.searchParams.has('shop')) {
+        urlObj.searchParams.set('shop', shop);
+      }
+
+      return fetch(urlObj.toString(), {
         ...options,
         headers,
+        credentials: 'include', // Include cookies for session management
       });
     },
     [appBridge, isReady]

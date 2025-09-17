@@ -20,27 +20,27 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // For API routes, pass the authorization header through
+  // For API routes, be more permissive
   // Session token verification will be done in the API routes themselves
   if (request.nextUrl.pathname.startsWith('/api/')) {
-    const authHeader = request.headers.get('authorization');
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      // Allow requests with shop parameter for OAuth flow
-      const shop = request.nextUrl.searchParams.get('shop');
-      if (shop) {
-        return NextResponse.next();
-      }
-
-      // For embedded app requests, require session token
-      return NextResponse.json(
-        { error: 'Unauthorized - Missing session token' },
-        { status: 401 }
-      );
+    // Always allow billing routes with shop parameter
+    if (request.nextUrl.pathname.startsWith('/api/billing')) {
+      return NextResponse.next();
     }
 
-    // Pass through with auth header intact
-    return NextResponse.next();
+    const authHeader = request.headers.get('authorization');
+
+    // Allow requests with either auth header or shop parameter
+    const shop = request.nextUrl.searchParams.get('shop');
+    if (authHeader || shop) {
+      return NextResponse.next();
+    }
+
+    // Only block if neither auth header nor shop parameter is present
+    return NextResponse.json(
+      { error: 'Unauthorized - Missing authentication' },
+      { status: 401 }
+    );
   }
 
   // Pass through all other requests

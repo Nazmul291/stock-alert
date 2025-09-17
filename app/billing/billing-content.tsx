@@ -39,10 +39,12 @@ export default function BillingContent({
 
       const apiEndpoint = isDevelopment ? '/api/billing/test' : '/api/billing';
 
+      console.log('Making request to:', apiEndpoint);
       const response = await authenticatedFetch(apiEndpoint, {
         method: 'POST',
         body: JSON.stringify(bodyData),
       });
+      console.log('Response received:', response.status);
 
       let data;
       try {
@@ -76,6 +78,8 @@ export default function BillingContent({
         setUpgrading(false);
       }
     } catch (error) {
+      console.error('Upgrade error:', error);
+      alert(`Failed to upgrade: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setUpgrading(false);
     }
   };
