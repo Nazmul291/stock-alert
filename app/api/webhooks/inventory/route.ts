@@ -128,7 +128,9 @@ export async function POST(req: NextRequest) {
 
       console.log(`[WEBHOOK] Fetching product with GraphQL, productGID: ${productGID}`);
       const productResponse = await graphqlClient.request(productQuery, {
-        id: productGID
+        variables: {
+          id: productGID
+        }
       });
 
       console.log(`[WEBHOOK] Product GraphQL response:`, JSON.stringify(productResponse, null, 2));
@@ -292,9 +294,11 @@ export async function POST(req: NextRequest) {
           }`;
 
         const hideResponse = await graphqlClient.request(productUpdateMutation, {
-          product: {
-            id: productGID,
-            status: 'DRAFT'
+          variables: {
+            product: {
+              id: productGID,
+              status: 'DRAFT'
+            }
           }
         });
 
@@ -364,9 +368,11 @@ export async function POST(req: NextRequest) {
             }`;
 
           const updateResponse = await graphqlClient.request(productUpdateMutation, {
-            product: {
-              id: productGID,
-              status: 'ACTIVE'
+            variables: {
+              product: {
+                id: productGID,
+                status: 'ACTIVE'
+              }
             }
           });
 

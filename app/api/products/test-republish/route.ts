@@ -37,7 +37,9 @@ export async function POST(req: NextRequest) {
       }`;
 
     const getResponse = await graphqlClient.request(getProductQuery, {
-      id: productGID
+      variables: {
+        id: productGID
+      }
     });
 
     const currentProduct = getResponse?.data?.product;
@@ -64,9 +66,11 @@ export async function POST(req: NextRequest) {
         }`;
 
       const updateResponse = await graphqlClient.request(productUpdateMutation, {
-        product: {
-          id: productGID,
-          status: 'ACTIVE'
+        variables: {
+          product: {
+            id: productGID,
+            status: 'ACTIVE'
+          }
         }
       });
 
