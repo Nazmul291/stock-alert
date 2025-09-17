@@ -48,6 +48,11 @@ export function verifySessionToken(token: string): { shop: string; accessToken: 
 }
 
 export async function getShopifyClient(shop: string, accessToken: string) {
+  // Validate inputs
+  if (!shop || !accessToken) {
+    throw new Error(`Invalid shop or accessToken: shop=${shop}, token exists=${!!accessToken}`);
+  }
+
   const session = new Session({
     id: `offline_${shop}`,
     shop,
@@ -62,6 +67,31 @@ export async function getShopifyClient(shop: string, accessToken: string) {
   console.error('[SHOPIFY_CLIENT] Created REST client for shop:', shop);
   console.error('[SHOPIFY_CLIENT] Session accessToken exists:', !!accessToken);
   console.error('[SHOPIFY_CLIENT] API Version:', shopify.config.apiVersion);
+  console.error('[SHOPIFY_CLIENT] Access token first 10 chars:', accessToken.substring(0, 10));
+
+  // Wrap the client.post method to catch raw responses
+  const originalPost = client.post.bind(client);
+  client.post = async function(options: any) {
+    try {
+      console.error('[SHOPIFY_CLIENT] Making POST request to:', options.path);
+      const response = await originalPost(options);
+      console.error('[SHOPIFY_CLIENT] POST request successful');
+      return response;
+    } catch (error: any) {
+      console.error('[SHOPIFY_CLIENT] POST request failed');
+      console.error('[SHOPIFY_CLIENT] Error type:', error.constructor.name);
+      console.error('[SHOPIFY_CLIENT] Error message:', error.message);
+
+      // Try to get more details about the response
+      if (error.response) {
+        console.error('[SHOPIFY_CLIENT] Response status:', error.response.status);
+        console.error('[SHOPIFY_CLIENT] Response statusText:', error.response.statusText);
+        console.error('[SHOPIFY_CLIENT] Response body:', error.response.body);
+      }
+
+      throw error;
+    }
+  };
 
   return client;
 }
