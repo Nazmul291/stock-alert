@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
 
     // Handle different compliance topics
     switch (topic) {
-      case 'customers/data_request':
+      case 'customers_data_request':
         // Handle customer data request (GDPR)
         console.log('[WEBHOOK] Customer data request for shop:', shop);
         // In production, you would:
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
           customer_id: data.customer?.id
         }, { status: 200 });
 
-      case 'customers/redact':
+      case 'customers_redact':
         // Handle customer data deletion request (GDPR)
         console.log('[WEBHOOK] Customer redaction request for shop:', shop);
         // In production, you would:
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
           customer_id: data.customer?.id
         }, { status: 200 });
 
-      case 'shop/redact':
+      case 'shop_redact':
         // Handle shop data deletion (when app is uninstalled)
         console.log('[WEBHOOK] Shop redaction request for shop:', shop);
         // In production, you would:
