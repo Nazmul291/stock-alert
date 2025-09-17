@@ -34,7 +34,11 @@ export function useAppBridge() {
         const app = window.shopify.createApp({
           apiKey,
           host,
+          forceRedirect: false, // Don't force redirect for embedded apps
         });
+
+        // Log for debugging
+        console.log('App Bridge initialized with host:', host);
 
         setAppBridge(app);
         setIsReady(true);
@@ -57,8 +61,20 @@ export async function getSessionToken(appBridge: any): Promise<string | null> {
   }
 
   try {
-    const sessionToken = await appBridge.idToken();
-    return sessionToken;
+    // Use the utilities function to get session token
+    if (window.shopify && window.shopify.idToken) {
+      const sessionToken = await window.shopify.idToken();
+      return sessionToken;
+    } else if (appBridge.idToken) {
+      const sessionToken = await appBridge.idToken();
+      return sessionToken;
+    } else if (appBridge.getSessionToken) {
+      const sessionToken = await appBridge.getSessionToken();
+      return sessionToken;
+    } else {
+      console.error('No session token method available');
+      return null;
+    }
   } catch (error) {
     console.error('Failed to get session token:', error);
     return null;

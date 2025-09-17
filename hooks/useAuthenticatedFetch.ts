@@ -17,11 +17,16 @@ export function useAuthenticatedFetch() {
           const sessionToken = await getSessionToken(appBridge);
           if (sessionToken) {
             headers.set('Authorization', `Bearer ${sessionToken}`);
+            console.log('Session token added to request');
+          } else {
+            console.log('No session token available');
           }
         } catch (error) {
           console.warn('Failed to get session token:', error);
           // Continue without session token
         }
+      } else {
+        console.log('App Bridge not ready, skipping session token');
       }
 
       // Always set Content-Type if not provided
