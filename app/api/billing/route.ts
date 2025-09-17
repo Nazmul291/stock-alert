@@ -131,13 +131,13 @@ export async function POST(req: NextRequest) {
         console.error('[BILLING] Return URL:', `${host}/api/billing/callback?shop=${shop}`);
 
         recurringCharge = await client.post({
-          path: 'recurring_application_charges.json',  // Add .json extension
+          path: 'recurring_application_charges.json',
           data: {
             recurring_application_charge: {
-              name: 'Stock Alert Pro',
+              name: 'Stock Alert Pro - Development',
               price: 9.99,
               return_url: `${host}/api/billing/callback?shop=${shop}`,
-              test: true,
+              test: true,  // Always test mode for development
               trial_days: 7,
               capped_amount: 9.99,
               terms: 'Pro features including Slack notifications, per-product thresholds, and priority support',

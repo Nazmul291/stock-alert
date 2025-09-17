@@ -30,7 +30,14 @@ export default function BillingContent({
       const bodyData = { plan: 'pro' };
       console.log('Sending upgrade request with body:', bodyData);
 
-      const response = await fetch('/api/billing', {
+      // Use test route for development
+      const isDevelopment = window.location.hostname === 'localhost' ||
+                           window.location.hostname.includes('ngrok') ||
+                           process.env.NODE_ENV === 'development';
+
+      const apiEndpoint = isDevelopment ? '/api/billing/test' : '/api/billing';
+
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
