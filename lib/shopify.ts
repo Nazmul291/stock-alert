@@ -77,24 +77,50 @@ export async function getShopifyClient(shop: string, accessToken: string) {
 
   // Wrap the client.post method to catch raw responses
   const originalPost = client.post.bind(client);
+
   client.post = async function(options: any) {
+    console.error('[SHOPIFY_CLIENT] Making POST request to:', options.path);
+    console.error('[SHOPIFY_CLIENT] POST data keys:', options.data ? Object.keys(options.data) : 'No data');
+
     try {
-      console.error('[SHOPIFY_CLIENT] Making POST request to:', options.path);
+      // Make a direct fetch call to see raw response
+      const apiUrl = `https://${shop}/admin/api/2024-10/${options.path}`;
+      console.error('[SHOPIFY_CLIENT] Direct fetch to:', apiUrl);
+
+      const fetchResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(options.data),
+      });
+
+      console.error('[SHOPIFY_CLIENT] Fetch response status:', fetchResponse.status);
+      console.error('[SHOPIFY_CLIENT] Fetch response statusText:', fetchResponse.statusText);
+
+      const responseText = await fetchResponse.text();
+      console.error('[SHOPIFY_CLIENT] Response text length:', responseText.length);
+      console.error('[SHOPIFY_CLIENT] Response text (first 1000 chars):', responseText.substring(0, 1000));
+
+      // Now try the original SDK method
+      console.error('[SHOPIFY_CLIENT] Now trying SDK post method...');
+    } catch (fetchError: any) {
+      console.error('[SHOPIFY_CLIENT] Direct fetch error:', fetchError.message);
+    }
+
+    // Call original post
+    try {
       const response = await originalPost(options);
-      console.error('[SHOPIFY_CLIENT] POST request successful');
+      console.error('[SHOPIFY_CLIENT] SDK POST successful');
+      console.error('[SHOPIFY_CLIENT] Response body exists:', !!response?.body);
+      console.error('[SHOPIFY_CLIENT] Response body type:', typeof response?.body);
       return response;
     } catch (error: any) {
-      console.error('[SHOPIFY_CLIENT] POST request failed');
+      console.error('[SHOPIFY_CLIENT] SDK POST failed');
       console.error('[SHOPIFY_CLIENT] Error type:', error.constructor.name);
       console.error('[SHOPIFY_CLIENT] Error message:', error.message);
-
-      // Try to get more details about the response
-      if (error.response) {
-        console.error('[SHOPIFY_CLIENT] Response status:', error.response.status);
-        console.error('[SHOPIFY_CLIENT] Response statusText:', error.response.statusText);
-        console.error('[SHOPIFY_CLIENT] Response body:', error.response.body);
-      }
-
+      console.error('[SHOPIFY_CLIENT] Error stack (first 500):', error.stack?.substring(0, 500));
       throw error;
     }
   };
