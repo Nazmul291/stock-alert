@@ -3,68 +3,18 @@ import { verifySessionToken, getShopifyClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
-  console.error('[BILLING] Request received at:', new Date().toISOString());
-
-  // Check critical environment variables
-  console.error('[BILLING] Environment check:');
-  console.error('[BILLING] NEXT_PUBLIC_SUPABASE_URL exists:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
-  console.error('[BILLING] SUPABASE_SERVICE_ROLE_KEY exists:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-  console.error('[BILLING] JWT_SECRET exists:', !!process.env.JWT_SECRET);
 
   try {
     // Parse request body with proper error handling for production environments
     let plan;
     let bodyText = '';
 
-    // Check content-type header
-    const contentType = req.headers.get('content-type');
-    console.error('[BILLING] Content-Type:', contentType);
-    console.error('[BILLING] Content-Length:', req.headers.get('content-length'));
-
     try {
-      // Try to get the body text first
-      try {
-        const clonedReq = req.clone();
-        bodyText = await clonedReq.text();
-        console.error('[BILLING] Raw body received:', bodyText);
-        console.error('[BILLING] Body length:', bodyText.length);
-      } catch (e) {
-        console.error('[BILLING] Could not read body text:', e);
-      }
-
-      // If body is empty, return early with clear error
-      if (!bodyText || bodyText.trim() === '') {
-        console.error('[BILLING] ERROR: Request body is empty');
-        return NextResponse.json({
-          error: 'Request body is empty. Please send a valid JSON body with plan parameter.'
-        }, { status: 400 });
-      }
-
-      // Try to parse JSON
-      let body;
-      try {
-        body = JSON.parse(bodyText);
-      } catch (jsonParseError) {
-        // If initial parsing fails, try getting fresh body from request
-        body = await req.json();
-      }
-
+      const body = await req.json();
       plan = body.plan;
-      console.error('[BILLING] Plan requested:', plan);
     } catch (parseError: any) {
-      // This catches "Unexpected end of JSON input" errors when body is empty/malformed
-      console.error('[BILLING] Failed to parse request body:', parseError);
-      console.error('[BILLING] Parse error message:', parseError.message);
-      console.error('[BILLING] Body that failed to parse:', bodyText);
-      console.error('[BILLING] Headers:', Object.fromEntries(req.headers.entries()));
-
       return NextResponse.json({
-        error: 'Invalid request body. Please ensure you are sending valid JSON.',
-        debug: {
-          bodyReceived: bodyText,
-          contentType: contentType,
-          errorMessage: parseError.message
-        }
+        error: 'Invalid request body. Please ensure you are sending valid JSON.'
       }, { status: 400 });
     }
 
@@ -178,13 +128,30 @@ export async function POST(req: NextRequest) {
             },
           },
         });
+
+        console.error('[BILLING] Shopify API response received');
+        console.error('[BILLING] Response body type:', typeof recurringCharge?.body);
+        console.error('[BILLING] Response body keys:', recurringCharge?.body ? Object.keys(recurringCharge.body) : 'No body');
+
       } catch (billingError: any) {
-        return NextResponse.json({ 
-          error: `Failed to create billing charge: ${billingError.message || 'Unknown error'}` 
+        console.error('[BILLING] Shopify API error:', billingError.message);
+        console.error('[BILLING] Error details:', JSON.stringify(billingError, null, 2));
+        return NextResponse.json({
+          error: `Failed to create billing charge: ${billingError.message || 'Unknown error'}`
+        }, { status: 500 });
+      }
+
+      if (!recurringCharge?.body?.recurring_application_charge) {
+        console.error('[BILLING] Invalid Shopify response structure');
+        console.error('[BILLING] Full response:', JSON.stringify(recurringCharge?.body, null, 2));
+        return NextResponse.json({
+          error: 'Invalid response from Shopify API'
         }, { status: 500 });
       }
 
       const charge = recurringCharge.body.recurring_application_charge;
+      console.error('[BILLING] Charge created with ID:', charge.id);
+      console.error('[BILLING] Confirmation URL:', charge.confirmation_url);
 
       // Store charge info in database
       try {
