@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getShopifyClient, getGraphQLClient, ShopifyResponse } from '@/lib/shopify';
+import { getShopifyClient, getGraphQLClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 import { sendLowStockAlert, sendOutOfStockAlert } from '@/lib/notifications';
 import crypto from 'crypto';
@@ -68,11 +68,11 @@ export async function POST(req: NextRequest) {
           }
         }
       }`
-    
-    const response = await graphqlClient.query({ data: query });
 
+    // Use the new request method instead of deprecated query method
+    const response = await graphqlClient.request(query);
 
-    const productGID = (response as ShopifyResponse).body?.data.inventoryItem?.variant?.product?.id;
+    const productGID = response?.data?.inventoryItem?.variant?.product?.id;
 
     // Get store settings
     const { data: settings } = await supabaseAdmin
