@@ -252,18 +252,33 @@ export async function POST(req: NextRequest) {
       console.log(`[AUTO-HIDE] Hiding product ${productId} (out of stock)`);
 
       try {
-        // Use the correct API format for updating product status
-        const hideResponse = await client.put({
-          path: `products/${productId}`,
-          data: {
-            product: {
-              id: parseInt(productId),
-              status: 'draft',
-            },
-          },
+        // Use GraphQL mutation to update product status (avoiding REST API deprecation)
+        const productUpdateMutation = `
+          mutation productUpdate($input: ProductInput!) {
+            productUpdate(input: $input) {
+              product {
+                id
+                status
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }`;
+
+        const hideResponse = await graphqlClient.request(productUpdateMutation, {
+          input: {
+            id: productGID,
+            status: 'DRAFT'
+          }
         });
 
-        console.log(`[AUTO-HIDE] Successfully set product ${productId} to draft`, hideResponse.body);
+        if (hideResponse?.data?.productUpdate?.userErrors?.length > 0) {
+          throw new Error(`GraphQL errors: ${JSON.stringify(hideResponse.data.productUpdate.userErrors)}`);
+        }
+
+        console.log(`[AUTO-HIDE] Successfully set product ${productId} to draft`, hideResponse.data?.productUpdate?.product);
 
         await supabaseAdmin
           .from('inventory_tracking')
@@ -304,18 +319,33 @@ export async function POST(req: NextRequest) {
         console.log(`[AUTO-REPUBLISH] Republishing product ${productId} from draft to active`);
 
         try {
-          // Use the correct API format for updating product status
-          const updateResponse = await client.put({
-            path: `products/${productId}`,
-            data: {
-              product: {
-                id: parseInt(productId),
-                status: 'active',
-              },
-            },
+          // Use GraphQL mutation to update product status (avoiding REST API deprecation)
+          const productUpdateMutation = `
+            mutation productUpdate($input: ProductInput!) {
+              productUpdate(input: $input) {
+                product {
+                  id
+                  status
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }`;
+
+          const updateResponse = await graphqlClient.request(productUpdateMutation, {
+            input: {
+              id: productGID,
+              status: 'ACTIVE'
+            }
           });
 
-          console.log(`[AUTO-REPUBLISH] Successfully republished product ${productId}`, updateResponse.body);
+          if (updateResponse?.data?.productUpdate?.userErrors?.length > 0) {
+            throw new Error(`GraphQL errors: ${JSON.stringify(updateResponse.data.productUpdate.userErrors)}`);
+          }
+
+          console.log(`[AUTO-REPUBLISH] Successfully republished product ${productId}`, updateResponse.data?.productUpdate?.product);
 
           // Update the is_hidden flag in our database
           const { error: dbError } = await supabaseAdmin

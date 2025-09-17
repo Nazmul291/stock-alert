@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getShopifyClient } from '@/lib/shopify';
+import { getShopifyClient, getGraphQLClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
@@ -21,34 +21,60 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Store not found' }, { status: 404 });
     }
 
-    const client = await getShopifyClient(shop, store.access_token);
+    const graphqlClient = await getGraphQLClient(shop, store.access_token);
+    const productGID = `gid://shopify/Product/${productId}`;
 
     console.log(`[TEST-REPUBLISH] Testing republish for product ${productId}`);
 
-    // First, get the current product status
-    const getResponse = await client.get({
-      path: `products/${productId}.json`,
-      query: {
-        fields: 'id,title,status'
-      }
+    // First, get the current product status using GraphQL
+    const getProductQuery = `
+      query getProduct($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          status
+        }
+      }`;
+
+    const getResponse = await graphqlClient.request(getProductQuery, {
+      id: productGID
     });
 
-    const currentProduct = getResponse.body.product;
+    const currentProduct = getResponse?.data?.product;
+    if (!currentProduct) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
     console.log(`[TEST-REPUBLISH] Current product status:`, currentProduct);
 
-    // Try to update to active
+    // Try to update to active using GraphQL
     try {
-      const updateResponse = await client.put({
-        path: `products/${productId}`,
-        data: {
-          product: {
-            id: parseInt(productId),
-            status: 'active',
-          },
-        },
+      const productUpdateMutation = `
+        mutation productUpdate($input: ProductInput!) {
+          productUpdate(input: $input) {
+            product {
+              id
+              status
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }`;
+
+      const updateResponse = await graphqlClient.request(productUpdateMutation, {
+        input: {
+          id: productGID,
+          status: 'ACTIVE'
+        }
       });
 
-      console.log(`[TEST-REPUBLISH] Update response:`, updateResponse.body);
+      if (updateResponse?.data?.productUpdate?.userErrors?.length > 0) {
+        throw new Error(`GraphQL errors: ${JSON.stringify(updateResponse.data.productUpdate.userErrors)}`);
+      }
+
+      console.log(`[TEST-REPUBLISH] Update response:`, updateResponse.data?.productUpdate?.product);
 
       // Update database
       await supabaseAdmin
@@ -61,8 +87,8 @@ export async function POST(req: NextRequest) {
         success: true,
         message: 'Product republished successfully',
         previousStatus: currentProduct.status,
-        newStatus: 'active',
-        product: updateResponse.body.product,
+        newStatus: 'ACTIVE',
+        product: updateResponse.data?.productUpdate?.product,
       });
     } catch (error: any) {
       console.error(`[TEST-REPUBLISH] Error:`, error);
