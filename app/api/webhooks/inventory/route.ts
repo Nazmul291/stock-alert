@@ -219,48 +219,102 @@ export async function POST(req: NextRequest) {
     
     // Handle auto-hide for completely out of stock products
     if (totalQuantity === 0 && settings.auto_hide_enabled && !excludeFromAutoHide) {
-      
-      await client.put({
-        path: `products/${productId}`,
-        data: {
-          product: {
-            id: productId,
-            status: 'draft',
+      console.log(`[AUTO-HIDE] Hiding product ${productId} (out of stock)`);
+
+      try {
+        // Use the correct API format for updating product status
+        const hideResponse = await client.put({
+          path: `products/${productId}.json`,
+          data: {
+            product: {
+              id: parseInt(productId),
+              status: 'draft',
+            },
           },
-        },
-      });
-      
-      await supabaseAdmin
-        .from('inventory_tracking')
-        .update({ is_hidden: true })
-        .eq('store_id', store.id)
-        .eq('product_id', productId);
-      
+        });
+
+        console.log(`[AUTO-HIDE] Successfully set product ${productId} to draft`, hideResponse.body);
+
+        await supabaseAdmin
+          .from('inventory_tracking')
+          .update({ is_hidden: true })
+          .eq('store_id', store.id)
+          .eq('product_id', productId);
+
+        console.log(`[AUTO-HIDE] Updated is_hidden flag for product ${productId}`);
+      } catch (error: any) {
+        console.error(`[AUTO-HIDE] Failed to hide product ${productId}:`, error);
+        console.error(`[AUTO-HIDE] Error details:`, {
+          message: error.message,
+          response: error.response?.body,
+          status: error.response?.status,
+        });
+      }
+
       if (!excludeFromAlerts) {
         // Pass product with SKU for notification
         const productWithSku = { ...product, sku: existingTracking?.sku || updateData.sku };
         await sendOutOfStockAlert(store, productWithSku, null, settings);
       }
-    } 
+    }
     // Handle auto-republish when restocked
-    else if (previousQuantity === 0 && totalQuantity > 0 && settings.auto_republish_enabled) {
-      if (existingTracking?.is_hidden) {
-        
-        await client.put({
-          path: `products/${productId}`,
-          data: {
-            product: {
-              id: productId,
-              status: 'active',
+    // ONLY if: previous quantity was 0 AND new quantity is > 0 AND auto-republish is enabled
+    else if (previousQuantity === 0 && totalQuantity > 0 && settings.auto_republish_enabled && !excludeFromAutoHide) {
+      console.log(`[AUTO-REPUBLISH] Product ${productId} restocked: prev=${previousQuantity}, new=${totalQuantity}`);
+
+      // Check if product is currently draft
+      // We check both the is_hidden flag and the actual product status
+      const isCurrentlyHidden = existingTracking?.is_hidden === true;
+      const isProductDraft = product.status === 'draft';
+
+      console.log(`[AUTO-REPUBLISH] Product ${productId} status: is_hidden=${isCurrentlyHidden}, status=${product.status}`);
+
+      // Only republish if the product is actually in draft status
+      if (isCurrentlyHidden || isProductDraft) {
+        console.log(`[AUTO-REPUBLISH] Republishing product ${productId} from draft to active`);
+
+        try {
+          // Use the correct API format for updating product status
+          const updateResponse = await client.put({
+            path: `products/${productId}.json`,
+            data: {
+              product: {
+                id: parseInt(productId),
+                status: 'active',
+              },
             },
-          },
-        });
-        
-        await supabaseAdmin
-          .from('inventory_tracking')
-          .update({ is_hidden: false })
-          .eq('store_id', store.id)
-          .eq('product_id', productId);
+          });
+
+          console.log(`[AUTO-REPUBLISH] Successfully republished product ${productId}`, updateResponse.body);
+
+          // Update the is_hidden flag in our database
+          const { error: dbError } = await supabaseAdmin
+            .from('inventory_tracking')
+            .update({ is_hidden: false })
+            .eq('store_id', store.id)
+            .eq('product_id', productId);
+
+          if (dbError) {
+            console.error(`[AUTO-REPUBLISH] Database update error for product ${productId}:`, dbError);
+          } else {
+            console.log(`[AUTO-REPUBLISH] Updated is_hidden flag to false for product ${productId}`);
+          }
+        } catch (error: any) {
+          console.error(`[AUTO-REPUBLISH] Failed to republish product ${productId}:`, error);
+          console.error(`[AUTO-REPUBLISH] Error details:`, {
+            message: error.message,
+            response: error.response?.body,
+            status: error.response?.status,
+          });
+        }
+      } else {
+        console.log(`[AUTO-REPUBLISH] Product ${productId} is already active, skipping republish`);
+      }
+    }
+    // Log when conditions are not met
+    else if (totalQuantity > 0 && settings.auto_republish_enabled) {
+      if (previousQuantity > 0) {
+        console.log(`[AUTO-REPUBLISH] Product ${productId} skipped: was not out of stock (prev=${previousQuantity})`);
       }
     }
     
