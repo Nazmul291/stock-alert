@@ -16,17 +16,39 @@ export async function POST(req: NextRequest) {
     let plan;
     let bodyText = '';
 
+    // Check content-type header
+    const contentType = req.headers.get('content-type');
+    console.error('[BILLING] Content-Type:', contentType);
+    console.error('[BILLING] Content-Length:', req.headers.get('content-length'));
+
     try {
-      // Clone the request to read the body text for debugging
-      const clonedReq = req.clone();
+      // Try to get the body text first
       try {
+        const clonedReq = req.clone();
         bodyText = await clonedReq.text();
         console.error('[BILLING] Raw body received:', bodyText);
+        console.error('[BILLING] Body length:', bodyText.length);
       } catch (e) {
         console.error('[BILLING] Could not read body text:', e);
       }
 
-      const body = await req.json();
+      // If body is empty, return early with clear error
+      if (!bodyText || bodyText.trim() === '') {
+        console.error('[BILLING] ERROR: Request body is empty');
+        return NextResponse.json({
+          error: 'Request body is empty. Please send a valid JSON body with plan parameter.'
+        }, { status: 400 });
+      }
+
+      // Try to parse JSON
+      let body;
+      try {
+        body = JSON.parse(bodyText);
+      } catch (jsonParseError) {
+        // If initial parsing fails, try getting fresh body from request
+        body = await req.json();
+      }
+
       plan = body.plan;
       console.error('[BILLING] Plan requested:', plan);
     } catch (parseError: any) {
@@ -34,8 +56,15 @@ export async function POST(req: NextRequest) {
       console.error('[BILLING] Failed to parse request body:', parseError);
       console.error('[BILLING] Parse error message:', parseError.message);
       console.error('[BILLING] Body that failed to parse:', bodyText);
+      console.error('[BILLING] Headers:', Object.fromEntries(req.headers.entries()));
+
       return NextResponse.json({
-        error: 'Invalid request body. Please ensure you are sending valid JSON.'
+        error: 'Invalid request body. Please ensure you are sending valid JSON.',
+        debug: {
+          bodyReceived: bodyText,
+          contentType: contentType,
+          errorMessage: parseError.message
+        }
       }, { status: 400 });
     }
 

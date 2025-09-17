@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function middleware(request: NextRequest) {
-  // Minimal middleware - just pass through everything
-  // Authentication will be handled in the pages themselves
+  // Log billing API requests for debugging
+  if (request.nextUrl.pathname === '/api/billing' && request.method === 'POST') {
+    console.log('[MIDDLEWARE] Billing POST request received');
+    console.log('[MIDDLEWARE] Content-Type:', request.headers.get('content-type'));
+    console.log('[MIDDLEWARE] Content-Length:', request.headers.get('content-length'));
+
+    // Ensure the request has proper headers
+    const contentType = request.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error('[MIDDLEWARE] WARNING: Invalid or missing Content-Type header');
+    }
+  }
+
+  // Pass through all requests
   return NextResponse.next();
 }
 

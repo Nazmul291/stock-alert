@@ -27,12 +27,17 @@ export default function BillingContent({
   const handleUpgrade = async () => {
     setUpgrading(true);
     try {
+      const bodyData = { plan: 'pro' };
+      console.log('Sending upgrade request with body:', bodyData);
+
       const response = await fetch('/api/billing', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: JSON.stringify({ plan: 'pro' }),
+        body: JSON.stringify(bodyData),
+        credentials: 'include', // Ensure cookies are sent
       });
 
       let data;
