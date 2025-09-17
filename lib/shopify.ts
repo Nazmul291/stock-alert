@@ -11,7 +11,7 @@ export const shopify = shopifyApi({
   apiSecretKey: process.env.SHOPIFY_API_SECRET || '',
   scopes: (process.env.SHOPIFY_SCOPES || 'read_products,write_products,read_inventory,write_inventory').split(','),
   hostName: (process.env.SHOPIFY_APP_URL || 'https://dev.nazmulcodes.org').replace(/https?:\/\//, ''),
-  apiVersion: ApiVersion.July25,
+  apiVersion: ApiVersion.October24, // Latest stable API version (2024-10)
   isEmbeddedApp: true,
   logger: {
     level: process.env.NODE_ENV === 'development' ? 0 : 3, // Set to 3 (ERROR) to suppress INFO messages

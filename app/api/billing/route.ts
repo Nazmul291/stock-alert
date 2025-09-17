@@ -114,6 +114,9 @@ export async function POST(req: NextRequest) {
       let recurringCharge;
       try {
         console.error('[BILLING] Creating recurring charge with Shopify API');
+        console.error('[BILLING] Using shop:', shop);
+        console.error('[BILLING] Return URL:', `${host}/api/billing/callback?shop=${shop}`);
+
         recurringCharge = await client.post({
           path: 'recurring_application_charges',
           data: {
