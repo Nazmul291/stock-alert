@@ -101,7 +101,7 @@ export default function TermsOfService() {
         <h2 className="text-2xl font-semibold mb-4">11. Contact Information</h2>
         <p className="mb-4">For questions about these terms, contact us at:</p>
         <ul className="space-y-2">
-          <li>Email: support@stockalert.app</li>
+          <li>Email: info@nazmulcodes.org</li>
           <li>Website: https://stock-alert.nazmulcodes.org</li>
         </ul>
       </section>

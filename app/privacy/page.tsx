@@ -93,7 +93,7 @@ export default function PrivacyPolicy() {
         <h2 className="text-2xl font-semibold mb-4">10. Contact Us</h2>
         <p className="mb-4">For privacy concerns or questions, contact us at:</p>
         <ul className="space-y-2">
-          <li>Email: support@stockalert.app</li>
+          <li>Email: info@nazmulcodes.org</li>
           <li>Website: https://stock-alert.nazmulcodes.org</li>
         </ul>
       </section>
