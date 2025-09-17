@@ -250,12 +250,13 @@ export async function POST(req: NextRequest) {
     // Handle auto-hide for completely out of stock products
     if (totalQuantity === 0 && settings.auto_hide_enabled && !excludeFromAutoHide) {
       console.log(`[AUTO-HIDE] Hiding product ${productId} (out of stock)`);
+      console.log(`[AUTO-HIDE] Using productGID: ${productGID}`);
 
       try {
         // Use GraphQL mutation to update product status (avoiding REST API deprecation)
         const productUpdateMutation = `
-          mutation productUpdate($input: ProductInput!) {
-            productUpdate(input: $input) {
+          mutation productUpdate($product: ProductInput!) {
+            productUpdate(product: $product) {
               product {
                 id
                 status
@@ -268,13 +269,16 @@ export async function POST(req: NextRequest) {
           }`;
 
         const hideResponse = await graphqlClient.request(productUpdateMutation, {
-          input: {
+          product: {
             id: productGID,
             status: 'DRAFT'
           }
         });
 
+        console.log(`[AUTO-HIDE] GraphQL Response:`, JSON.stringify(hideResponse, null, 2));
+
         if (hideResponse?.data?.productUpdate?.userErrors?.length > 0) {
+          console.error(`[AUTO-HIDE] GraphQL userErrors:`, hideResponse.data.productUpdate.userErrors);
           throw new Error(`GraphQL errors: ${JSON.stringify(hideResponse.data.productUpdate.userErrors)}`);
         }
 
@@ -321,8 +325,8 @@ export async function POST(req: NextRequest) {
         try {
           // Use GraphQL mutation to update product status (avoiding REST API deprecation)
           const productUpdateMutation = `
-            mutation productUpdate($input: ProductInput!) {
-              productUpdate(input: $input) {
+            mutation productUpdate($product: ProductInput!) {
+              productUpdate(product: $product) {
                 product {
                   id
                   status
@@ -335,7 +339,7 @@ export async function POST(req: NextRequest) {
             }`;
 
           const updateResponse = await graphqlClient.request(productUpdateMutation, {
-            input: {
+            product: {
               id: productGID,
               status: 'ACTIVE'
             }

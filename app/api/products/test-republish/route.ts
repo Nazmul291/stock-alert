@@ -50,8 +50,8 @@ export async function POST(req: NextRequest) {
     // Try to update to active using GraphQL
     try {
       const productUpdateMutation = `
-        mutation productUpdate($input: ProductInput!) {
-          productUpdate(input: $input) {
+        mutation productUpdate($product: ProductInput!) {
+          productUpdate(product: $product) {
             product {
               id
               status
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         }`;
 
       const updateResponse = await graphqlClient.request(productUpdateMutation, {
-        input: {
+        product: {
           id: productGID,
           status: 'ACTIVE'
         }
