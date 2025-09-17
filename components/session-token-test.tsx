@@ -9,6 +9,8 @@ export default function SessionTokenTest() {
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [apiCalls, setApiCalls] = useState<number>(0);
+  const [lastCall, setLastCall] = useState<string>('');
 
   useEffect(() => {
     const testToken = async () => {
@@ -21,27 +23,49 @@ export default function SessionTokenTest() {
         const sessionToken = await getSessionToken(appBridge);
         if (sessionToken) {
           setToken(sessionToken);
-          console.log('Session token retrieved:', sessionToken.substring(0, 20) + '...');
+          console.log('✅ Session token retrieved:', sessionToken.substring(0, 20) + '...');
+
+          // Decode token to show shop
+          try {
+            const parts = sessionToken.split('.');
+            if (parts.length === 3) {
+              const decoded = JSON.parse(atob(parts[1]));
+              console.log('✅ Token decoded - Shop:', decoded.dest);
+            }
+          } catch (e) {
+            console.error('Failed to decode token');
+          }
 
           // Test API call with session token
-          const response = await fetch('/api/auth/verify', {
+          const response = await fetch('/api/shopify-check', {
+            method: 'POST',
             headers: {
-              'Authorization': `Bearer ${sessionToken}`
-            }
+              'Authorization': `Bearer ${sessionToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ test: true }),
           });
 
-          console.log('API call with session token status:', response.status);
+          console.log('✅ API call with session token - Status:', response.status);
+          setApiCalls(prev => prev + 1);
+          setLastCall(new Date().toLocaleTimeString());
         } else {
           setError('No session token available');
+          console.error('❌ No session token available');
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
+        console.error('❌ Session token error:', err);
       } finally {
         setIsLoading(false);
       }
     };
 
     testToken();
+
+    // Re-test every 30 seconds
+    const interval = setInterval(testToken, 30000);
+    return () => clearInterval(interval);
   }, [appBridge, isReady]);
 
   // Only render in development
@@ -49,23 +73,57 @@ export default function SessionTokenTest() {
     return null;
   }
 
+  const params = new URLSearchParams(window.location.search);
+  const shop = params.get('shop');
+  const host = params.get('host');
+
   return (
     <div style={{
       position: 'fixed',
       bottom: 10,
       right: 10,
       padding: 10,
-      background: '#f0f0f0',
-      border: '1px solid #ccc',
+      background: token ? '#d4f4dd' : error ? '#ffd4d4' : '#f0f0f0',
+      border: '1px solid',
+      borderColor: token ? '#4caf50' : error ? '#f44336' : '#ccc',
       borderRadius: 5,
-      fontSize: 12,
-      maxWidth: 300,
-      zIndex: 9999
+      fontSize: 11,
+      maxWidth: 320,
+      zIndex: 9999,
+      fontFamily: 'monospace'
     }}>
-      <strong>Session Token Debug:</strong>
-      <div>App Bridge Ready: {isReady ? '✅' : '❌'}</div>
-      <div>Token: {token ? '✅ Retrieved' : isLoading ? '⏳ Loading...' : '❌ Not retrieved'}</div>
-      {error && <div style={{ color: 'red' }}>Error: {error}</div>}
+      <div style={{ fontWeight: 'bold', marginBottom: 5, fontSize: 12 }}>
+        🔐 Session Token Monitor
+      </div>
+      <div>Shop: {shop || '❌ Missing'}</div>
+      <div>Host: {host ? '✅ Present' : '❌ Missing'}</div>
+      <div>App Bridge: {isReady ? '✅ Ready' : '❌ Not Ready'}</div>
+      <div>Session Token: {token ? '✅ Active' : isLoading ? '⏳ Loading...' : '❌ None'}</div>
+      {apiCalls > 0 && (
+        <>
+          <div>API Calls Made: {apiCalls}</div>
+          <div>Last Call: {lastCall}</div>
+        </>
+      )}
+      {error && (
+        <div style={{ color: '#d32f2f', marginTop: 5, fontSize: 10 }}>
+          Error: {error}
+        </div>
+      )}
+      <div style={{ marginTop: 5, fontSize: 10, color: '#666' }}>
+        Auto-refresh every 30s
+      </div>
+      <a
+        href="/debug-session"
+        style={{
+          display: 'inline-block',
+          marginTop: 5,
+          color: '#1976d2',
+          textDecoration: 'underline'
+        }}
+      >
+        Open Full Debugger →
+      </a>
     </div>
   );
 }
