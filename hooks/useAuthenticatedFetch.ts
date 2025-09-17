@@ -17,19 +17,12 @@ export function useAuthenticatedFetch() {
         const urlToken = getSessionTokenFromURL();
         if (urlToken) {
           headers.set('Authorization', `Bearer ${urlToken}`);
-          console.log('✅ Session token from URL added to request');
         } else if (isReady && appBridge) {
           // Fall back to App Bridge if no URL token
           const sessionToken = await getSessionToken(appBridge);
           if (sessionToken) {
             headers.set('Authorization', `Bearer ${sessionToken}`);
-            console.log('✅ Session token from App Bridge added to request');
-          } else {
-            console.log('⚠️ No session token available from any source');
           }
-        } else {
-          // No URL token and App Bridge not ready
-          console.log('⚠️ No URL token and App Bridge not ready');
         }
       } catch (error) {
         console.warn('Failed to get session token:', error);
