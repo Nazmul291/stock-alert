@@ -1,3 +1,7 @@
+// This webhook handler processes inventory_levels/update webhooks
+// It triggers when inventory quantities change (not product status changes)
+// For auto-hide/republish to work, ensure inventory_levels/update webhook is registered
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getShopifyClient, getGraphQLClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
@@ -42,11 +46,33 @@ export async function POST(req: NextRequest) {
     const shop = req.headers.get('x-shopify-shop-domain');
 
     // Log the raw webhook data to understand the payload structure
+    const webhookTopic = req.headers.get('x-shopify-topic');
     console.log(`[WEBHOOK] Raw webhook data:`, JSON.stringify(data, null, 2));
-    console.log(`[WEBHOOK] Webhook topic:`, req.headers.get('x-shopify-topic'));
+    console.log(`[WEBHOOK] Webhook topic:`, webhookTopic);
 
     if (!shop) {
       return NextResponse.json({ error: 'Missing shop domain' }, { status: 400 });
+    }
+
+    // Handle products/update webhooks separately
+    if (webhookTopic === 'products/update') {
+      console.log(`[WEBHOOK] Handling products/update webhook for product ${data.id}`);
+      // For products/update webhooks, we don't need to process inventory changes
+      // These are triggered when product status changes (draft -> active)
+      return NextResponse.json({
+        success: true,
+        message: 'Product update webhook received',
+        product_id: data.id
+      }, { status: 200 });
+    }
+
+    // Only process inventory_levels/update webhooks
+    if (webhookTopic !== 'inventory_levels/update') {
+      console.log(`[WEBHOOK] Ignoring webhook topic: ${webhookTopic}`);
+      return NextResponse.json({
+        success: true,
+        message: `Webhook topic ${webhookTopic} not handled by this endpoint`
+      }, { status: 200 });
     }
     
     // Get store from database
@@ -61,8 +87,9 @@ export async function POST(req: NextRequest) {
     }
     const graphqlClient = await getGraphQLClient(shop, store.access_token)
 
-    // Check for inventory_item_id in different possible locations
-    const inventoryItemId = data.inventory_item_id || data.id || data.inventory_item?.id;
+    // For inventory_levels/update webhook, the structure is different
+    // Expected: { inventory_item_id: ..., location_id: ..., available: ... }
+    const inventoryItemId = data.inventory_item_id;
 
     if (!inventoryItemId) {
       console.error(`[WEBHOOK] No inventory item ID found in webhook data`);
