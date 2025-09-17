@@ -45,11 +45,12 @@ const nextConfig: NextConfig = {
     ],
   },
   
-  // Optimize production builds
+  // Temporarily disable console removal for debugging
   compiler: {
-    removeConsole: process.env.NODE_ENV === 'production' ? {
-      exclude: ['error', 'warn'], // Keep console.error and console.warn in production
-    } : false,
+    // removeConsole: process.env.NODE_ENV === 'production' ? {
+    //   exclude: ['error', 'warn'], // Keep console.error and console.warn in production
+    // } : false,
+    removeConsole: false, // Temporarily disabled for debugging
   },
 };
 
