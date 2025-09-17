@@ -70,9 +70,12 @@ export async function POST(req: NextRequest) {
       }`
 
     // Use the new request method instead of deprecated query method
+    console.log(`[WEBHOOK] Fetching product for inventory_item_id: ${data.inventory_item_id}`);
     const response = await graphqlClient.request(query);
+    console.log(`[WEBHOOK] GraphQL inventory response:`, JSON.stringify(response, null, 2));
 
     const productGID = response?.data?.inventoryItem?.variant?.product?.id;
+    console.log(`[WEBHOOK] Extracted productGID: ${productGID}`);
 
     // Get store settings
     const { data: settings } = await supabaseAdmin
@@ -147,8 +150,16 @@ export async function POST(req: NextRequest) {
     }
     
     if (!productId || !product) {
-      return NextResponse.json({ 
-        warning: 'Could not determine product for inventory update' 
+      console.error(`[WEBHOOK] Missing product data: productId=${productId}, product=${!!product}, productGID=${productGID}`);
+      return NextResponse.json({
+        warning: 'Could not determine product for inventory update'
+      }, { status: 200 });
+    }
+
+    if (!productGID) {
+      console.error(`[WEBHOOK] Missing productGID for product ${productId}`);
+      return NextResponse.json({
+        warning: 'Could not determine product GID for inventory update'
       }, { status: 200 });
     }
     
@@ -310,6 +321,8 @@ export async function POST(req: NextRequest) {
     // ONLY if: previous quantity was 0 AND new quantity is > 0 AND auto-republish is enabled
     else if (previousQuantity === 0 && totalQuantity > 0 && settings.auto_republish_enabled && !excludeFromAutoHide) {
       console.log(`[AUTO-REPUBLISH] Product ${productId} restocked: prev=${previousQuantity}, new=${totalQuantity}`);
+      console.log(`[AUTO-REPUBLISH] Settings: auto_republish_enabled=${settings.auto_republish_enabled}, excludeFromAutoHide=${excludeFromAutoHide}`);
+      console.log(`[AUTO-REPUBLISH] ProductGID being used: ${productGID}`);
 
       // Check if product is currently draft
       // We check both the is_hidden flag and the actual product status
@@ -345,7 +358,10 @@ export async function POST(req: NextRequest) {
             }
           });
 
+          console.log(`[AUTO-REPUBLISH] GraphQL Response:`, JSON.stringify(updateResponse, null, 2));
+
           if (updateResponse?.data?.productUpdate?.userErrors?.length > 0) {
+            console.error(`[AUTO-REPUBLISH] GraphQL userErrors:`, updateResponse.data.productUpdate.userErrors);
             throw new Error(`GraphQL errors: ${JSON.stringify(updateResponse.data.productUpdate.userErrors)}`);
           }
 
