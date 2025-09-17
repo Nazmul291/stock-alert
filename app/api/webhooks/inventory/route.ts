@@ -11,7 +11,6 @@ import crypto from 'crypto';
 async function verifyWebhook(req: NextRequest, body: string): Promise<boolean> {
   const hmacHeader = req.headers.get('x-shopify-hmac-sha256');
   if (!hmacHeader) {
-    console.error('[WEBHOOK] No HMAC header found');
     return false;
   }
 
@@ -24,10 +23,6 @@ async function verifyWebhook(req: NextRequest, body: string): Promise<boolean> {
     .digest('base64');
 
   const isValid = hash === hmacHeader;
-  if (!isValid) {
-    console.error('[WEBHOOK] HMAC verification failed');
-  }
-
   return isValid;
 }
 
@@ -45,10 +40,8 @@ export async function POST(req: NextRequest) {
     const data = JSON.parse(body);
     const shop = req.headers.get('x-shopify-shop-domain');
 
-    // Log the raw webhook data to understand the payload structure
+    // Get the webhook topic
     const webhookTopic = req.headers.get('x-shopify-topic');
-    console.log(`[WEBHOOK] Raw webhook data:`, JSON.stringify(data, null, 2));
-    console.log(`[WEBHOOK] Webhook topic:`, webhookTopic);
 
     if (!shop) {
       return NextResponse.json({ error: 'Missing shop domain' }, { status: 400 });
@@ -56,7 +49,6 @@ export async function POST(req: NextRequest) {
 
     // Handle products/update webhooks separately
     if (webhookTopic === 'products/update') {
-      console.log(`[WEBHOOK] Handling products/update webhook for product ${data.id}`);
       // For products/update webhooks, we don't need to process inventory changes
       // These are triggered when product status changes (draft -> active)
       return NextResponse.json({
@@ -68,7 +60,6 @@ export async function POST(req: NextRequest) {
 
     // Only process inventory_levels/update webhooks
     if (webhookTopic !== 'inventory_levels/update') {
-      console.log(`[WEBHOOK] Ignoring webhook topic: ${webhookTopic}`);
       return NextResponse.json({
         success: true,
         message: `Webhook topic ${webhookTopic} not handled by this endpoint`
@@ -92,7 +83,6 @@ export async function POST(req: NextRequest) {
     const inventoryItemId = data.inventory_item_id;
 
     if (!inventoryItemId) {
-      console.error(`[WEBHOOK] No inventory item ID found in webhook data`);
       return NextResponse.json({
         warning: 'No inventory item ID in webhook payload',
         data: data
@@ -111,12 +101,12 @@ export async function POST(req: NextRequest) {
       }`
 
     // Use the new request method instead of deprecated query method
-    console.log(`[WEBHOOK] Fetching product for inventory_item_id: ${inventoryItemId}`);
+    
     const response = await graphqlClient.request(query);
-    console.log(`[WEBHOOK] GraphQL inventory response:`, JSON.stringify(response, null, 2));
+    
 
     const productGID = response?.data?.inventoryItem?.variant?.product?.id;
-    console.log(`[WEBHOOK] Extracted productGID: ${productGID}`);
+    
 
     // Get store settings
     const { data: settings } = await supabaseAdmin
@@ -167,14 +157,14 @@ export async function POST(req: NextRequest) {
           }
         }`;
 
-      console.log(`[WEBHOOK] Fetching product with GraphQL, productGID: ${productGID}`);
+      
       const productResponse = await graphqlClient.request(productQuery, {
         variables: {
           id: productGID
         }
       });
 
-      console.log(`[WEBHOOK] Product GraphQL response:`, JSON.stringify(productResponse, null, 2));
+      
 
       if (productResponse?.data?.product) {
         // Convert GraphQL response to REST format for compatibility
@@ -190,29 +180,24 @@ export async function POST(req: NextRequest) {
             inventory_quantity: edge.node.inventoryQuantity || 0
           }))
         };
-        console.log(`[WEBHOOK] Successfully converted product data for product ${productId}`);
+        
       } else {
-        console.error(`[WEBHOOK] No product data in GraphQL response for ${productGID}`);
+        
       }
 
     } catch (apiError: any) {
-      console.error(`[WEBHOOK] Error fetching product ${productGID}:`, apiError);
-      console.error(`[WEBHOOK] Error details:`, {
-        message: apiError.message,
-        response: apiError.response,
-        stack: apiError.stack
-      });
+      // Error caught but not logged in production
     }
     
     if (!productId || !product) {
-      console.error(`[WEBHOOK] Missing product data: productId=${productId}, product=${!!product}, productGID=${productGID}`);
+      
       return NextResponse.json({
         warning: 'Could not determine product for inventory update'
       }, { status: 200 });
     }
 
     if (!productGID) {
-      console.error(`[WEBHOOK] Missing productGID for product ${productId}`);
+      
       return NextResponse.json({
         warning: 'Could not determine product GID for inventory update'
       }, { status: 200 });
@@ -315,8 +300,8 @@ export async function POST(req: NextRequest) {
     
     // Handle auto-hide for completely out of stock products
     if (totalQuantity === 0 && settings.auto_hide_enabled && !excludeFromAutoHide) {
-      console.log(`[AUTO-HIDE] Hiding product ${productId} (out of stock)`);
-      console.log(`[AUTO-HIDE] Using productGID: ${productGID}`);
+      
+      
 
       try {
         // Use GraphQL mutation to update product status (avoiding REST API deprecation)
@@ -343,14 +328,14 @@ export async function POST(req: NextRequest) {
           }
         });
 
-        console.log(`[AUTO-HIDE] GraphQL Response:`, JSON.stringify(hideResponse, null, 2));
+        
 
         if (hideResponse?.data?.productUpdate?.userErrors?.length > 0) {
-          console.error(`[AUTO-HIDE] GraphQL userErrors:`, hideResponse.data.productUpdate.userErrors);
+          
           throw new Error(`GraphQL errors: ${JSON.stringify(hideResponse.data.productUpdate.userErrors)}`);
         }
 
-        console.log(`[AUTO-HIDE] Successfully set product ${productId} to draft`, hideResponse.data?.productUpdate?.product);
+        
 
         await supabaseAdmin
           .from('inventory_tracking')
@@ -358,14 +343,9 @@ export async function POST(req: NextRequest) {
           .eq('store_id', store.id)
           .eq('product_id', productId);
 
-        console.log(`[AUTO-HIDE] Updated is_hidden flag for product ${productId}`);
+        
       } catch (error: any) {
-        console.error(`[AUTO-HIDE] Failed to hide product ${productId}:`, error);
-        console.error(`[AUTO-HIDE] Error details:`, {
-          message: error.message,
-          response: error.response?.body,
-          status: error.response?.status,
-        });
+        // Error caught but not logged in production
       }
 
       if (!excludeFromAlerts) {
@@ -377,20 +357,20 @@ export async function POST(req: NextRequest) {
     // Handle auto-republish when restocked
     // ONLY if: previous quantity was 0 AND new quantity is > 0 AND auto-republish is enabled
     else if (previousQuantity === 0 && totalQuantity > 0 && settings.auto_republish_enabled && !excludeFromAutoHide) {
-      console.log(`[AUTO-REPUBLISH] Product ${productId} restocked: prev=${previousQuantity}, new=${totalQuantity}`);
-      console.log(`[AUTO-REPUBLISH] Settings: auto_republish_enabled=${settings.auto_republish_enabled}, excludeFromAutoHide=${excludeFromAutoHide}`);
-      console.log(`[AUTO-REPUBLISH] ProductGID being used: ${productGID}`);
+      
+      
+      
 
       // Check if product is currently draft
       // We check both the is_hidden flag and the actual product status
       const isCurrentlyHidden = existingTracking?.is_hidden === true;
       const isProductDraft = product.status === 'draft';
 
-      console.log(`[AUTO-REPUBLISH] Product ${productId} status: is_hidden=${isCurrentlyHidden}, status=${product.status}`);
+      
 
       // Only republish if the product is actually in draft status
       if (isCurrentlyHidden || isProductDraft) {
-        console.log(`[AUTO-REPUBLISH] Republishing product ${productId} from draft to active`);
+        
 
         try {
           // Use GraphQL mutation to update product status (avoiding REST API deprecation)
@@ -417,14 +397,14 @@ export async function POST(req: NextRequest) {
             }
           });
 
-          console.log(`[AUTO-REPUBLISH] GraphQL Response:`, JSON.stringify(updateResponse, null, 2));
+          
 
           if (updateResponse?.data?.productUpdate?.userErrors?.length > 0) {
-            console.error(`[AUTO-REPUBLISH] GraphQL userErrors:`, updateResponse.data.productUpdate.userErrors);
+            
             throw new Error(`GraphQL errors: ${JSON.stringify(updateResponse.data.productUpdate.userErrors)}`);
           }
 
-          console.log(`[AUTO-REPUBLISH] Successfully republished product ${productId}`, updateResponse.data?.productUpdate?.product);
+          
 
           // Update the is_hidden flag in our database
           const { error: dbError } = await supabaseAdmin
@@ -434,26 +414,21 @@ export async function POST(req: NextRequest) {
             .eq('product_id', productId);
 
           if (dbError) {
-            console.error(`[AUTO-REPUBLISH] Database update error for product ${productId}:`, dbError);
+            
           } else {
-            console.log(`[AUTO-REPUBLISH] Updated is_hidden flag to false for product ${productId}`);
+            
           }
         } catch (error: any) {
-          console.error(`[AUTO-REPUBLISH] Failed to republish product ${productId}:`, error);
-          console.error(`[AUTO-REPUBLISH] Error details:`, {
-            message: error.message,
-            response: error.response?.body,
-            status: error.response?.status,
-          });
+          // Error caught but not logged in production
         }
       } else {
-        console.log(`[AUTO-REPUBLISH] Product ${productId} is already active, skipping republish`);
+        
       }
     }
     // Log when conditions are not met
     else if (totalQuantity > 0 && settings.auto_republish_enabled) {
       if (previousQuantity > 0) {
-        console.log(`[AUTO-REPUBLISH] Product ${productId} skipped: was not out of stock (prev=${previousQuantity})`);
+        
       }
     }
     

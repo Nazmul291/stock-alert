@@ -25,7 +25,6 @@ export function useAuthenticatedFetch() {
           }
         }
       } catch (error) {
-        console.warn('Failed to get session token:', error);
         // Continue without session token
       }
 

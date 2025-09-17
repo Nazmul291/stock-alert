@@ -47,7 +47,6 @@ export default function BillingContent({
       try {
         data = await response.json();
       } catch (jsonError) {
-        console.error('Failed to parse response:', jsonError);
         alert('Failed to create billing charge: Invalid response from server');
         setUpgrading(false);
         return;
@@ -75,7 +74,6 @@ export default function BillingContent({
         setUpgrading(false);
       }
     } catch (error) {
-      console.error('Upgrade error:', error);
       alert(`Failed to upgrade: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setUpgrading(false);
     }
