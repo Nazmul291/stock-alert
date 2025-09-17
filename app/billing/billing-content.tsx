@@ -35,7 +35,15 @@ export default function BillingContent({
         body: JSON.stringify({ plan: 'pro' }),
       });
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('Failed to parse response:', jsonError);
+        alert('Failed to create billing charge: Invalid response from server');
+        setUpgrading(false);
+        return;
+      }
       
       if (data.confirmation_url) {
         // Real charge - redirect to Shopify confirmation

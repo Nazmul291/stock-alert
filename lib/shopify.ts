@@ -14,7 +14,12 @@ export const shopify = shopifyApi({
   apiVersion: ApiVersion.July25,
   isEmbeddedApp: true,
   logger: {
-    level: process.env.NODE_ENV === 'development' ? 0 : 2,
+    level: process.env.NODE_ENV === 'development' ? 0 : 3, // Set to 3 (ERROR) to suppress INFO messages
+  },
+  future: {
+    lineItemBilling: false, // Explicitly set to false to suppress the warning
+    customerAddressDefaultFix: false,
+    unstable_managedPricingSupport: false,
   },
 });
 
