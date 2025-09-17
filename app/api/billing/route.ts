@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   try {
     const { plan } = await req.json();
     const sessionToken = req.cookies.get('shopify-session')?.value;
-    const host = req.nextUrl.searchParams.get('host') || req.headers.get('shopify-app-host');
+    const host = process.env.NEXT_PUBLIC_HOST;
     
     
     if (!sessionToken) {
@@ -34,6 +34,10 @@ export async function POST(req: NextRequest) {
 
     const client = await getShopifyClient(shop, accessToken);
 
+    console.log('NEXT_PUBLIC_HOST: ', process.env.NEXT_PUBLIC_HOST);
+    console.log('shop: ', shop);
+    console.log('host: ', host);
+
     if (plan === 'pro') {
       // Create recurring charge for Pro plan
       let recurringCharge;
@@ -42,10 +46,10 @@ export async function POST(req: NextRequest) {
           path: 'recurring_application_charges',
           data: {
             recurring_application_charge: {
-              name: 'Stock Alert Pro (Test)',
+              name: 'Stock Alert Pro',
               price: 9.99,
               return_url: `${process.env.NEXT_PUBLIC_HOST}/api/billing/callback?shop=${shop}${host ? `&host=${host}` : ''}`,
-              test: true, // ALWAYS use test charges for now
+              test: true,
               trial_days: 7,
               capped_amount: 9.99,
               terms: 'Pro features including Slack notifications, per-product thresholds, and priority support',
