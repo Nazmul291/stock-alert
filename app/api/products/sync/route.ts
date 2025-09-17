@@ -4,11 +4,11 @@ import { PLAN_LIMITS } from '@/lib/plan-limits';
 
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const shop = searchParams.get('shop');
+    // Get shop from session token (added by middleware) or query param (for backward compatibility)
+    const shop = req.headers.get('x-shopify-shop') || req.nextUrl.searchParams.get('shop');
 
     if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+      return NextResponse.json({ error: 'Shop not identified' }, { status: 400 });
     }
 
     // Get store from database with plan information

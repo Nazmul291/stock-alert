@@ -1,20 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSessionTokenFromRequest } from '@/lib/session-token';
 
 export async function middleware(request: NextRequest) {
-  // Log billing API requests for debugging
-  if (request.nextUrl.pathname === '/api/billing' && request.method === 'POST') {
-    console.log('[MIDDLEWARE] Billing POST request received');
-    console.log('[MIDDLEWARE] Content-Type:', request.headers.get('content-type'));
-    console.log('[MIDDLEWARE] Content-Length:', request.headers.get('content-length'));
+  // Skip authentication for public routes
+  const publicPaths = [
+    '/auth',
+    '/api/auth',
+    '/api/webhooks',
+    '/privacy',
+    '/terms',
+    '/favicon.ico'
+  ];
 
-    // Ensure the request has proper headers
-    const contentType = request.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      console.error('[MIDDLEWARE] WARNING: Invalid or missing Content-Type header');
-    }
+  const isPublicPath = publicPaths.some(path =>
+    request.nextUrl.pathname.startsWith(path)
+  );
+
+  // Skip authentication for webhook routes (they use HMAC verification)
+  if (isPublicPath) {
+    return NextResponse.next();
   }
 
-  // Pass through all requests
+  // For API routes, verify session token
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    const sessionToken = await getSessionTokenFromRequest(request);
+
+    if (!sessionToken) {
+      // Allow requests with shop parameter for OAuth flow
+      const shop = request.nextUrl.searchParams.get('shop');
+      if (shop) {
+        return NextResponse.next();
+      }
+
+      return NextResponse.json(
+        { error: 'Unauthorized - Invalid session token' },
+        { status: 401 }
+      );
+    }
+
+    // Add shop to headers for downstream use
+    const requestHeaders = new Headers(request.headers);
+    const destUrl = new URL(sessionToken.dest);
+    requestHeaders.set('x-shopify-shop', destUrl.hostname);
+    requestHeaders.set('x-shopify-user-id', sessionToken.sub);
+
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
+  }
+
+  // Pass through all other requests
   return NextResponse.next();
 }
 

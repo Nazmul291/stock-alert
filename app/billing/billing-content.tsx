@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 import {
   Page,
   Layout,
@@ -17,12 +18,13 @@ interface BillingContentProps {
   searchParams: { shop?: string; host?: string };
 }
 
-export default function BillingContent({ 
-  store, 
-  searchParams 
+export default function BillingContent({
+  store,
+  searchParams
 }: BillingContentProps) {
   const router = useRouter();
   const [upgrading, setUpgrading] = useState(false);
+  const authenticatedFetch = useAuthenticatedFetch();
 
   const handleUpgrade = async () => {
     setUpgrading(true);
@@ -37,14 +39,9 @@ export default function BillingContent({
 
       const apiEndpoint = isDevelopment ? '/api/billing/test' : '/api/billing';
 
-      const response = await fetch(apiEndpoint, {
+      const response = await authenticatedFetch(apiEndpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
         body: JSON.stringify(bodyData),
-        credentials: 'include', // Ensure cookies are sent
       });
 
       let data;
@@ -86,11 +83,8 @@ export default function BillingContent({
   const handleDowngrade = async () => {
     setUpgrading(true);
     try {
-      const response = await fetch('/api/billing', {
+      const response = await authenticatedFetch('/api/billing', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ plan: 'free' }),
       });
 
