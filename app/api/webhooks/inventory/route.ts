@@ -40,8 +40,11 @@ export async function POST(req: NextRequest) {
 
     const data = JSON.parse(body);
     const shop = req.headers.get('x-shopify-shop-domain');
-    
-    
+
+    // Log the raw webhook data to understand the payload structure
+    console.log(`[WEBHOOK] Raw webhook data:`, JSON.stringify(data, null, 2));
+    console.log(`[WEBHOOK] Webhook topic:`, req.headers.get('x-shopify-topic'));
+
     if (!shop) {
       return NextResponse.json({ error: 'Missing shop domain' }, { status: 400 });
     }
@@ -58,9 +61,20 @@ export async function POST(req: NextRequest) {
     }
     const graphqlClient = await getGraphQLClient(shop, store.access_token)
 
+    // Check for inventory_item_id in different possible locations
+    const inventoryItemId = data.inventory_item_id || data.id || data.inventory_item?.id;
+
+    if (!inventoryItemId) {
+      console.error(`[WEBHOOK] No inventory item ID found in webhook data`);
+      return NextResponse.json({
+        warning: 'No inventory item ID in webhook payload',
+        data: data
+      }, { status: 200 });
+    }
+
     const query = `
       query {
-        inventoryItem(id: "gid://shopify/InventoryItem/${data.inventory_item_id}") {
+        inventoryItem(id: "gid://shopify/InventoryItem/${inventoryItemId}") {
           variant {
             product {
               id
@@ -70,7 +84,7 @@ export async function POST(req: NextRequest) {
       }`
 
     // Use the new request method instead of deprecated query method
-    console.log(`[WEBHOOK] Fetching product for inventory_item_id: ${data.inventory_item_id}`);
+    console.log(`[WEBHOOK] Fetching product for inventory_item_id: ${inventoryItemId}`);
     const response = await graphqlClient.request(query);
     console.log(`[WEBHOOK] GraphQL inventory response:`, JSON.stringify(response, null, 2));
 
