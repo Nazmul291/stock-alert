@@ -3,47 +3,72 @@ import { verifySessionToken, getShopifyClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
+  console.error('[BILLING] Request received at:', new Date().toISOString());
 
   try {
     // Parse request body with proper error handling for production environments
     let plan;
+    let bodyText = '';
+
     try {
+      // Clone the request to read the body text for debugging
+      const clonedReq = req.clone();
+      try {
+        bodyText = await clonedReq.text();
+        console.error('[BILLING] Raw body received:', bodyText);
+      } catch (e) {
+        console.error('[BILLING] Could not read body text:', e);
+      }
+
       const body = await req.json();
       plan = body.plan;
-    } catch (parseError) {
+      console.error('[BILLING] Plan requested:', plan);
+    } catch (parseError: any) {
       // This catches "Unexpected end of JSON input" errors when body is empty/malformed
-      console.error('Failed to parse request body:', parseError);
+      console.error('[BILLING] Failed to parse request body:', parseError);
+      console.error('[BILLING] Parse error message:', parseError.message);
+      console.error('[BILLING] Body that failed to parse:', bodyText);
       return NextResponse.json({
         error: 'Invalid request body. Please ensure you are sending valid JSON.'
       }, { status: 400 });
     }
 
     if (!plan) {
+      console.error('[BILLING] No plan parameter provided');
       return NextResponse.json({
         error: 'Plan parameter is required'
       }, { status: 400 });
     }
+
     const sessionToken = req.cookies.get('shopify-session')?.value;
+    console.error('[BILLING] Session token exists:', !!sessionToken);
+
     // Ensure NEXT_PUBLIC_HOST is set in production environment (required for Shopify redirect URLs)
     const host = process.env.NEXT_PUBLIC_HOST;
+    console.error('[BILLING] NEXT_PUBLIC_HOST:', host);
 
     if (!host) {
-      console.error('NEXT_PUBLIC_HOST is not set in environment variables');
+      console.error('[BILLING] ERROR: NEXT_PUBLIC_HOST is not set in environment variables');
       return NextResponse.json({
         error: 'Server configuration error: NEXT_PUBLIC_HOST environment variable is missing'
       }, { status: 500 });
     }
 
     if (!sessionToken) {
+      console.error('[BILLING] ERROR: No session token found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const session = verifySessionToken(sessionToken);
+    console.error('[BILLING] Session verified:', !!session);
+
     if (!session) {
+      console.error('[BILLING] ERROR: Invalid session token');
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
     const { shop, accessToken } = session;
+    console.error('[BILLING] Shop:', shop);
 
     // Get store from database with proper error handling
     let store;
@@ -182,10 +207,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
   } catch (error: any) {
     // Comprehensive error logging for debugging production issues
-    console.error('Billing route error:', error);
-    console.error('Error stack:', error.stack);
+    console.error('[BILLING] FATAL ERROR:', error);
+    console.error('[BILLING] Error message:', error.message);
+    console.error('[BILLING] Error stack:', error.stack);
+    console.error('[BILLING] Error name:', error.name);
+    console.error('[BILLING] Full error object:', JSON.stringify(error, null, 2));
+
     return NextResponse.json({
-      error: `Internal server error: ${error.message || 'Unknown error occurred'}`
+      error: `Internal server error: ${error.message || 'Unknown error occurred'}`,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     }, { status: 500 });
   }
 }
