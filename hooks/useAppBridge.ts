@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 
 interface ShopifyAppBridge {
   createApp: (config: { apiKey: string; host: string }) => any;
@@ -17,10 +16,11 @@ declare global {
 export function useAppBridge() {
   const [appBridge, setAppBridge] = useState<any>(null);
   const [isReady, setIsReady] = useState(false);
-  const searchParams = useSearchParams();
 
   useEffect(() => {
-    const host = searchParams.get('host');
+    // Get host from URL params
+    const params = new URLSearchParams(window.location.search);
+    const host = params.get('host');
     const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_API_KEY;
 
     if (!host || !apiKey) {
@@ -45,7 +45,7 @@ export function useAppBridge() {
     };
 
     initAppBridge();
-  }, [searchParams]);
+  }, []);
 
   return { appBridge, isReady };
 }

@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { PLAN_LIMITS } from '@/lib/plan-limits';
+import { getSessionTokenFromRequest, getShopFromToken } from '@/lib/session-token';
 
 export async function GET(req: NextRequest) {
   try {
-    // Get shop from session token (added by middleware) or query param (for backward compatibility)
-    const shop = req.headers.get('x-shopify-shop') || req.nextUrl.searchParams.get('shop');
+    // Try to get shop from session token first
+    let shop: string | null = null;
+    const sessionToken = await getSessionTokenFromRequest(req);
+    if (sessionToken) {
+      shop = getShopFromToken(sessionToken);
+    } else {
+      // Fall back to query param for backward compatibility
+      shop = req.nextUrl.searchParams.get('shop');
+    }
 
     if (!shop) {
       return NextResponse.json({ error: 'Shop not identified' }, { status: 400 });

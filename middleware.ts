@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionTokenFromRequest } from '@/lib/session-token';
 
 export async function middleware(request: NextRequest) {
   // Skip authentication for public routes
@@ -21,34 +20,27 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // For API routes, verify session token
+  // For API routes, pass the authorization header through
+  // Session token verification will be done in the API routes themselves
   if (request.nextUrl.pathname.startsWith('/api/')) {
-    const sessionToken = await getSessionTokenFromRequest(request);
+    const authHeader = request.headers.get('authorization');
 
-    if (!sessionToken) {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       // Allow requests with shop parameter for OAuth flow
       const shop = request.nextUrl.searchParams.get('shop');
       if (shop) {
         return NextResponse.next();
       }
 
+      // For embedded app requests, require session token
       return NextResponse.json(
-        { error: 'Unauthorized - Invalid session token' },
+        { error: 'Unauthorized - Missing session token' },
         { status: 401 }
       );
     }
 
-    // Add shop to headers for downstream use
-    const requestHeaders = new Headers(request.headers);
-    const destUrl = new URL(sessionToken.dest);
-    requestHeaders.set('x-shopify-shop', destUrl.hostname);
-    requestHeaders.set('x-shopify-user-id', sessionToken.sub);
-
-    return NextResponse.next({
-      request: {
-        headers: requestHeaders,
-      },
-    });
+    // Pass through with auth header intact
+    return NextResponse.next();
   }
 
   // Pass through all other requests
