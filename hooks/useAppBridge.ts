@@ -54,29 +54,55 @@ export function useAppBridge() {
   return { appBridge, isReady };
 }
 
+// Get session token from URL if available
+export function getSessionTokenFromURL(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const idToken = params.get('id_token');
+
+  if (idToken) {
+    console.log('✅ Session token found in URL (id_token parameter)');
+    return idToken;
+  }
+
+  return null;
+}
+
 export async function getSessionToken(appBridge: any): Promise<string | null> {
+  // First, check if token is in URL (fastest, most reliable)
+  const urlToken = getSessionTokenFromURL();
+  if (urlToken) {
+    return urlToken;
+  }
+
+  // If no URL token and no App Bridge, we can't get a token
   if (!appBridge) {
-    console.error('App Bridge not initialized');
+    console.warn('No session token in URL and App Bridge not initialized');
     return null;
   }
 
+  // Try to get token from App Bridge (for dynamic refresh)
   try {
     // Use the utilities function to get session token
     if (window.shopify && window.shopify.idToken) {
       const sessionToken = await window.shopify.idToken();
+      console.log('✅ Session token retrieved from App Bridge (window.shopify.idToken)');
       return sessionToken;
     } else if (appBridge.idToken) {
       const sessionToken = await appBridge.idToken();
+      console.log('✅ Session token retrieved from App Bridge (appBridge.idToken)');
       return sessionToken;
     } else if (appBridge.getSessionToken) {
       const sessionToken = await appBridge.getSessionToken();
+      console.log('✅ Session token retrieved from App Bridge (appBridge.getSessionToken)');
       return sessionToken;
     } else {
-      console.error('No session token method available');
+      console.error('No session token method available in App Bridge');
       return null;
     }
   } catch (error) {
-    console.error('Failed to get session token:', error);
+    console.error('Failed to get session token from App Bridge:', error);
     return null;
   }
 }

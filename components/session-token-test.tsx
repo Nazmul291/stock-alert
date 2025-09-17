@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useAppBridgeContext } from './app-bridge-provider';
-import { getSessionToken } from '@/hooks/useAppBridge';
+import { getSessionToken, getSessionTokenFromURL } from '@/hooks/useAppBridge';
 
 export default function SessionTokenTest() {
   const { appBridge, isReady } = useAppBridgeContext();
   const [token, setToken] = useState<string | null>(null);
+  const [tokenSource, setTokenSource] = useState<'url' | 'app-bridge' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [apiCalls, setApiCalls] = useState<number>(0);
@@ -14,20 +15,29 @@ export default function SessionTokenTest() {
 
   useEffect(() => {
     const testToken = async () => {
-      if (!isReady || !appBridge) {
-        return;
-      }
-
       setIsLoading(true);
       try {
-        const sessionToken = await getSessionToken(appBridge);
-        if (sessionToken) {
-          setToken(sessionToken);
-          console.log('✅ Session token retrieved:', sessionToken.substring(0, 20) + '...');
+        // First check for URL token
+        const urlToken = getSessionTokenFromURL();
+        if (urlToken) {
+          setToken(urlToken);
+          setTokenSource('url');
+          console.log('✅ Session token from URL (id_token):', urlToken.substring(0, 20) + '...');
+        } else if (isReady && appBridge) {
+          // Fall back to App Bridge
+          const sessionToken = await getSessionToken(appBridge);
+          if (sessionToken) {
+            setToken(sessionToken);
+            setTokenSource('app-bridge');
+            console.log('✅ Session token from App Bridge:', sessionToken.substring(0, 20) + '...');
+          }
+        }
 
-          // Decode token to show shop
+        // Decode token to show shop
+        if (token || urlToken) {
+          const activeToken = token || urlToken;
           try {
-            const parts = sessionToken.split('.');
+            const parts = activeToken!.split('.');
             if (parts.length === 3) {
               const decoded = JSON.parse(atob(parts[1]));
               console.log('✅ Token decoded - Shop:', decoded.dest);
@@ -37,19 +47,22 @@ export default function SessionTokenTest() {
           }
 
           // Test API call with session token
-          const response = await fetch('/api/shopify-check', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${sessionToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ test: true }),
-          });
+          const tokenForApi = token || urlToken;
+          if (tokenForApi) {
+            const response = await fetch('/api/shopify-check', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${tokenForApi}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ test: true }),
+            });
 
-          console.log('✅ API call with session token - Status:', response.status);
-          setApiCalls(prev => prev + 1);
-          setLastCall(new Date().toLocaleTimeString());
-        } else {
+            console.log('✅ API call with session token - Status:', response.status);
+            setApiCalls(prev => prev + 1);
+            setLastCall(new Date().toLocaleTimeString());
+          }
+        } else if (!token && !urlToken) {
           setError('No session token available');
           console.error('❌ No session token available');
         }
@@ -76,6 +89,7 @@ export default function SessionTokenTest() {
   const params = new URLSearchParams(window.location.search);
   const shop = params.get('shop');
   const host = params.get('host');
+  const idTokenParam = params.get('id_token');
 
   return (
     <div style={{
@@ -97,8 +111,9 @@ export default function SessionTokenTest() {
       </div>
       <div>Shop: {shop || '❌ Missing'}</div>
       <div>Host: {host ? '✅ Present' : '❌ Missing'}</div>
-      <div>App Bridge: {isReady ? '✅ Ready' : '❌ Not Ready'}</div>
-      <div>Session Token: {token ? '✅ Active' : isLoading ? '⏳ Loading...' : '❌ None'}</div>
+      <div>id_token in URL: {idTokenParam ? '✅ Present' : '❌ Missing'}</div>
+      <div>App Bridge: {isReady ? '✅ Ready' : '⚠️ Not Required'}</div>
+      <div>Session Token: {token ? `✅ Active (${tokenSource})` : isLoading ? '⏳ Loading...' : '❌ None'}</div>
       {apiCalls > 0 && (
         <>
           <div>API Calls Made: {apiCalls}</div>

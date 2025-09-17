@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 import { useAppBridgeContext } from '@/components/app-bridge-provider';
-import { getSessionToken } from './useAppBridge';
+import { getSessionToken, getSessionTokenFromURL } from './useAppBridge';
 
 export function useAuthenticatedFetch() {
   const { appBridge, isReady } = useAppBridgeContext();
@@ -11,22 +11,29 @@ export function useAuthenticatedFetch() {
     async (url: string, options: RequestInit = {}) => {
       const headers = new Headers(options.headers);
 
-      // Try to get session token if App Bridge is available
-      if (isReady && appBridge) {
-        try {
+      // Try to get session token (checks URL first, then App Bridge)
+      try {
+        // First check URL for id_token
+        const urlToken = getSessionTokenFromURL();
+        if (urlToken) {
+          headers.set('Authorization', `Bearer ${urlToken}`);
+          console.log('✅ Session token from URL added to request');
+        } else if (isReady && appBridge) {
+          // Fall back to App Bridge if no URL token
           const sessionToken = await getSessionToken(appBridge);
           if (sessionToken) {
             headers.set('Authorization', `Bearer ${sessionToken}`);
-            console.log('Session token added to request');
+            console.log('✅ Session token from App Bridge added to request');
           } else {
-            console.log('No session token available');
+            console.log('⚠️ No session token available from any source');
           }
-        } catch (error) {
-          console.warn('Failed to get session token:', error);
-          // Continue without session token
+        } else {
+          // No URL token and App Bridge not ready
+          console.log('⚠️ No URL token and App Bridge not ready');
         }
-      } else {
-        console.log('App Bridge not ready, skipping session token');
+      } catch (error) {
+        console.warn('Failed to get session token:', error);
+        // Continue without session token
       }
 
       // Always set Content-Type if not provided

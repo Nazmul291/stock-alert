@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Page, Button, Badge, Layout, Banner } from '@shopify/polaris';
 import { useAppBridgeContext } from '@/components/app-bridge-provider';
-import { getSessionToken } from '@/hooks/useAppBridge';
+import { getSessionToken, getSessionTokenFromURL } from '@/hooks/useAppBridge';
 import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 
 export default function DebugSession() {
@@ -13,6 +13,7 @@ export default function DebugSession() {
   interface SessionData {
     appBridgeReady: boolean;
     sessionToken: string | null;
+    tokenSource: 'url' | 'app-bridge' | null;
     tokenDecoded: any | null;
     apiTestResult: any | null;
     error: string | null;
@@ -22,6 +23,7 @@ export default function DebugSession() {
   const [sessionData, setSessionData] = useState<SessionData>({
     appBridgeReady: false,
     sessionToken: null,
+    tokenSource: null,
     tokenDecoded: null,
     apiTestResult: null,
     error: null,
@@ -29,6 +31,29 @@ export default function DebugSession() {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+
+  // Check for URL token immediately on mount
+  useEffect(() => {
+    const urlToken = getSessionTokenFromURL();
+    if (urlToken) {
+      console.log('✅ Found id_token in URL on page load');
+      // Decode it immediately for display
+      try {
+        const parts = urlToken.split('.');
+        if (parts.length === 3) {
+          const decoded = JSON.parse(atob(parts[1]));
+          setSessionData(prev => ({
+            ...prev,
+            sessionToken: urlToken,
+            tokenSource: 'url',
+            tokenDecoded: decoded,
+          }));
+        }
+      } catch (e) {
+        console.error('Failed to decode URL token:', e);
+      }
+    }
+  }, []);
 
   // Check App Bridge initialization
   useEffect(() => {
@@ -42,20 +67,30 @@ export default function DebugSession() {
   const testSessionToken = async () => {
     setIsLoading(true);
     try {
-      // Step 1: Check if App Bridge is ready
-      if (!isReady || !appBridge) {
-        throw new Error('App Bridge not initialized');
-      }
+      // Step 1: First check for URL token
+      const urlToken = getSessionTokenFromURL();
+      let token: string | null = null;
+      let tokenSource: 'url' | 'app-bridge' | null = null;
 
-      // Step 2: Get session token
-      console.log('Getting session token...');
-      const token = await getSessionToken(appBridge);
+      if (urlToken) {
+        token = urlToken;
+        tokenSource = 'url';
+        console.log('✅ Using session token from URL (id_token parameter)');
+      } else if (isReady && appBridge) {
+        // Step 2: Try App Bridge if no URL token
+        console.log('Getting session token from App Bridge...');
+        const appToken = await getSessionToken(appBridge);
+        if (appToken) {
+          token = appToken;
+          tokenSource = 'app-bridge';
+        }
+      }
 
       if (!token) {
-        throw new Error('No session token received');
+        throw new Error('No session token available from URL or App Bridge');
       }
 
-      console.log('Session token retrieved:', token.substring(0, 50) + '...');
+      console.log(`Session token retrieved (source: ${tokenSource}):`, token.substring(0, 50) + '...');
 
       // Step 3: Decode token (without verification, just to see contents)
       const parts = token.split('.');
@@ -94,8 +129,9 @@ export default function DebugSession() {
       console.log('Authenticated fetch result:', authResult);
 
       setSessionData({
-        appBridgeReady: true,
+        appBridgeReady: isReady,
         sessionToken: token,
+        tokenSource: tokenSource,
         tokenDecoded: decoded,
         apiTestResult: { manual: apiResult, authenticated: authResult },
         error: null,
@@ -145,13 +181,18 @@ export default function DebugSession() {
               <h2 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 'bold' }}>
                 App Bridge Status
               </h2>
-              <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
                 <Badge tone={isReady ? 'success' : 'warning'}>
                   {`App Bridge: ${isReady ? 'Ready' : 'Not Ready'}`}
                 </Badge>
                 <Badge tone={sessionData.sessionToken ? 'success' : 'attention'}>
                   {`Session Token: ${sessionData.sessionToken ? 'Available' : 'Not Available'}`}
                 </Badge>
+                {sessionData.tokenSource && (
+                  <Badge tone="info">
+                    {`Source: ${sessionData.tokenSource === 'url' ? 'URL (id_token)' : 'App Bridge'}`}
+                  </Badge>
+                )}
               </div>
               <Button variant="primary" onClick={testSessionToken} loading={isLoading}>
                 Test Session Token Generation
