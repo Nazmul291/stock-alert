@@ -56,7 +56,14 @@ export async function getShopifyClient(shop: string, accessToken: string) {
     accessToken,
   });
 
-  return new shopify.clients.Rest({ session });
+  const client = new shopify.clients.Rest({ session });
+
+  // Log the client configuration for debugging
+  console.error('[SHOPIFY_CLIENT] Created REST client for shop:', shop);
+  console.error('[SHOPIFY_CLIENT] Session accessToken exists:', !!accessToken);
+  console.error('[SHOPIFY_CLIENT] API Version:', shopify.config.apiVersion);
+
+  return client;
 }
 
 export async function getGraphQLClient(shop: string, accessToken: string) {

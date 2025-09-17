@@ -138,7 +138,19 @@ export async function POST(req: NextRequest) {
 
       } catch (billingError: any) {
         console.error('[BILLING] Shopify API error:', billingError.message);
-        console.error('[BILLING] Error details:', JSON.stringify(billingError, null, 2));
+        console.error('[BILLING] Error name:', billingError.name);
+        console.error('[BILLING] Error stack:', billingError.stack);
+
+        // Check if error has response property (from Shopify API)
+        if (billingError.response) {
+          console.error('[BILLING] Response status:', billingError.response?.status);
+          console.error('[BILLING] Response body:', billingError.response?.body);
+          console.error('[BILLING] Response headers:', billingError.response?.headers);
+        }
+
+        // Log the entire error object
+        console.error('[BILLING] Full error:', billingError);
+
         return NextResponse.json({
           error: `Failed to create billing charge: ${billingError.message || 'Unknown error'}`
         }, { status: 500 });
