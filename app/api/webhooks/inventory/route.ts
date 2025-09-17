@@ -126,9 +126,12 @@ export async function POST(req: NextRequest) {
           }
         }`;
 
+      console.log(`[WEBHOOK] Fetching product with GraphQL, productGID: ${productGID}`);
       const productResponse = await graphqlClient.request(productQuery, {
         id: productGID
       });
+
+      console.log(`[WEBHOOK] Product GraphQL response:`, JSON.stringify(productResponse, null, 2));
 
       if (productResponse?.data?.product) {
         // Convert GraphQL response to REST format for compatibility
@@ -144,9 +147,18 @@ export async function POST(req: NextRequest) {
             inventory_quantity: edge.node.inventoryQuantity || 0
           }))
         };
+        console.log(`[WEBHOOK] Successfully converted product data for product ${productId}`);
+      } else {
+        console.error(`[WEBHOOK] No product data in GraphQL response for ${productGID}`);
       }
 
     } catch (apiError: any) {
+      console.error(`[WEBHOOK] Error fetching product ${productGID}:`, apiError);
+      console.error(`[WEBHOOK] Error details:`, {
+        message: apiError.message,
+        response: apiError.response,
+        stack: apiError.stack
+      });
     }
     
     if (!productId || !product) {
