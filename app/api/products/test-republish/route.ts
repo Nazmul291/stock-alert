@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     // Try to update to active using GraphQL
     try {
       const productUpdateMutation = `
-        mutation productUpdate($product: ProductInput!) {
+        mutation productUpdate($product: ProductUpdateInput) {
           productUpdate(product: $product) {
             product {
               id

@@ -280,7 +280,7 @@ export async function POST(req: NextRequest) {
       try {
         // Use GraphQL mutation to update product status (avoiding REST API deprecation)
         const productUpdateMutation = `
-          mutation productUpdate($product: ProductInput!) {
+          mutation productUpdate($product: ProductUpdateInput) {
             productUpdate(product: $product) {
               product {
                 id
@@ -354,7 +354,7 @@ export async function POST(req: NextRequest) {
         try {
           // Use GraphQL mutation to update product status (avoiding REST API deprecation)
           const productUpdateMutation = `
-            mutation productUpdate($product: ProductInput!) {
+            mutation productUpdate($product: ProductUpdateInput) {
               productUpdate(product: $product) {
                 product {
                   id
