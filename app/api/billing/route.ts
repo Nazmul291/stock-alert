@@ -103,6 +103,16 @@ export async function POST(req: NextRequest) {
         console.error('[BILLING] Testing Shopify client with shop info request');
         const shopInfo = await client.get({ path: 'shop.json' });
         console.error('[BILLING] Shop info retrieved successfully:', shopInfo.body?.shop?.name);
+        console.error('[BILLING] Shop plan:', shopInfo.body?.shop?.plan_name);
+        console.error('[BILLING] Shop ID:', shopInfo.body?.shop?.id);
+
+        // Also check if we can access application charges endpoint with GET
+        try {
+          const charges = await client.get({ path: 'recurring_application_charges.json' });
+          console.error('[BILLING] Existing charges count:', charges.body?.recurring_application_charges?.length || 0);
+        } catch (chargeListError: any) {
+          console.error('[BILLING] Cannot list charges:', chargeListError.message);
+        }
       } catch (testError: any) {
         console.error('[BILLING] Failed to retrieve shop info:', testError.message);
         console.error('[BILLING] This indicates invalid access token or permissions issue');
@@ -130,17 +140,15 @@ export async function POST(req: NextRequest) {
         console.error('[BILLING] Using shop:', shop);
         console.error('[BILLING] Return URL:', `${host}/api/billing/callback?shop=${shop}`);
 
+        // Minimal test charge configuration
         recurringCharge = await client.post({
           path: 'recurring_application_charges.json',
           data: {
             recurring_application_charge: {
-              name: 'Stock Alert Pro - Development',
+              name: 'Stock Alert Pro',
               price: 9.99,
               return_url: `${host}/api/billing/callback?shop=${shop}`,
-              test: true,  // Always test mode for development
-              trial_days: 7,
-              capped_amount: 9.99,
-              terms: 'Pro features including Slack notifications, per-product thresholds, and priority support',
+              test: true,  // Test charges should always work
             },
           },
         });
