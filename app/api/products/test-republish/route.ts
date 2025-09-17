@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     // Try to update to active
     try {
       const updateResponse = await client.put({
-        path: `products/${productId}.json`,
+        path: `products/${productId}`,
         data: {
           product: {
             id: parseInt(productId),

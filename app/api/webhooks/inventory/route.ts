@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       
       // Fetch all products to find the one with this inventory_item_id
       const searchResponse = await client.get({
-        path: `products/${productId}`,
+        path: `products/${productId}.json`,
         query: {
           fields: 'id,title,status,variants'
         }
@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
       try {
         // Use the correct API format for updating product status
         const hideResponse = await client.put({
-          path: `products/${productId}.json`,
+          path: `products/${productId}`,
           data: {
             product: {
               id: parseInt(productId),
@@ -276,7 +276,7 @@ export async function POST(req: NextRequest) {
         try {
           // Use the correct API format for updating product status
           const updateResponse = await client.put({
-            path: `products/${productId}.json`,
+            path: `products/${productId}`,
             data: {
               product: {
                 id: parseInt(productId),
