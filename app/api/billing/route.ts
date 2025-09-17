@@ -97,6 +97,19 @@ export async function POST(req: NextRequest) {
     try {
       client = await getShopifyClient(shop, accessToken);
       console.error('[BILLING] Shopify client created successfully');
+
+      // Test the client with a simple GET request first to verify token
+      try {
+        console.error('[BILLING] Testing Shopify client with shop info request');
+        const shopInfo = await client.get({ path: 'shop.json' });
+        console.error('[BILLING] Shop info retrieved successfully:', shopInfo.body?.shop?.name);
+      } catch (testError: any) {
+        console.error('[BILLING] Failed to retrieve shop info:', testError.message);
+        console.error('[BILLING] This indicates invalid access token or permissions issue');
+        return NextResponse.json({
+          error: 'Invalid access token or insufficient permissions. Please reinstall the app.'
+        }, { status: 401 });
+      }
     } catch (clientError: any) {
       console.error('[BILLING] Failed to create Shopify client:', clientError);
       console.error('[BILLING] Client error message:', clientError.message);
@@ -118,7 +131,7 @@ export async function POST(req: NextRequest) {
         console.error('[BILLING] Return URL:', `${host}/api/billing/callback?shop=${shop}`);
 
         recurringCharge = await client.post({
-          path: 'recurring_application_charges',
+          path: 'recurring_application_charges.json',  // Add .json extension
           data: {
             recurring_application_charge: {
               name: 'Stock Alert Pro',

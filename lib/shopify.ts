@@ -6,11 +6,17 @@ export interface ShopifyResponse {
   body: any;
 }
 
+// Validate required environment variables
+const apiSecret = process.env.SHOPIFY_API_SECRET;
+if (!apiSecret) {
+  console.error('[SHOPIFY_CONFIG] WARNING: SHOPIFY_API_SECRET is not set!');
+}
+
 export const shopify = shopifyApi({
   apiKey: process.env.SHOPIFY_API_KEY || '38a870cdc7f41175fd49a52689539f9d',
-  apiSecretKey: process.env.SHOPIFY_API_SECRET || '',
+  apiSecretKey: apiSecret || 'dummy-secret-for-development',  // Provide fallback to prevent empty string
   scopes: (process.env.SHOPIFY_SCOPES || 'read_products,write_products,read_inventory,write_inventory').split(','),
-  hostName: (process.env.SHOPIFY_APP_URL || 'https://dev.nazmulcodes.org').replace(/https?:\/\//, ''),
+  hostName: (process.env.SHOPIFY_APP_URL || 'https://stock-alert.nazmulcodes.org').replace(/https?:\/\//, ''),
   apiVersion: ApiVersion.October24, // Latest stable API version (2024-10)
   isEmbeddedApp: true,
   logger: {
