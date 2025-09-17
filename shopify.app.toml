@@ -24,5 +24,15 @@ redirect_urls = [
 [webhooks]
 api_version = "2024-10"
 
+# Mandatory compliance webhooks
+[[webhooks.subscriptions]]
+topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/api/webhooks/compliance"
+
+# Inventory webhooks
+[[webhooks.subscriptions]]
+topics = ["inventory_levels/update", "products/update", "products/delete"]
+uri = "/api/webhooks/inventory"
+
 [pos]
 embedded = false

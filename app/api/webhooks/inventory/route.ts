@@ -6,14 +6,25 @@ import crypto from 'crypto';
 
 async function verifyWebhook(req: NextRequest, body: string): Promise<boolean> {
   const hmacHeader = req.headers.get('x-shopify-hmac-sha256');
-  if (!hmacHeader) return false;
+  if (!hmacHeader) {
+    console.error('[WEBHOOK] No HMAC header found');
+    return false;
+  }
+
+  // Use webhook secret if available, otherwise fall back to API secret
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET || process.env.SHOPIFY_API_SECRET || '';
 
   const hash = crypto
-    .createHmac('sha256', process.env.SHOPIFY_API_SECRET!)
+    .createHmac('sha256', secret)
     .update(body, 'utf8')
     .digest('base64');
 
-  return hash === hmacHeader;
+  const isValid = hash === hmacHeader;
+  if (!isValid) {
+    console.error('[WEBHOOK] HMAC verification failed');
+  }
+
+  return isValid;
 }
 
 export async function POST(req: NextRequest) {
