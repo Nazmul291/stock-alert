@@ -5,6 +5,12 @@ import { supabaseAdmin } from '@/lib/supabase';
 export async function POST(req: NextRequest) {
   console.error('[BILLING] Request received at:', new Date().toISOString());
 
+  // Check critical environment variables
+  console.error('[BILLING] Environment check:');
+  console.error('[BILLING] NEXT_PUBLIC_SUPABASE_URL exists:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
+  console.error('[BILLING] SUPABASE_SERVICE_ROLE_KEY exists:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+  console.error('[BILLING] JWT_SECRET exists:', !!process.env.JWT_SECRET);
+
   try {
     // Parse request body with proper error handling for production environments
     let plan;
@@ -72,6 +78,8 @@ export async function POST(req: NextRequest) {
 
     // Get store from database with proper error handling
     let store;
+    console.error('[BILLING] Fetching store from database for shop:', shop);
+
     try {
       const { data, error } = await supabaseAdmin
         .from('stores')
@@ -79,16 +87,22 @@ export async function POST(req: NextRequest) {
         .eq('shop_domain', shop)
         .single();
 
+      console.error('[BILLING] Database query completed. Error:', error, 'Data:', data ? 'Found' : 'Not found');
+
       if (error) {
-        console.error('Database error fetching store:', error);
+        console.error('[BILLING] Database error fetching store:', error);
+        console.error('[BILLING] Error details:', JSON.stringify(error, null, 2));
         return NextResponse.json({
           error: `Database error: ${error.message}`
         }, { status: 500 });
       }
 
       store = data;
+      console.error('[BILLING] Store found with ID:', store?.id);
     } catch (dbError: any) {
-      console.error('Failed to fetch store:', dbError);
+      console.error('[BILLING] Exception while fetching store:', dbError);
+      console.error('[BILLING] Exception message:', dbError.message);
+      console.error('[BILLING] Exception stack:', dbError.stack);
       return NextResponse.json({
         error: `Failed to fetch store: ${dbError.message}`
       }, { status: 500 });
@@ -99,10 +113,15 @@ export async function POST(req: NextRequest) {
     }
 
     let client;
+    console.error('[BILLING] Creating Shopify client for shop:', shop);
+
     try {
       client = await getShopifyClient(shop, accessToken);
+      console.error('[BILLING] Shopify client created successfully');
     } catch (clientError: any) {
-      console.error('Failed to create Shopify client:', clientError);
+      console.error('[BILLING] Failed to create Shopify client:', clientError);
+      console.error('[BILLING] Client error message:', clientError.message);
+      console.error('[BILLING] Client error stack:', clientError.stack);
       return NextResponse.json({
         error: `Failed to create Shopify client: ${clientError.message}`
       }, { status: 500 });
@@ -110,9 +129,12 @@ export async function POST(req: NextRequest) {
 
 
     if (plan === 'pro') {
+      console.error('[BILLING] Processing PRO plan upgrade');
+
       // Create recurring charge for Pro plan
       let recurringCharge;
       try {
+        console.error('[BILLING] Creating recurring charge with Shopify API');
         recurringCharge = await client.post({
           path: 'recurring_application_charges',
           data: {
