@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { registerWebhooks } from '@/lib/webhook-registration';
+import { getGraphQLClient } from '@/lib/shopify';
 
 export async function POST(req: NextRequest) {
   try {
@@ -26,27 +27,43 @@ export async function POST(req: NextRequest) {
     // Register webhooks
     await registerWebhooks(shop, store.access_token);
 
-    // Verify registration by fetching the list
-    const response = await fetch(
-      `https://${shop}/admin/api/2024-01/webhooks.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': store.access_token,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Initialize GraphQL client for verification
+    const client = await getGraphQLClient(shop, store.access_token);
 
-    if (!response.ok) {
-      return NextResponse.json({ 
-        error: 'Failed to verify webhook registration' 
+    // Verify registration by fetching the list using GraphQL
+    const query = `
+      query getWebhookSubscriptions {
+        webhookSubscriptions(first: 100) {
+          edges {
+            node {
+              id
+              topic
+              endpoint {
+                __typename
+                ... on WebhookHttpEndpoint {
+                  callbackUrl
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response: any = await client.query({
+      data: query
+    });
+
+    if (!response.body?.data?.webhookSubscriptions) {
+      return NextResponse.json({
+        error: 'Failed to verify webhook registration'
       }, { status: 500 });
     }
 
-    const { webhooks } = await response.json();
-    
+    const webhooks = response.body.data.webhookSubscriptions.edges;
+
     // Check which webhooks were registered
-    const registeredTopics = webhooks.map((w: any) => w.topic);
+    const registeredTopics = webhooks.map((edge: any) => edge.node.topic);
     const expectedTopics = ['APP/UNINSTALLED', 'INVENTORY_LEVELS/UPDATE'];
     const missingTopics = expectedTopics.filter(topic => !registeredTopics.includes(topic));
 
@@ -55,7 +72,7 @@ export async function POST(req: NextRequest) {
       message: 'Webhook registration completed',
       registered: registeredTopics,
       missing: missingTopics,
-      total: webhooks.length
+      total: registeredTopics.length
     });
 
   } catch (error) {

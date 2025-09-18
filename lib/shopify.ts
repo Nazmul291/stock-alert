@@ -1,6 +1,5 @@
 import { shopifyApi, ApiVersion, Session } from '@shopify/shopify-api';
 import '@shopify/shopify-api/adapters/node';
-import jwt from 'jsonwebtoken';
 
 export interface ShopifyResponse {
   body: any;
@@ -29,29 +28,6 @@ export const shopify = shopifyApi({
   },
 });
 
-export function generateSessionToken(shop: string, accessToken: string): string {
-  return jwt.sign(
-    {
-      shop,
-      accessToken,
-      iat: Math.floor(Date.now() / 1000),
-    },
-    process.env.JWT_SECRET || 'default-jwt-secret-change-in-production',
-    { expiresIn: '7d' }
-  );
-}
-
-export function verifySessionToken(token: string): { shop: string; accessToken: string } | null {
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-jwt-secret-change-in-production') as any;
-    return {
-      shop: decoded.shop,
-      accessToken: decoded.accessToken,
-    };
-  } catch (error) {
-    return null;
-  }
-}
 
 export async function getShopifyClient(shop: string, accessToken: string) {
   // Validate inputs

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifySessionToken, getShopifyClient } from '@/lib/shopify';
+import { getShopifyClient } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getSessionTokenFromRequest, getShopFromToken } from '@/lib/session-token';
 
 export async function POST(req: NextRequest) {
 
@@ -25,8 +26,18 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const sessionToken = req.cookies.get('shopify-session')?.value;
+    // Validate Shopify session token
+    const sessionToken = await getSessionTokenFromRequest(req);
     console.error('[BILLING] Session token exists:', !!sessionToken);
+
+    if (!sessionToken) {
+      console.error('[BILLING] ERROR: No valid session token found');
+      return NextResponse.json({ error: 'Unauthorized - missing or invalid session token' }, { status: 401 });
+    }
+
+    // Extract shop from session token
+    const shop = getShopFromToken(sessionToken);
+    console.error('[BILLING] Shop from token:', shop);
 
     // Ensure NEXT_PUBLIC_HOST is set in production environment (required for Shopify redirect URLs)
     const host = process.env.NEXT_PUBLIC_HOST;
@@ -38,22 +49,6 @@ export async function POST(req: NextRequest) {
         error: 'Server configuration error: NEXT_PUBLIC_HOST environment variable is missing'
       }, { status: 500 });
     }
-
-    if (!sessionToken) {
-      console.error('[BILLING] ERROR: No session token found');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const session = verifySessionToken(sessionToken);
-    console.error('[BILLING] Session verified:', !!session);
-
-    if (!session) {
-      console.error('[BILLING] ERROR: Invalid session token');
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
-    }
-
-    const { shop, accessToken } = session;
-    console.error('[BILLING] Shop:', shop);
 
     // Get store from database with proper error handling
     let store;
@@ -95,7 +90,7 @@ export async function POST(req: NextRequest) {
     console.error('[BILLING] Creating Shopify client for shop:', shop);
 
     try {
-      client = await getShopifyClient(shop, accessToken);
+      client = await getShopifyClient(shop, store.access_token);
       console.error('[BILLING] Shopify client created successfully');
 
       // Test the client with a simple GET request first to verify token

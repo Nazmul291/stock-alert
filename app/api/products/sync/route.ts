@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { PLAN_LIMITS } from '@/lib/plan-limits';
 import { getSessionTokenFromRequest, getShopFromToken } from '@/lib/session-token';
+import { getGraphQLClient } from '@/lib/shopify';
 
 export async function GET(req: NextRequest) {
   try {
@@ -46,68 +47,128 @@ export async function GET(req: NextRequest) {
     const currentProductCount = distinctProductIds.size;
 
 
-    // First, verify the access token is valid with a lightweight API call
-    const shopInfoResponse = await fetch(
-      `https://${shop}/admin/api/2024-01/shop.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': store.access_token,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Initialize GraphQL client
+    const client = await getGraphQLClient(shop, store.access_token);
 
-    if (!shopInfoResponse.ok) {
-      
-      if (shopInfoResponse.status === 401) {
-        return NextResponse.json({ 
+    // First, verify the access token is valid with a lightweight GraphQL query
+    try {
+      const shopQuery = `
+        query getShop {
+          shop {
+            id
+            name
+          }
+        }
+      `;
+
+      await client.query({ data: shopQuery });
+    } catch (error: any) {
+      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+        return NextResponse.json({
           error: 'Authentication failed. The access token is invalid or expired. Please reinstall the app.',
-          requiresReauth: true 
+          requiresReauth: true
         }, { status: 401 });
       }
+      throw error;
     }
 
-    // Fetch products from Shopify with reasonable limit for plan
+    // Fetch products from Shopify using GraphQL
     const fetchLimit = plan === 'free' ? 50 : 250; // Free plans don't need to fetch as many
-    
-    const productsResponse = await fetch(
-      `https://${shop}/admin/api/2024-01/products.json?limit=${fetchLimit}`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': store.access_token,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
 
-    if (!productsResponse.ok) {
-      
+    const productsQuery = `
+      query getProducts($first: Int!) {
+        products(first: $first) {
+          edges {
+            node {
+              id
+              title
+              handle
+              status
+              totalInventory
+              tracksInventory
+              variants(first: 100) {
+                edges {
+                  node {
+                    id
+                    title
+                    sku
+                    inventoryQuantity
+                    inventoryItem {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    let products = [];
+
+    try {
+      const response: any = await client.query({
+        data: {
+          query: productsQuery,
+          variables: {
+            first: fetchLimit
+          }
+        }
+      });
+
+      // Transform GraphQL response to match existing format
+      if (!response.body || !response.body.data) {
+        throw new Error('Invalid response from Shopify GraphQL API');
+      }
+
+      products = response.body.data.products.edges.map((edge: any) => {
+        const product = edge.node;
+        // Extract numeric ID from GID
+        const productId = product.id.split('/').pop();
+
+        return {
+          id: productId,
+          title: product.title,
+          handle: product.handle,
+          status: product.status,
+          variants: product.variants.edges.map((vEdge: any) => {
+            const variant = vEdge.node;
+            const variantId = variant.id.split('/').pop();
+            const inventoryItemId = variant.inventoryItem?.id?.split('/').pop();
+
+            return {
+              id: variantId,
+              title: variant.title,
+              sku: variant.sku,
+              inventory_quantity: variant.inventoryQuantity || 0,
+              inventory_item_id: inventoryItemId
+            };
+          })
+        };
+      });
+    } catch (error: any) {
       // Handle specific error cases
-      if (productsResponse.status === 401) {
-        // Authentication error - token might be invalid or expired
-        return NextResponse.json({ 
+      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+        return NextResponse.json({
           error: 'Authentication failed. The app may need to be re-installed or re-authenticated.',
-          requiresReauth: true 
+          requiresReauth: true
         }, { status: 401 });
-      } else if (productsResponse.status === 403) {
-        // Permission error - app might not have required scopes
-        return NextResponse.json({ 
-          error: 'Permission denied. The app may not have the required permissions to access products.' 
+      } else if (error.message?.includes('Forbidden') || error.message?.includes('403')) {
+        return NextResponse.json({
+          error: 'Permission denied. The app may not have the required permissions to access products.'
         }, { status: 403 });
-      } else if (productsResponse.status === 429) {
-        // Rate limiting
-        return NextResponse.json({ 
-          error: 'Rate limit exceeded. Please try again in a few moments.' 
+      } else if (error.message?.includes('Throttled') || error.message?.includes('429')) {
+        return NextResponse.json({
+          error: 'Rate limit exceeded. Please try again in a few moments.'
         }, { status: 429 });
       }
-      
+
       // Generic error
-      return NextResponse.json({ 
-        error: `Failed to fetch products from Shopify (${productsResponse.status})` 
+      return NextResponse.json({
+        error: `Failed to fetch products from Shopify: ${error.message}`
       }, { status: 500 });
     }
-
-    const { products } = await productsResponse.json();
 
     // We already have the distinct product IDs from above
     const existingProductIds = distinctProductIds;

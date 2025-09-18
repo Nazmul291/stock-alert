@@ -32,13 +32,7 @@ export default function BillingContent({
       const bodyData = { plan: 'pro' };
 
       // Use test route for development
-      const isDevelopment = window.location.hostname === 'localhost' ||
-                           window.location.hostname.includes('ngrok') ||
-                           process.env.NODE_ENV === 'development';
-
-      const apiEndpoint = isDevelopment ? '/api/billing/test' : '/api/billing';
-
-      const response = await authenticatedFetch(apiEndpoint, {
+      const response = await authenticatedFetch('/api/billing', {
         method: 'POST',
         body: JSON.stringify(bodyData),
       });

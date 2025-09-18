@@ -1,3 +1,5 @@
+import { getGraphQLClient } from '@/lib/shopify';
+
 export interface WebhookConfig {
   topic: string;
   address: string;
@@ -20,23 +22,43 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
   ];
 
 
+  // Initialize GraphQL client
+  const client = await getGraphQLClient(shop, accessToken);
+
   for (const webhook of webhooks) {
     try {
-      // First, check if webhook already exists
-      const checkResponse = await fetch(
-        `https://${shop}/admin/api/2024-01/webhooks.json`,
-        {
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json',
-          },
+      // First, check if webhook already exists using GraphQL
+      const checkQuery = `
+        query getWebhookSubscriptions {
+          webhookSubscriptions(first: 100) {
+            edges {
+              node {
+                id
+                topic
+                endpoint {
+                  __typename
+                  ... on WebhookHttpEndpoint {
+                    callbackUrl
+                  }
+                }
+              }
+            }
+          }
         }
-      );
+      `;
 
-      if (checkResponse.ok) {
-        const { webhooks: existingWebhooks } = await checkResponse.json();
+      const checkResponse: any = await client.query({
+        data: checkQuery
+      });
+
+      if (checkResponse.body?.data?.webhookSubscriptions) {
+        const existingWebhooks = checkResponse.body.data.webhookSubscriptions.edges;
         const exists = existingWebhooks.some(
-          (w: any) => w.topic === webhook.topic && w.address === webhook.address
+          (edge: any) => {
+            const node = edge.node;
+            return node.topic === webhook.topic.toUpperCase().replace('/', '_') &&
+                   node.endpoint?.callbackUrl === webhook.address;
+          }
         );
 
         if (exists) {
@@ -44,36 +66,47 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
         }
       }
 
-      // Register the webhook
-      const response = await fetch(
-        `https://${shop}/admin/api/2024-01/webhooks.json`,
-        {
-          method: 'POST',
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            webhook: {
-              topic: webhook.topic,
-              address: webhook.address,
-              format: 'json',
-            },
-          }),
+      // Register the webhook using GraphQL
+      const createMutation = `
+        mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
+          webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+            webhookSubscription {
+              id
+              topic
+              endpoint {
+                __typename
+                ... on WebhookHttpEndpoint {
+                  callbackUrl
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
         }
-      );
+      `;
 
-      if (response.ok) {
-        const webhookData = await response.json();
-      } else {
-        const errorText = await response.text();
-        
-        // Try to parse error for more details
-        try {
-          const errorJson = JSON.parse(errorText);
-        } catch {
-          // Not JSON, continue silently
+      // Convert topic format (e.g., "app/uninstalled" -> "APP_UNINSTALLED")
+      const graphqlTopic = webhook.topic.toUpperCase().replace('/', '_');
+
+      const response: any = await client.query({
+        data: {
+          query: createMutation,
+          variables: {
+            topic: graphqlTopic,
+            webhookSubscription: {
+              callbackUrl: webhook.address,
+              format: 'JSON'
+            }
+          }
         }
+      });
+
+      if (response.body?.data?.webhookSubscriptionCreate?.userErrors?.length > 0) {
+        // Errors occurred but we handle them silently
+        // response.body.data.webhookSubscriptionCreate.userErrors
       }
     } catch (error) {
       // Handle error silently

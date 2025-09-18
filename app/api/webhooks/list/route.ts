@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getGraphQLClient } from '@/lib/shopify';
 
 export async function GET(req: NextRequest) {
   try {
@@ -21,40 +22,60 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Store not found or not authenticated' }, { status: 404 });
     }
 
-    // Fetch registered webhooks from Shopify
-    
-    const response = await fetch(
-      `https://${shop}/admin/api/2024-01/webhooks.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': store.access_token,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Initialize GraphQL client
+    const client = await getGraphQLClient(shop, store.access_token);
 
-    if (!response.ok) {
-      return NextResponse.json({ 
-        error: `Failed to fetch webhooks from Shopify (${response.status})` 
+    // Fetch registered webhooks from Shopify using GraphQL
+    const query = `
+      query getWebhookSubscriptions {
+        webhookSubscriptions(first: 100) {
+          edges {
+            node {
+              id
+              topic
+              createdAt
+              updatedAt
+              endpoint {
+                __typename
+                ... on WebhookHttpEndpoint {
+                  callbackUrl
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const response: any = await client.query({
+      data: query
+    });
+
+    if (!response.body?.data?.webhookSubscriptions) {
+      return NextResponse.json({
+        error: 'Failed to fetch webhooks from Shopify'
       }, { status: 500 });
     }
 
-    const { webhooks } = await response.json();
-    
+    const webhooks = response.body.data.webhookSubscriptions.edges;
+
     // Format webhook data for easier reading
-    const formattedWebhooks = webhooks.map((webhook: any) => ({
-      id: webhook.id,
-      topic: webhook.topic,
-      address: webhook.address,
-      created_at: webhook.created_at,
-      updated_at: webhook.updated_at,
-      format: webhook.format,
-      api_version: webhook.api_version,
-    }));
+    const formattedWebhooks = webhooks.map((edge: any) => {
+      const webhook = edge.node;
+      return {
+        id: webhook.id,
+        topic: webhook.topic,
+        address: webhook.endpoint?.callbackUrl || 'N/A',
+        created_at: webhook.createdAt,
+        updated_at: webhook.updatedAt,
+        format: 'JSON',
+        endpoint_type: webhook.endpoint?.__typename || 'Unknown'
+      };
+    });
 
     return NextResponse.json({
       shop,
-      count: webhooks.length,
+      count: formattedWebhooks.length,
       webhooks: formattedWebhooks,
       expectedWebhooks: [
         'APP/UNINSTALLED',

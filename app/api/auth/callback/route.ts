@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { shopify, generateSessionToken, WEBHOOK_TOPICS } from '@/lib/shopify';
+import { shopify, WEBHOOK_TOPICS } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 import { registerWebhooks } from '@/lib/webhook-registration';
 
@@ -157,24 +157,13 @@ export async function GET(req: NextRequest) {
       // Webhooks can be registered manually later
     }
 
-    // Generate session token
-    const token = generateSessionToken(session.shop, session.accessToken);
-
-    // Redirect to app with token
+    // Redirect to app - embedded apps will use App Bridge for session tokens
     const redirectUrl = new URL('/', process.env.NEXT_PUBLIC_HOST);
     redirectUrl.searchParams.set('shop', session.shop);
     redirectUrl.searchParams.set('host', req.nextUrl.searchParams.get('host') || '');
     redirectUrl.searchParams.set('authenticated', '1');
-    
-    const response = NextResponse.redirect(redirectUrl);
-    response.cookies.set('shopify-session', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
 
-    return response;
+    return NextResponse.redirect(redirectUrl);
   } catch (error) {
     // Return a user-friendly error page
     const errorHtml = `
