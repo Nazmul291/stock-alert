@@ -3,18 +3,14 @@
 import { useState, useEffect } from 'react';
 import {
   Card,
-  Layout,
   Text,
   Badge,
   InlineStack,
   BlockStack,
   Spinner,
   Icon,
-  ProgressBar,
-  Box,
 } from '@shopify/polaris';
 import {
-  PackageIcon,
   AlertCircleIcon,
   AlertTriangleIcon,
   CheckCircleIcon,
@@ -133,7 +129,7 @@ export default function ProductStats({ shop }: ProductStatsProps) {
           </Text>
           {percentage !== undefined && (
             <Badge tone={tone || 'info'}>
-              {percentage}%
+              {`${percentage}%`}
             </Badge>
           )}
         </InlineStack>
@@ -262,87 +258,72 @@ export default function ProductStats({ shop }: ProductStatsProps) {
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm">Out of Stock</Text>
                   <Text as="p" variant="bodySm" fontWeight="medium">
-                    {percentages?.outOfStock}% ({stats.outOfStock} products)
+                    {percentages?.outOfStock || 0}% ({stats.outOfStock} products)
                   </Text>
                 </InlineStack>
-                {percentages?.outOfStock === 0 ? (
+                <div style={{
+                  width: '100%',
+                  height: '4px',
+                  backgroundColor: '#f1f1f1',
+                  borderRadius: '2px',
+                  overflow: 'hidden'
+                }}>
                   <div style={{
-                    height: '4px',
-                    backgroundColor: '#f1f1f1',
+                    width: `${Math.max(percentages?.outOfStock || 0, 0.5)}%`,
+                    height: '100%',
+                    backgroundColor: '#d72c0d',
                     borderRadius: '2px',
-                    position: 'relative'
-                  }}>
-                    <div style={{
-                      position: 'absolute',
-                      left: 0,
-                      top: 0,
-                      height: '100%',
-                      width: '2px',
-                      backgroundColor: '#d72c0d',
-                      borderRadius: '2px'
-                    }} />
-                  </div>
-                ) : (
-                  <ProgressBar progress={percentages.outOfStock} tone="critical" size="small" />
-                )}
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
               </BlockStack>
 
               <BlockStack gap="100">
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm">Low Stock</Text>
                   <Text as="p" variant="bodySm" fontWeight="medium">
-                    {percentages?.lowStock}% ({stats.lowStock} products)
+                    {percentages?.lowStock || 0}% ({stats.lowStock} products)
                   </Text>
                 </InlineStack>
-                {percentages?.lowStock === 0 ? (
+                <div style={{
+                  width: '100%',
+                  height: '4px',
+                  backgroundColor: '#f1f1f1',
+                  borderRadius: '2px',
+                  overflow: 'hidden'
+                }}>
                   <div style={{
-                    height: '4px',
-                    backgroundColor: '#f1f1f1',
+                    width: `${Math.max(percentages?.lowStock || 0, 0.5)}%`,
+                    height: '100%',
+                    backgroundColor: '#b98900',
                     borderRadius: '2px',
-                    position: 'relative'
-                  }}>
-                    <div style={{
-                      position: 'absolute',
-                      left: 0,
-                      top: 0,
-                      height: '100%',
-                      width: '2px',
-                      backgroundColor: '#b98900',
-                      borderRadius: '2px'
-                    }} />
-                  </div>
-                ) : (
-                  <ProgressBar progress={percentages.lowStock} tone="warning" size="small" />
-                )}
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
               </BlockStack>
 
               <BlockStack gap="100">
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm">In Stock</Text>
                   <Text as="p" variant="bodySm" fontWeight="medium">
-                    {percentages?.inStock}% ({stats.inStock} products)
+                    {percentages?.inStock || 0}% ({stats.inStock} products)
                   </Text>
                 </InlineStack>
-                {percentages?.inStock === 0 ? (
+                <div style={{
+                  width: '100%',
+                  height: '4px',
+                  backgroundColor: '#f1f1f1',
+                  borderRadius: '2px',
+                  overflow: 'hidden'
+                }}>
                   <div style={{
-                    height: '4px',
-                    backgroundColor: '#f1f1f1',
+                    width: `${Math.max(percentages?.inStock || 0, 0.5)}%`,
+                    height: '100%',
+                    backgroundColor: '#008060',
                     borderRadius: '2px',
-                    position: 'relative'
-                  }}>
-                    <div style={{
-                      position: 'absolute',
-                      left: 0,
-                      top: 0,
-                      height: '100%',
-                      width: '2px',
-                      backgroundColor: '#008060',
-                      borderRadius: '2px'
-                    }} />
-                  </div>
-                ) : (
-                  <ProgressBar progress={percentages.inStock} tone="success" size="small" />
-                )}
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
               </BlockStack>
             </BlockStack>
           </BlockStack>
