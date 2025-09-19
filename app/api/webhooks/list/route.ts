@@ -49,13 +49,13 @@ export async function GET(req: NextRequest) {
 
     const response: any = await client.request(query);
 
-    if (!response?.data?.webhookSubscriptions) {
+    if (!response?.webhookSubscriptions) {
       return NextResponse.json({
         error: 'Failed to fetch webhooks from Shopify'
       }, { status: 500 });
     }
 
-    const webhooks = response.data.webhookSubscriptions.edges;
+    const webhooks = response.webhookSubscriptions.edges;
 
     // Format webhook data for easier reading
     const formattedWebhooks = webhooks.map((edge: any) => {

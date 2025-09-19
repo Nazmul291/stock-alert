@@ -52,13 +52,13 @@ export async function POST(req: NextRequest) {
 
     const response: any = await client.request(query);
 
-    if (!response?.data?.webhookSubscriptions) {
+    if (!response?.webhookSubscriptions) {
       return NextResponse.json({
         error: 'Failed to verify webhook registration'
       }, { status: 500 });
     }
 
-    const webhooks = response.data.webhookSubscriptions.edges;
+    const webhooks = response.webhookSubscriptions.edges;
 
     // Check which webhooks were registered
     const registeredTopics = webhooks.map((edge: any) => edge.node.topic);

@@ -129,11 +129,11 @@ export async function GET(req: NextRequest) {
         });
 
         // Transform GraphQL response to match existing format
-        if (!response || !response.data) {
+        if (!response || !response.products) {
           throw new Error('Invalid response from Shopify GraphQL API');
         }
 
-        const pageProducts = response.data.products.edges.map((edge: any) => {
+        const pageProducts = response.products.edges.map((edge: any) => {
           const product = edge.node;
           // Extract numeric ID from GID
           const productId = product.id.split('/').pop();
@@ -162,8 +162,8 @@ export async function GET(req: NextRequest) {
         products.push(...pageProducts);
 
         // Check if there are more pages
-        hasNextPage = response.data.products.pageInfo.hasNextPage;
-        cursor = response.data.products.pageInfo.endCursor;
+        hasNextPage = response.products.pageInfo.hasNextPage;
+        cursor = response.products.pageInfo.endCursor;
 
         // Break if we've reached the plan limit
         if (products.length >= maxFetchLimit) {
