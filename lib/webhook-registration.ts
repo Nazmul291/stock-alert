@@ -47,12 +47,10 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
         }
       `;
 
-      const checkResponse: any = await client.query({
-        data: checkQuery
-      });
+      const checkResponse: any = await client.request(checkQuery);
 
-      if (checkResponse.body?.data?.webhookSubscriptions) {
-        const existingWebhooks = checkResponse.body.data.webhookSubscriptions.edges;
+      if (checkResponse?.data?.webhookSubscriptions) {
+        const existingWebhooks = checkResponse.data.webhookSubscriptions.edges;
         const exists = existingWebhooks.some(
           (edge: any) => {
             const node = edge.node;
@@ -91,22 +89,19 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
       // Convert topic format (e.g., "app/uninstalled" -> "APP_UNINSTALLED")
       const graphqlTopic = webhook.topic.toUpperCase().replace('/', '_');
 
-      const response: any = await client.query({
-        data: {
-          query: createMutation,
-          variables: {
-            topic: graphqlTopic,
-            webhookSubscription: {
-              callbackUrl: webhook.address,
-              format: 'JSON'
-            }
+      const response: any = await client.request(createMutation, {
+        variables: {
+          topic: graphqlTopic,
+          webhookSubscription: {
+            callbackUrl: webhook.address,
+            format: 'JSON'
           }
         }
       });
 
-      if (response.body?.data?.webhookSubscriptionCreate?.userErrors?.length > 0) {
+      if (response?.data?.webhookSubscriptionCreate?.userErrors?.length > 0) {
         // Errors occurred but we handle them silently
-        // response.body.data.webhookSubscriptionCreate.userErrors
+        // response.data.webhookSubscriptionCreate.userErrors
       }
     } catch (error) {
       // Handle error silently

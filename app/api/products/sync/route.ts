@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
         }
       `;
 
-      await client.query({ data: shopQuery });
+      await client.request(shopQuery);
     } catch (error: any) {
       if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
         return NextResponse.json({
@@ -121,22 +121,19 @@ export async function GET(req: NextRequest) {
         const effectivePageSize = plan === 'free' ? Math.min(10, pageSize) : pageSize;
         const currentPageSize = Math.min(effectivePageSize, maxFetchLimit - products.length);
 
-        const response: any = await client.query({
-          data: {
-            query: productsQuery,
-            variables: {
-              first: currentPageSize,
-              after: cursor
-            }
+        const response: any = await client.request(productsQuery, {
+          variables: {
+            first: currentPageSize,
+            after: cursor
           }
         });
 
         // Transform GraphQL response to match existing format
-        if (!response.body || !response.body.data) {
+        if (!response || !response.data) {
           throw new Error('Invalid response from Shopify GraphQL API');
         }
 
-        const pageProducts = response.body.data.products.edges.map((edge: any) => {
+        const pageProducts = response.data.products.edges.map((edge: any) => {
           const product = edge.node;
           // Extract numeric ID from GID
           const productId = product.id.split('/').pop();
@@ -165,8 +162,8 @@ export async function GET(req: NextRequest) {
         products.push(...pageProducts);
 
         // Check if there are more pages
-        hasNextPage = response.body.data.products.pageInfo.hasNextPage;
-        cursor = response.body.data.products.pageInfo.endCursor;
+        hasNextPage = response.data.products.pageInfo.hasNextPage;
+        cursor = response.data.products.pageInfo.endCursor;
 
         // Break if we've reached the plan limit
         if (products.length >= maxFetchLimit) {
