@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
 
       await client.request(shopQuery);
     } catch (error: any) {
+      console.error('Shop query error:', error);
       if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
         return NextResponse.json({
           error: 'Authentication failed. The access token is invalid or expired. Please reinstall the app.',
@@ -129,11 +130,11 @@ export async function GET(req: NextRequest) {
         });
 
         // Transform GraphQL response to match existing format
-        if (!response || !response.products) {
+        if (!response || !response.data || !response.data.products) {
           throw new Error('Invalid response from Shopify GraphQL API');
         }
 
-        const pageProducts = response.products.edges.map((edge: any) => {
+        const pageProducts = response.data.products.edges.map((edge: any) => {
           const product = edge.node;
           // Extract numeric ID from GID
           const productId = product.id.split('/').pop();
@@ -162,8 +163,8 @@ export async function GET(req: NextRequest) {
         products.push(...pageProducts);
 
         // Check if there are more pages
-        hasNextPage = response.products.pageInfo.hasNextPage;
-        cursor = response.products.pageInfo.endCursor;
+        hasNextPage = response.data.products.pageInfo.hasNextPage;
+        cursor = response.data.products.pageInfo.endCursor;
 
         // Break if we've reached the plan limit
         if (products.length >= maxFetchLimit) {
@@ -176,6 +177,7 @@ export async function GET(req: NextRequest) {
         products = products.slice(0, maxFetchLimit);
       }
     } catch (error: any) {
+      console.error('Products fetch error:', error);
       // Handle specific error cases
       if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
         return NextResponse.json({
@@ -422,6 +424,10 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Internal server error in sync:', error);
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }

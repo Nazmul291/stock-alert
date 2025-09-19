@@ -49,8 +49,8 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
 
       const checkResponse: any = await client.request(checkQuery);
 
-      if (checkResponse?.webhookSubscriptions) {
-        const existingWebhooks = checkResponse.webhookSubscriptions.edges;
+      if (checkResponse?.data?.webhookSubscriptions) {
+        const existingWebhooks = checkResponse.data.webhookSubscriptions.edges;
         const exists = existingWebhooks.some(
           (edge: any) => {
             const node = edge.node;
@@ -99,9 +99,9 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
         }
       });
 
-      if (response?.webhookSubscriptionCreate?.userErrors?.length > 0) {
-        console.error(`Webhook registration error for ${webhook.topic}:`, response.webhookSubscriptionCreate.userErrors);
-      } else if (response?.webhookSubscriptionCreate?.webhookSubscription) {
+      if (response?.data?.webhookSubscriptionCreate?.userErrors?.length > 0) {
+        console.error(`Webhook registration error for ${webhook.topic}:`, response.data.webhookSubscriptionCreate.userErrors);
+      } else if (response?.data?.webhookSubscriptionCreate?.webhookSubscription) {
         console.log(`Successfully registered webhook: ${webhook.topic}`);
       }
     } catch (error) {
