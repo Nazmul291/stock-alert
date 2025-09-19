@@ -2,7 +2,7 @@
 
 import { Page, Layout, Card, Banner, Text, ProgressBar } from '@shopify/polaris';
 import SettingsForm from './settings-form';
-import ProductsTable from '../products/products-table';
+import ProductStats from '@/components/product-stats';
 import SyncProductsButton from './sync-products-button';
 import { PLAN_LIMITS } from '@/lib/plan-limits';
 
@@ -71,10 +71,10 @@ export default function SettingsContent({
           <Card>
             <div style={{ padding: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ margin: 0 }}>Product Threshold Settings</h2>
+                <h2 style={{ margin: 0 }}>Inventory Statistics</h2>
                 <SyncProductsButton shop={searchParams.shop || ''} />
               </div>
-              
+
               {/* Product Quota Display */}
               <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f9fafb', borderRadius: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -83,8 +83,8 @@ export default function SettingsContent({
                     {currentProducts}/{maxProducts} products ({plan.toUpperCase()} plan)
                   </Text>
                 </div>
-                <ProgressBar 
-                  progress={usagePercentage} 
+                <ProgressBar
+                  progress={usagePercentage}
                   tone={usagePercentage >= 90 ? 'critical' : usagePercentage >= 70 ? 'warning' : 'success'}
                 />
                 {usagePercentage >= 90 && (
@@ -93,18 +93,9 @@ export default function SettingsContent({
                   </Text>
                 )}
               </div>
-              
-              <p style={{ marginBottom: '15px', color: '#6b7280' }}>
-                Configure custom thresholds and settings for individual products. These settings override the global settings above.
-              </p>
-              {products.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#6b7280' }}>
-                  <p style={{ marginBottom: '10px' }}>No products found in your inventory.</p>
-                  <p style={{ fontSize: '14px' }}>Click "Sync Products from Shopify" above to import your products.</p>
-                </div>
-              ) : (
-                <ProductsTable products={products} shop={searchParams.shop || ''} />
-              )}
+
+              {/* Product Statistics Dashboard */}
+              <ProductStats shop={searchParams.shop || ''} />
             </div>
           </Card>
         </Layout.Section>

@@ -41,9 +41,9 @@ export async function GET(req: NextRequest) {
       .from('inventory_tracking')
       .select('product_id')
       .eq('store_id', store.id);
-    
-    // Count distinct products (not variants)
-    const distinctProductIds = new Set(currentProducts?.map(p => p.product_id) || []);
+
+    // Count distinct products (not variants) - ensure all IDs are strings for comparison
+    const distinctProductIds = new Set(currentProducts?.map(p => String(p.product_id)) || []);
     const currentProductCount = distinctProductIds.size;
 
 
@@ -72,12 +72,13 @@ export async function GET(req: NextRequest) {
       throw error;
     }
 
-    // Fetch products from Shopify using GraphQL
-    const fetchLimit = plan === 'free' ? 50 : 250; // Free plans don't need to fetch as many
+    // Fetch products from Shopify using GraphQL with pagination
+    const pageSize = 250; // Shopify's max limit per page
+    const maxFetchLimit = plan === 'free' ? 10 : 10000; // Free: 10 products, Pro: 10000 products
 
     const productsQuery = `
-      query getProducts($first: Int!) {
-        products(first: $first) {
+      query getProducts($first: Int!, $after: String) {
+        products(first: $first, after: $after) {
           edges {
             node {
               id
@@ -101,52 +102,82 @@ export async function GET(req: NextRequest) {
               }
             }
           }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
         }
       }
     `;
 
     let products = [];
+    let hasNextPage = true;
+    let cursor = null;
 
     try {
-      const response: any = await client.query({
-        data: {
-          query: productsQuery,
-          variables: {
-            first: fetchLimit
-          }
-        }
-      });
+      // Fetch products with pagination
+      while (hasNextPage && products.length < maxFetchLimit) {
+        // For free plan, fetch only what's needed (10 products max)
+        const effectivePageSize = plan === 'free' ? Math.min(10, pageSize) : pageSize;
+        const currentPageSize = Math.min(effectivePageSize, maxFetchLimit - products.length);
 
-      // Transform GraphQL response to match existing format
-      if (!response.body || !response.body.data) {
-        throw new Error('Invalid response from Shopify GraphQL API');
+        const response: any = await client.query({
+          data: {
+            query: productsQuery,
+            variables: {
+              first: currentPageSize,
+              after: cursor
+            }
+          }
+        });
+
+        // Transform GraphQL response to match existing format
+        if (!response.body || !response.body.data) {
+          throw new Error('Invalid response from Shopify GraphQL API');
+        }
+
+        const pageProducts = response.body.data.products.edges.map((edge: any) => {
+          const product = edge.node;
+          // Extract numeric ID from GID
+          const productId = product.id.split('/').pop();
+
+          return {
+            id: productId,
+            title: product.title,
+            handle: product.handle,
+            status: product.status,
+            variants: product.variants.edges.map((vEdge: any) => {
+              const variant = vEdge.node;
+              const variantId = variant.id.split('/').pop();
+              const inventoryItemId = variant.inventoryItem?.id?.split('/').pop();
+
+              return {
+                id: variantId,
+                title: variant.title,
+                sku: variant.sku,
+                inventory_quantity: variant.inventoryQuantity || 0,
+                inventory_item_id: inventoryItemId
+              };
+            })
+          };
+        });
+
+        products.push(...pageProducts);
+
+        // Check if there are more pages
+        hasNextPage = response.body.data.products.pageInfo.hasNextPage;
+        cursor = response.body.data.products.pageInfo.endCursor;
+
+        // Break if we've reached the plan limit
+        if (products.length >= maxFetchLimit) {
+          break;
+        }
       }
 
-      products = response.body.data.products.edges.map((edge: any) => {
-        const product = edge.node;
-        // Extract numeric ID from GID
-        const productId = product.id.split('/').pop();
-
-        return {
-          id: productId,
-          title: product.title,
-          handle: product.handle,
-          status: product.status,
-          variants: product.variants.edges.map((vEdge: any) => {
-            const variant = vEdge.node;
-            const variantId = variant.id.split('/').pop();
-            const inventoryItemId = variant.inventoryItem?.id?.split('/').pop();
-
-            return {
-              id: variantId,
-              title: variant.title,
-              sku: variant.sku,
-              inventory_quantity: variant.inventoryQuantity || 0,
-              inventory_item_id: inventoryItemId
-            };
-          })
-        };
-      });
+      // Trim to exact limit if we fetched more
+      if (products.length > maxFetchLimit) {
+        products = products.slice(0, maxFetchLimit);
+      }
     } catch (error: any) {
       // Handle specific error cases
       if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
@@ -176,13 +207,11 @@ export async function GET(req: NextRequest) {
 
     // Calculate how many products we can sync based on plan limits
     const remainingSlots = Math.max(0, maxProducts - existingProductCount);
-    
-    if (remainingSlots === 0) {
-      const upgradeMessage = plan === 'free' 
-        ? 'Please upgrade to Professional to sync more products.'
-        : 'You have reached the maximum products for your plan.';
-        
-      return NextResponse.json({ 
+
+    if (remainingSlots === 0 && plan === 'free') {
+      const upgradeMessage = 'Please upgrade to Professional to sync more products.';
+
+      return NextResponse.json({
         error: `Product limit reached. You have already synced ${existingProductCount}/${maxProducts} products on the ${plan} plan. ${upgradeMessage}`,
         currentCount: existingProductCount,
         maxProducts: maxProducts,
@@ -195,17 +224,23 @@ export async function GET(req: NextRequest) {
     const inventoryData = [];
     const productsToSync = [];
     let newProductCount = 0;
+    let updatedProductCount = 0;
 
-    // Filter products - prioritize new products up to the limit
+    // For Pro plan, sync ALL products. For Free plan, respect the limit
     for (const product of products) {
-      if (!existingProductIds.has(product.id)) {
-        if (newProductCount < remainingSlots) {
+      const productIdStr = String(product.id);
+      const isExistingProduct = existingProductIds.has(productIdStr);
+
+      if (!isExistingProduct) {
+        // New product
+        if (plan === 'pro' || newProductCount < remainingSlots) {
           productsToSync.push(product);
           newProductCount++;
         }
       } else {
-        // Always include already synced products for updates
+        // Existing product - always update
         productsToSync.push(product);
+        updatedProductCount++;
       }
     }
 
@@ -272,9 +307,9 @@ export async function GET(req: NextRequest) {
         .eq('store_id', store.id)
         .in('product_id', inventoryData.map(item => item.product_id));
 
-      // Create a map for quick lookups
+      // Create a map for quick lookups - ensure keys are strings
       const existingMap = new Map(
-        existingProducts?.map(p => [p.product_id, p.id]) || []
+        existingProducts?.map(p => [String(p.product_id), p.id]) || []
       );
 
       // Separate into updates and inserts
@@ -282,7 +317,10 @@ export async function GET(req: NextRequest) {
       const inserts = [];
 
       for (const item of inventoryData) {
-        const existingId = existingMap.get(item.product_id);
+        // Ensure product_id is a string for consistent comparison
+        const productIdString = String(item.product_id);
+        const existingId = existingMap.get(productIdString);
+
         if (existingId) {
           updates.push({
             ...item,
@@ -305,7 +343,10 @@ export async function GET(req: NextRequest) {
         const { error } = await supabaseAdmin
           .from('inventory_tracking')
           .insert(inserts);
-        if (error) errors.push(`Insert error: ${error.message}`);
+
+        if (error) {
+          errors.push(`Insert error: ${error.message}`);
+        }
       }
 
       // Batch update existing products (Supabase upsert handles this)
@@ -313,11 +354,15 @@ export async function GET(req: NextRequest) {
         const { error } = await supabaseAdmin
           .from('inventory_tracking')
           .upsert(updates);
-        if (error) errors.push(`Update error: ${error.message}`);
+
+        if (error) {
+          errors.push(`Update error: ${error.message}`);
+        }
       }
 
       if (errors.length > 0) {
-        // Handle batch operation errors silently
+        // Log errors but continue - don't fail the whole sync for partial errors
+        console.error('Sync encountered some errors:', errors);
       }
     }
 

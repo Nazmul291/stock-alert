@@ -26,11 +26,97 @@ async function verifyWebhook(req: NextRequest, body: string): Promise<boolean> {
   return isValid;
 }
 
+// Background processing function
+async function processInventoryUpdate(
+  data: any,
+  shop: string,
+  webhookTopic: string
+) {
+  try {
+    // Get store from database
+    const { data: store } = await supabaseAdmin
+      .from('stores')
+      .select('*')
+      .eq('shop_domain', shop)
+      .single();
+
+    if (!store) {
+      console.error('Store not found:', shop);
+      return;
+    }
+
+    const graphqlClient = await getGraphQLClient(shop, store.access_token);
+
+    // Continue with the rest of the processing...
+    // For inventory_levels/update webhook, the structure is different
+    const inventoryItemId = data.inventory_item_id;
+
+    if (!inventoryItemId) {
+      console.log('No inventory item ID in webhook payload');
+      return;
+    }
+
+    // Rest of the processing logic will follow...
+    await processInventoryLogic(data, store, graphqlClient, inventoryItemId);
+  } catch (error) {
+    console.error('Error processing inventory update:', error);
+    // Log error to database for debugging
+    try {
+      await supabaseAdmin
+        .from('webhook_errors')
+        .insert({
+          shop_domain: shop,
+          topic: webhookTopic,
+          error_message: error instanceof Error ? error.message : 'Unknown error',
+          payload: data,
+          created_at: new Date().toISOString()
+        });
+    } catch (logError) {
+      console.error('Failed to log webhook error:', logError);
+    }
+  }
+}
+
+// Main processing logic extracted to separate function
+async function processInventoryLogic(
+  data: any,
+  store: any,
+  graphqlClient: any,
+  inventoryItemId: string
+) {
+  // This function contains the main processing logic
+  // Moved from the main POST handler for async processing
+
+  const query = `
+    query {
+      inventoryItem(id: "gid://shopify/InventoryItem/${inventoryItemId}") {
+        variant {
+          product {
+            id
+          }
+        }
+      }
+    }`;
+
+  const response = await graphqlClient.request(query);
+  const productGID = response?.data?.inventoryItem?.variant?.product?.id;
+
+  if (!productGID) {
+    console.log('Could not determine product GID for inventory update');
+    return;
+  }
+
+  // Continue with the rest of the processing logic...
+  // (All the remaining logic from the original handler will be here)
+  await continueProcessing(data, store, graphqlClient, productGID);
+}
+
+
 export async function POST(req: NextRequest) {
-  
+
   try {
     const body = await req.text();
-    
+
     // Verify webhook
     const isValid = await verifyWebhook(req, body);
     if (!isValid) {
@@ -39,8 +125,6 @@ export async function POST(req: NextRequest) {
 
     const data = JSON.parse(body);
     const shop = req.headers.get('x-shopify-shop-domain');
-
-    // Get the webhook topic
     const webhookTopic = req.headers.get('x-shopify-topic');
 
     if (!shop) {
@@ -50,7 +134,6 @@ export async function POST(req: NextRequest) {
     // Handle products/update webhooks separately
     if (webhookTopic === 'products/update') {
       // For products/update webhooks, we don't need to process inventory changes
-      // These are triggered when product status changes (draft -> active)
       return NextResponse.json({
         success: true,
         message: 'Product update webhook received',
@@ -65,143 +148,124 @@ export async function POST(req: NextRequest) {
         message: `Webhook topic ${webhookTopic} not handled by this endpoint`
       }, { status: 200 });
     }
-    
-    // Get store from database
-    const { data: store } = await supabaseAdmin
-    .from('stores')
-    .select('*')
-    .eq('shop_domain', shop)
-    .single();
-    
-    if (!store) {
-      return NextResponse.json({ error: 'Store not found' }, { status: 404 });
-    }
-    const graphqlClient = await getGraphQLClient(shop, store.access_token)
 
-    // For inventory_levels/update webhook, the structure is different
-    // Expected: { inventory_item_id: ..., location_id: ..., available: ... }
-    const inventoryItemId = data.inventory_item_id;
+    // IMMEDIATE RESPONSE - Send 200 OK to Shopify right away
+    // This prevents 408 timeout errors
 
-    if (!inventoryItemId) {
-      return NextResponse.json({
-        warning: 'No inventory item ID in webhook payload',
-        data: data
-      }, { status: 200 });
-    }
-
-    const query = `
-      query {
-        inventoryItem(id: "gid://shopify/InventoryItem/${inventoryItemId}") {
-          variant {
-            product {
-              id
-            }
-          }
-        }
-      }`
-
-    // Use the new request method instead of deprecated query method
-    
-    const response = await graphqlClient.request(query);
-    
-
-    const productGID = response?.data?.inventoryItem?.variant?.product?.id;
-    
-
-    // Get store settings
-    const { data: settings } = await supabaseAdmin
-      .from('store_settings')
-      .select('*')
-      .eq('store_id', store.id)
-      .single();
-
-    if (!settings) {
-      return NextResponse.json({ error: 'Settings not found' }, { status: 404 });
-    }
-
-    // Log webhook event
-    await supabaseAdmin
-      .from('webhook_events')
-      .insert({
-        store_id: store.id,
-        topic: 'inventory_levels/update',
-        payload: data,
-        processed: false,
+    // Process the webhook asynchronously in the background
+    // Using setImmediate or process.nextTick to ensure response is sent first
+    setImmediate(() => {
+      processInventoryUpdate(data, shop, webhookTopic).catch(error => {
+        console.error('Background processing error:', error);
       });
+    });
 
-    const client = await getShopifyClient(shop, store.access_token);
-    
-    // Find which product this inventory_item_id belongs to
-    let productId = productGID.split('/').pop();
-    let product = null;
-    
-    try {
+    // Return success immediately to Shopify
+    return NextResponse.json({
+      success: true,
+      message: 'Webhook received and queued for processing'
+    }, { status: 200 })
+  } catch (error) {
+    // IMPORTANT: Return 200 to prevent Shopify from retrying
+    // We log the error but don't want webhook retries for internal issues
+    return NextResponse.json({
+      success: true,
+      warning: 'Webhook processed with errors, check logs'
+    }, { status: 200 });
+  }
+}
 
-      // Fetch product using GraphQL to avoid REST API deprecation
-      const productQuery = `
-        query getProduct($id: ID!) {
-          product(id: $id) {
-            id
-            title
-            status
-            variants(first: 250) {
-              edges {
-                node {
-                  id
-                  title
-                  sku
-                  inventoryQuantity
-                }
+// Move the rest of the processing logic to the continueProcessing function
+async function continueProcessing(
+  data: any,
+  store: any,
+  graphqlClient: any,
+  productGID: string
+) {
+  // Get store settings
+  const { data: settings } = await supabaseAdmin
+    .from('store_settings')
+    .select('*')
+    .eq('store_id', store.id)
+    .single();
+
+  if (!settings) {
+    console.error('Settings not found for store:', store.id);
+    return;
+  }
+
+  // Log webhook event
+  await supabaseAdmin
+    .from('webhook_events')
+    .insert({
+      store_id: store.id,
+      topic: 'inventory_levels/update',
+      payload: data,
+      processed: false,
+    });
+
+  const client = await getShopifyClient(store.shop_domain, store.access_token);
+
+  // Find which product this inventory_item_id belongs to
+  let productId = productGID.split('/').pop();
+  let product = null;
+
+  try {
+    // Fetch product using GraphQL to avoid REST API deprecation
+    const productQuery = `
+      query getProduct($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          status
+          variants(first: 250) {
+            edges {
+              node {
+                id
+                title
+                sku
+                inventoryQuantity
               }
             }
           }
-        }`;
-
-      
-      const productResponse = await graphqlClient.request(productQuery, {
-        variables: {
-          id: productGID
         }
-      });
+      }`;
 
-      
-
-      if (productResponse?.data?.product) {
-        // Convert GraphQL response to REST format for compatibility
-        const gqlProduct = productResponse.data.product;
-        product = {
-          id: gqlProduct.id.split('/').pop(),
-          title: gqlProduct.title,
-          status: gqlProduct.status.toLowerCase(),
-          variants: gqlProduct.variants.edges.map((edge: any) => ({
-            id: edge.node.id.split('/').pop(),
-            title: edge.node.title,
-            sku: edge.node.sku,
-            inventory_quantity: edge.node.inventoryQuantity || 0
-          }))
-        };
-        
-      } else {
-        
+    const productResponse = await graphqlClient.request(productQuery, {
+      variables: {
+        id: productGID
       }
+    });
 
-    } catch (apiError: any) {
-      // Error caught but not logged in production
-    }
-    
-    if (!productId || !product) {
-      
-      return NextResponse.json({
-        warning: 'Could not determine product for inventory update'
-      }, { status: 200 });
+    if (productResponse?.data?.product) {
+      // Convert GraphQL response to REST format for compatibility
+      const gqlProduct = productResponse.data.product;
+      product = {
+        id: gqlProduct.id.split('/').pop(),
+        title: gqlProduct.title,
+        status: gqlProduct.status.toLowerCase(),
+        variants: gqlProduct.variants.edges.map((edge: any) => ({
+          id: edge.node.id.split('/').pop(),
+          title: edge.node.title,
+          sku: edge.node.sku,
+          inventory_quantity: edge.node.inventoryQuantity || 0
+        }))
+      };
     }
 
-    if (!productGID) {
-      
-      return NextResponse.json({
-        warning: 'Could not determine product GID for inventory update'
-      }, { status: 200 });
-    }
+  } catch (apiError: any) {
+    console.error('Error fetching product:', apiError);
+  }
+
+  if (!productId || !product) {
+    console.log('Could not determine product for inventory update');
+    return;
+  }
+
+  if (!productGID) {
+    console.log('Could not determine product GID for inventory update');
+    return;
+  }
     
     // Calculate total quantity across all variants
     let totalQuantity = 0;
@@ -462,13 +526,4 @@ export async function POST(req: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(1);
 
-    return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error) {
-    // IMPORTANT: Return 200 to prevent Shopify from retrying
-    // We log the error but don't want webhook retries for internal issues
-    return NextResponse.json({ 
-      success: true,
-      warning: 'Webhook processed with errors, check logs'
-    }, { status: 200 });
-  }
 }
