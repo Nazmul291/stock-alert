@@ -80,9 +80,7 @@ export default function DashboardClient({
     const steps = [
       setupProgress.app_installed,
       setupProgress.global_settings_configured,
-      setupProgress.notifications_configured,
-      setupProgress.product_thresholds_configured,
-      setupProgress.first_product_tracked
+      setupProgress.notifications_configured
     ];
     return (steps.filter(Boolean).length / steps.length) * 100;
   };
@@ -161,20 +159,6 @@ export default function DashboardClient({
                       <Text as="span" tone="success">✓ Notifications Set Up</Text>
                     ) : (
                       <Text as="span">Set Up Notifications</Text>
-                    )}
-                  </List.Item>
-                  <List.Item>
-                    {setupProgress?.product_thresholds_configured ? (
-                      <Text as="span" tone="success">✓ Product Thresholds Set</Text>
-                    ) : (
-                      <Text as="span">Configure Product Thresholds</Text>
-                    )}
-                  </List.Item>
-                  <List.Item>
-                    {setupProgress?.first_product_tracked ? (
-                      <Text as="span" tone="success">✓ First Product Tracked</Text>
-                    ) : (
-                      <Text as="span">Track Your First Product</Text>
                     )}
                   </List.Item>
                 </List>

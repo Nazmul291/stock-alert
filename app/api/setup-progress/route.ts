@@ -105,12 +105,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Calculate overall progress percentage
+    // Calculate overall progress percentage - only 3 steps now
     const steps = [
       'app_installed',
-      'global_settings_configured', 
-      'notifications_configured',
-      'product_thresholds_configured'
+      'global_settings_configured',
+      'notifications_configured'
     ];
 
     const completedSteps = steps.filter(step => progress && progress[step]).length;

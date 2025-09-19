@@ -61,17 +61,16 @@ export default function HomeContent({ searchParams, setupProgress, store }: Home
     return "Good evening";
   };
 
-  // Calculate setup progress percentage
+  // Calculate setup progress percentage - only 3 steps now
   const calculateProgress = () => {
-    if (!setupProgress) return 25; // Default if no data
-    
+    if (!setupProgress) return 33; // Default if no data (app installed = 33%)
+
     const steps = [
       setupProgress.app_installed,
       setupProgress.global_settings_configured,
-      setupProgress.notifications_configured,
-      setupProgress.product_thresholds_configured
+      setupProgress.notifications_configured
     ];
-    
+
     const completedSteps = steps.filter(step => step).length;
     return Math.round((completedSteps / steps.length) * 100);
   };
@@ -368,15 +367,6 @@ export default function HomeContent({ searchParams, setupProgress, store }: Home
                           </Badge>
                           <Text variant="bodySm" tone={setupProgress?.notifications_configured ? undefined : "subdued"}>
                             Set up notifications
-                          </Text>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <Badge tone={setupProgress?.product_thresholds_configured ? "success" : undefined} size="small">
-                            {setupProgress?.product_thresholds_configured ? '✓' : '○'}
-                          </Badge>
-                          <Text variant="bodySm" tone={setupProgress?.product_thresholds_configured ? undefined : "subdued"}>
-                            Configure product thresholds
                           </Text>
                         </div>
                       </BlockStack>
