@@ -27,6 +27,7 @@ import {
   XIcon
 } from '@shopify/polaris-icons';
 import { format } from 'date-fns';
+import ShopifyVerificationPanel from '@/components/shopify-verification-panel';
 
 interface DashboardClientProps {
   store: any;
@@ -119,6 +120,11 @@ export default function DashboardClient({
         </div>
       )}
       <Layout>
+        {/* Shopify Verification Panel */}
+        <Layout.Section>
+          <ShopifyVerificationPanel />
+        </Layout.Section>
+
         {/* Welcome Banner for new users */}
         {progressPercentage < 100 && (
           <Layout.Section>
