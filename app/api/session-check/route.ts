@@ -4,13 +4,22 @@ import { requireSessionToken } from '@/lib/session-token';
 // Simple endpoint for Shopify to verify session token implementation
 export async function GET(req: NextRequest) {
   try {
+    const authHeader = req.headers.get('authorization');
+    const hasApiSecret = !!process.env.SHOPIFY_API_SECRET;
+
     const authResult = await requireSessionToken(req);
 
     if (!authResult.isAuthenticated) {
       return NextResponse.json({
-        error: 'Unauthorized',
+        error: authResult.error || 'Unauthorized',
+        errorCode: authResult.errorCode,
         message: 'Valid session token required',
-        authenticated: false
+        authenticated: false,
+        debug: {
+          hasAuthHeader: !!authHeader,
+          hasApiSecret,
+          tokenLength: authHeader ? authHeader.length : 0
+        }
       }, { status: 401 });
     }
 
