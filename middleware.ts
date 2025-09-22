@@ -61,7 +61,8 @@ export async function middleware(request: NextRequest) {
       '/api/products/validate',
       '/api/setup-progress',
       '/api/webhooks/register',
-      '/api/webhooks/list'
+      '/api/webhooks/list',
+      '/api/session-check'
     ];
 
     const isProtectedRoute = protectedApiRoutes.some(route =>

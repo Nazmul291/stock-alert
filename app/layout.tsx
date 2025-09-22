@@ -4,6 +4,7 @@ import "./globals.css";
 import PolarisProvider from '@/components/polaris-provider';
 import AppBridgeProvider from '@/components/app-bridge-provider';
 import ReduxProvider from '@/components/redux-provider';
+import SessionDebug from '@/components/session-debug';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -31,6 +32,7 @@ export default function RootLayout({
         <ReduxProvider>
           <AppBridgeProvider>
             <PolarisProvider>
+              <SessionDebug />
               {children}
             </PolarisProvider>
           </AppBridgeProvider>
