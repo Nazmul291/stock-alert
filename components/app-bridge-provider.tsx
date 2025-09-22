@@ -65,7 +65,6 @@ function AppBridgeProviderInner({ children }: AppBridgeProviderProps) {
       {isReady && host && (
         <NavMenu>
           <a href={getUrl('/')} rel="home">Home</a>
-          <a href={getUrl('/dashboard')}>Dashboard</a>
           <a href={getUrl('/products')}>Products</a>
           <a href={getUrl('/settings')}>Settings</a>
           <a href={getUrl('/billing')}>Billing</a>
