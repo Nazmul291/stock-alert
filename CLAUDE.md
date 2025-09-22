@@ -1,0 +1,9 @@
+- always use descriptive variable name
+- always avoide duplicating files and functionality
+- always use existing feature if possible - you can modify it
+- always adapt the current archetecture
+- always clean up test files and script that you created for testing
+- do not do unnecessery build if not ask
+- always follow the best practices
+- try to achive more functionality with less code
+- always create reusable function and components

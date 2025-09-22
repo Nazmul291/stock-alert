@@ -2,21 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { registerWebhooks } from '@/lib/webhook-registration';
 import { getGraphQLClient } from '@/lib/shopify';
+import { requireSessionToken } from '@/lib/session-token';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { shop } = body;
+    // Require valid session token for webhook management
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Get store from database
     const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('id, access_token')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (storeError || !store || !store.access_token) {
@@ -25,10 +30,10 @@ export async function POST(req: NextRequest) {
 
 
     // Register webhooks
-    await registerWebhooks(shop, store.access_token);
+    await registerWebhooks(shopDomain, store.access_token);
 
     // Initialize GraphQL client for verification
-    const client = await getGraphQLClient(shop, store.access_token);
+    const client = await getGraphQLClient(shopDomain, store.access_token);
 
     // Verify registration by fetching the list using GraphQL
     const query = `

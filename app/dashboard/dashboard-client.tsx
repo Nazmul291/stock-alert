@@ -306,6 +306,12 @@ export default function DashboardClient({
           </Card>
         </Layout.Section>
 
+        {/* Session Token Debug - Only in development */}
+        {process.env.NODE_ENV === 'development' && (
+          <Layout.Section>
+          </Layout.Section>
+        )}
+
         {/* Store Info */}
         <Layout.Section>
           <Card>

@@ -1,27 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { getSessionTokenFromRequest, getShopFromToken } from '@/lib/session-token';
+import { requireSessionToken } from '@/lib/session-token';
 
 export async function GET(req: NextRequest) {
   try {
-    // Get shop from session token or query param
-    let shop: string | null = null;
-    const sessionToken = await getSessionTokenFromRequest(req);
-    if (sessionToken) {
-      shop = getShopFromToken(sessionToken);
-    } else {
-      shop = req.nextUrl.searchParams.get('shop');
+    // Require valid session token
+    const authResult = await requireSessionToken(req);
+
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop not identified' }, { status: 400 });
-    }
+    const shopDomain = authResult.shopDomain!;
 
     // Get store from database
     const { data: store } = await supabaseAdmin
       .from('stores')
       .select('id, plan')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (!store) {

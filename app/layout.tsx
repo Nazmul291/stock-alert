@@ -25,7 +25,7 @@ export default function RootLayout({
           rel="stylesheet" 
           href="https://unpkg.com/@shopify/polaris@12.27.0/build/esm/styles.css"
         />
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" data-api-key={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}></script>
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
       </head>
       <body className={inter.className} suppressHydrationWarning>
         <ReduxProvider>

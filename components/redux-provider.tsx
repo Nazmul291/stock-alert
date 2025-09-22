@@ -6,7 +6,7 @@ import { useEffect, Suspense, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAppDispatch } from '@/store/hooks';
 import { setAuth, setLoading } from '@/store/authSlice';
-import { getSessionTokenFromURL } from '@/hooks/useAppBridge';
+import { getSessionTokenFromURL } from '@/hooks/session-helpers';
 
 function AuthInitializerInner({ children }: { children: React.ReactNode }) {
   const dispatch = useAppDispatch();

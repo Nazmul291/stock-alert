@@ -1,21 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { getGraphQLClient } from '@/lib/shopify';
+import { requireSessionToken } from '@/lib/session-token';
 
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const shop = searchParams.get('shop');
+    // Require valid session token for webhook management
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Get store from database
     const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('id, access_token')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (storeError || !store || !store.access_token) {
@@ -23,7 +28,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Initialize GraphQL client
-    const client = await getGraphQLClient(shop, store.access_token);
+    const client = await getGraphQLClient(shopDomain, store.access_token);
 
     // Fetch registered webhooks from Shopify using GraphQL
     const query = `
@@ -72,7 +77,7 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({
-      shop,
+      shop: shopDomain,
       count: formattedWebhooks.length,
       webhooks: formattedWebhooks,
       expectedWebhooks: [
