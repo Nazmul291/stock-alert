@@ -17,13 +17,18 @@ export async function verifySessionToken(token: string): Promise<SessionTokenPay
   const apiSecret = process.env.SHOPIFY_API_SECRET;
 
   if (!apiSecret) {
+    console.error('[SESSION_TOKEN] SHOPIFY_API_SECRET environment variable is not set');
     return null;
   }
 
   try {
+    // First decode without verification to see the payload
+    const decodedHeader = jwt.decode(token, { complete: true });
+
     const decoded = jwt.verify(token, apiSecret, {
       algorithms: ['HS256'],
-      complete: false
+      complete: false,
+      clockTolerance: 60 // Allow 60 seconds clock skew
     }) as SessionTokenPayload;
 
     // Extract shop domain from the dest field
