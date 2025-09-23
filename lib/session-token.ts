@@ -28,7 +28,7 @@ export async function verifySessionToken(token: string): Promise<SessionTokenPay
     const decoded = jwt.verify(token, apiSecret, {
       algorithms: ['HS256'],
       complete: false,
-      clockTolerance: 60 // Allow 60 seconds clock skew
+      clockTolerance: 300 // Allow 5 minutes clock skew for development
     }) as SessionTokenPayload;
 
     // Extract shop domain from the dest field

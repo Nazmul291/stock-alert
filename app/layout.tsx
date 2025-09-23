@@ -32,7 +32,7 @@ export default function RootLayout({
         <ReduxProvider>
           <AppBridgeProvider>
             <PolarisProvider>
-              {/* <SessionMonitor /> */}
+              <SessionMonitor />
               {children}
             </PolarisProvider>
           </AppBridgeProvider>

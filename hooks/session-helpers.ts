@@ -8,39 +8,93 @@ export function getSessionTokenFromURL(): string | null {
   return params.get('id_token');
 }
 
-export async function getSessionToken(appBridge: any): Promise<string | null> {
-  // First, check if token is in URL (fastest, most reliable)
-  const urlToken = getSessionTokenFromURL();
-  if (urlToken) {
-    return urlToken;
+export async function getSessionToken(appBridge: any, forceRefresh: boolean = false): Promise<string | null> {
+  // If not forcing refresh, check URL token first
+  if (!forceRefresh) {
+    const urlToken = getSessionTokenFromURL();
+    if (urlToken) {
+      return urlToken;
+    }
   }
 
-  // Try to get token from App Bridge (for dynamic refresh)
+  // Try to get fresh token from App Bridge (multiple attempts for reliability)
   try {
-    // Modern API - window.shopify.idToken is the standard method
-    if (window.shopify && typeof window.shopify.idToken === 'function') {
-      const sessionToken = await window.shopify.idToken();
-      if (sessionToken) {
-        return sessionToken;
+    let sessionToken: string | null = null;
+
+    // Method 1: Modern App Bridge v4+ API - ShopifyBridge.getSessionToken
+    if (window.ShopifyBridge && typeof window.ShopifyBridge.getSessionToken === 'function') {
+      try {
+        sessionToken = await window.ShopifyBridge.getSessionToken();
+        if (sessionToken) {
+          return sessionToken;
+        }
+      } catch (error) {
+        // Continue to next method
       }
     }
 
-    // Fallback to appBridge object methods
+    // Method 2: Legacy API - window.shopify.idToken
+    if (window.shopify && typeof window.shopify.idToken === 'function') {
+      try {
+        sessionToken = await window.shopify.idToken();
+        if (sessionToken) {
+          return sessionToken;
+        }
+      } catch (error) {
+        // Continue to next method
+      }
+    }
+
+    // Method 3: AppBridge object methods
     if (appBridge) {
       // Try idToken method on appBridge
       if (typeof appBridge.idToken === 'function') {
-        const sessionToken = await appBridge.idToken();
-        if (sessionToken) {
-          return sessionToken;
+        try {
+          sessionToken = await appBridge.idToken();
+          if (sessionToken) {
+            return sessionToken;
+          }
+        } catch (error) {
+          // Continue to next method
         }
       }
 
       // Legacy getSessionToken method
       if (typeof appBridge.getSessionToken === 'function') {
-        const sessionToken = await appBridge.getSessionToken();
-        if (sessionToken) {
-          return sessionToken;
+        try {
+          sessionToken = await appBridge.getSessionToken();
+          if (sessionToken) {
+            return sessionToken;
+          }
+        } catch (error) {
+          // Continue to next method
         }
+      }
+    }
+
+    // Method 4: Try to recreate App Bridge instance and get fresh token
+    if (window.shopify && typeof window.shopify.createApp === 'function') {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const host = urlParams.get('host');
+        const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_API_KEY;
+
+        if (host && apiKey) {
+          const freshApp = window.shopify.createApp({
+            apiKey: apiKey,
+            host: host,
+            forceRedirect: false,
+          });
+
+          if (freshApp && typeof freshApp.idToken === 'function') {
+            sessionToken = await freshApp.idToken();
+            if (sessionToken) {
+              return sessionToken;
+            }
+          }
+        }
+      } catch (error) {
+        // Final fallback failed
       }
     }
 
@@ -54,6 +108,12 @@ declare global {
   interface Window {
     shopify?: {
       idToken?: () => Promise<string>;
+      createApp?: (config: any) => any;
+      [key: string]: any;
+    };
+    ShopifyBridge?: {
+      getSessionToken?: () => Promise<string>;
+      createApp?: (config: any) => any;
       [key: string]: any;
     };
   }

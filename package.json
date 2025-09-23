@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.9.0",
-    "@shopify/app-bridge-react": "^4.2.2",
+    "@shopify/app-bridge-react": "^4.2.3",
     "@shopify/polaris": "12",
     "@shopify/polaris-icons": "^9.3.1",
     "@shopify/shopify-api": "^11.14.1",

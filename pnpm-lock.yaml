@@ -12,8 +12,8 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0(react-redux@9.2.0(@types/react@19.1.12)(react@19.1.0)(redux@5.0.1))(react@19.1.0)
       '@shopify/app-bridge-react':
-        specifier: ^4.2.2
-        version: 4.2.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+        specifier: ^4.2.3
+        version: 4.2.3(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@shopify/polaris':
         specifier: '12'
         version: 12.27.0(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -562,14 +562,14 @@ packages:
   '@shopify/admin-api-client@1.1.1':
     resolution: {integrity: sha512-J/cdodM7jmk9yKxHnkrnVHP2Gm70w2dFA4O3ehPvIBsXvK0PwXmiRjQOCCPfyLo442awON5soQ/XuWVSUmZL/g==}
 
-  '@shopify/app-bridge-react@4.2.2':
-    resolution: {integrity: sha512-mgOs/DwwJvKNuK4n4m/7UrB1hGS6psn4hYYDm4OTGfXGu/l0V5QVZSIGgjCLmgH6sT0uMTuBY0IRCCPLKrj+kg==}
+  '@shopify/app-bridge-react@4.2.3':
+    resolution: {integrity: sha512-9Ijs/S3/y+zTRCID9CZbPmbWWYL044Jp+81n2iHOC+NIHrZkYyO6BVBaksmvlLHZyKjdU8VeTuziMUMLKEupRA==}
     peerDependencies:
       react: '*'
       react-dom: '*'
 
-  '@shopify/app-bridge-types@0.3.0':
-    resolution: {integrity: sha512-6LnQDfE5TP5RtlFFh/3S//9UmwS7rRsfDOHTPkZxvEZw5p+j0WfZcFnsq+ntr5Uc+xd3wZ0GZxt1GY1cm4/3bA==}
+  '@shopify/app-bridge-types@0.4.0':
+    resolution: {integrity: sha512-JhyNu0n4381ZqxbsyRU+v2mahePn39NfpSPIzA2+RKCD7xFMnejJcsKgV4p4uVmT52y7VKwNO9vmlmh7juVGfA==}
 
   '@shopify/graphql-client@1.4.1':
     resolution: {integrity: sha512-/w4Uchx8ueI8gwmJd1ZbbIGndsjfMEFlzmay3P7rya5zj7K308xne/ggIvWDweueIut2qf1A8lI58xQl9Pu22w==}
@@ -3215,13 +3215,13 @@ snapshots:
     dependencies:
       '@shopify/graphql-client': 1.4.1
 
-  '@shopify/app-bridge-react@4.2.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0)':
+  '@shopify/app-bridge-react@4.2.3(react-dom@19.1.0(react@19.1.0))(react@19.1.0)':
     dependencies:
-      '@shopify/app-bridge-types': 0.3.0
+      '@shopify/app-bridge-types': 0.4.0
       react: 19.1.0
       react-dom: 19.1.0(react@19.1.0)
 
-  '@shopify/app-bridge-types@0.3.0': {}
+  '@shopify/app-bridge-types@0.4.0': {}
 
   '@shopify/graphql-client@1.4.1': {}
 

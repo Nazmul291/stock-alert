@@ -31,7 +31,7 @@ export async function verifySessionTokenEdge(token: string): Promise<SessionToke
     // Verify the JWT
     const { payload } = await jwtVerify(token, secret, {
       algorithms: ['HS256'],
-      clockTolerance: 60 // Allow 60 seconds clock skew
+      clockTolerance: 300 // Allow 5 minutes clock skew for development
     });
 
     const decoded = payload as unknown as SessionTokenPayload;

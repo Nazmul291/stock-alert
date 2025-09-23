@@ -22,31 +22,40 @@ export default function AuthBouncePage() {
           throw new Error('Missing required parameters (shop or host)');
         }
 
-        // Wait for App Bridge to load
+        // Wait for App Bridge to load (both modern and legacy)
         let retries = 0;
-        const maxRetries = 50;
+        const maxRetries = 100;
 
-        while (!window.shopify && retries < maxRetries) {
+        while (!window.ShopifyBridge && !window.shopify && retries < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, 100));
           retries++;
         }
 
-        if (!window.shopify) {
+        if (!window.ShopifyBridge && !window.shopify) {
           throw new Error('App Bridge failed to load after waiting');
         }
 
         setStatus('Checking App Bridge availability...');
 
-        // Modern API - directly use window.shopify.idToken
         let sessionToken: string | null = null;
 
-        // First try the modern API
-        if (window.shopify && typeof window.shopify.idToken === 'function') {
-          setStatus('Retrieving session token via modern API...');
+        // First try the modern App Bridge v4+ API
+        if (window.ShopifyBridge && typeof window.ShopifyBridge.getSessionToken === 'function') {
+          setStatus('Retrieving session token via App Bridge v4+ API...');
+          try {
+            sessionToken = await window.ShopifyBridge.getSessionToken();
+          } catch (error) {
+            // Silent fail, try legacy method
+          }
+        }
+
+        // Fallback to legacy window.shopify.idToken
+        if (!sessionToken && window.shopify && typeof window.shopify.idToken === 'function') {
+          setStatus('Retrieving session token via legacy API...');
           try {
             sessionToken = await window.shopify.idToken();
           } catch (error) {
-            // Silent fail, try legacy method
+            // Silent fail, try createApp method
           }
         }
 

@@ -7,3 +7,4 @@
 - always follow the best practices
 - try to achive more functionality with less code
 - always create reusable function and components
+- always kill the background task 

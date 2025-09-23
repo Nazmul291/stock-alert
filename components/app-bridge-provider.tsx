@@ -1,53 +1,17 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, Suspense } from 'react';
+import { Suspense } from 'react';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-
-interface AppBridgeContextType {
-  appBridge: any;
-  isReady: boolean;
-}
-
-const AppBridgeContext = createContext<AppBridgeContextType>({
-  appBridge: null,
-  isReady: false,
-});
-
-export const useAppBridgeContext = () => useContext(AppBridgeContext);
 
 interface AppBridgeProviderProps {
   children: React.ReactNode;
 }
 
 function AppBridgeProviderInner({ children }: AppBridgeProviderProps) {
-  const [appBridge, setAppBridge] = useState<any>(null);
-  const [isReady, setIsReady] = useState(false);
   const searchParams = useSearchParams();
-
   const shop = searchParams.get('shop');
   const host = searchParams.get('host');
-
-  useEffect(() => {
-    if (!host || typeof window === 'undefined') return;
-
-    const initAppBridge = async () => {
-      // Wait for Shopify App Bridge to be available
-      let attempts = 0;
-      while (!window.shopify && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-
-      if (window.shopify) {
-        // App Bridge is loaded from CDN, just use it
-        setAppBridge(window.shopify);
-        setIsReady(true);
-      }
-    };
-
-    initAppBridge();
-  }, [host]);
 
   // Helper to add query params to URLs
   const getUrl = (path: string) => {
@@ -60,9 +24,9 @@ function AppBridgeProviderInner({ children }: AppBridgeProviderProps) {
   };
 
   return (
-    <AppBridgeContext.Provider value={{ appBridge, isReady }}>
-      {/* Only render NavMenu when App Bridge is ready and we're in embedded context */}
-      {isReady && host && (
+    <>
+      {/* App Bridge v4 NavMenu - works without provider */}
+      {host && (
         <NavMenu>
           <a href={getUrl('/')} rel="home">Home</a>
           <a href={getUrl('/products')}>Products</a>
@@ -71,24 +35,32 @@ function AppBridgeProviderInner({ children }: AppBridgeProviderProps) {
         </NavMenu>
       )}
       {children}
-    </AppBridgeContext.Provider>
+    </>
   );
 }
 
 export default function AppBridgeProvider({ children }: AppBridgeProviderProps) {
   return (
-    <Suspense fallback={
-      <AppBridgeContext.Provider value={{ appBridge: null, isReady: false }}>
-        {children}
-      </AppBridgeContext.Provider>
-    }>
+    <Suspense fallback={<>{children}</>}>
       <AppBridgeProviderInner>{children}</AppBridgeProviderInner>
     </Suspense>
   );
 }
 
+// App Bridge v4 provides direct access via window.shopify
+export function useAppBridge() {
+  return {
+    appBridge: typeof window !== 'undefined' ? window.shopify : null,
+    isReady: typeof window !== 'undefined' && !!window.shopify
+  };
+}
+
 declare global {
   interface Window {
-    shopify?: any;
+    shopify?: {
+      idToken?: () => Promise<string>;
+      createApp?: (config: any) => any;
+      [key: string]: any;
+    };
   }
 }
