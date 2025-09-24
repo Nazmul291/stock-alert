@@ -1,6 +1,6 @@
 'use client';
 
-import { Card, Page, Layout, Text, BlockStack, Box, List, Divider, Link, Icon } from '@shopify/polaris';
+import { Card, Page, Layout, Text, BlockStack, Box, List, Divider, Link, Icon, InlineStack } from '@shopify/polaris';
 import {
   LockIcon,
   DataTableIcon,
@@ -46,14 +46,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={DataTableIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">1. Information We Collect</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={DataTableIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">1. Information We Collect</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <Text as="p" variant="bodyMd">
                   Stock Alert collects the following information to provide inventory management services:
@@ -87,14 +85,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={NotificationIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">2. How We Use Your Information</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={NotificationIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">2. How We Use Your Information</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <Text as="p" variant="bodyMd">
                   We use the collected information for the following purposes:
@@ -115,14 +111,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={LockFilledIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">3. Data Storage and Security</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={LockFilledIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">3. Data Storage and Security</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <BlockStack gap="300">
                   <Text as="p" variant="bodyMd">
@@ -159,14 +153,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={LockIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">4. Data Sharing</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={LockIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">4. Data Sharing</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <Text as="p" variant="bodyMd">
                   We <Text as="span" fontWeight="bold">do not sell, trade, or rent</Text> your information to third parties.
@@ -197,14 +189,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={ClockIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">5. Data Retention</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={ClockIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">5. Data Retention</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <BlockStack gap="300">
                   <Text as="p" variant="bodyMd">
@@ -236,14 +226,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={PersonIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">6. Your Rights</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={PersonIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">6. Your Rights</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <Text as="p" variant="bodyMd">
                   You have the following rights regarding your personal data:
@@ -281,7 +269,9 @@ export default function PrivacyPolicy() {
             {/* GDPR Compliance */}
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">7. GDPR Compliance</Text>
+                <div className="flex-grow">
+                  <Text as="h2" variant="headingMd">7. GDPR Compliance</Text>
+                </div>
                 <Text as="p" variant="bodyMd">
                   For merchants in the European Union, we comply with GDPR requirements:
                 </Text>
@@ -300,14 +290,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={SettingsIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">8. Cookies</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={SettingsIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">8. Cookies</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <BlockStack gap="300">
                   <Text as="p" variant="bodyMd">
@@ -334,14 +322,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={EditIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">9. Policy Updates</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={EditIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">9. Policy Updates</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <Text as="p" variant="bodyMd">
                   We may update this Privacy Policy periodically to reflect changes in our practices or for legal reasons.
@@ -358,14 +344,12 @@ export default function PrivacyPolicy() {
             <Card>
               <BlockStack gap="400">
                 <Box>
-                  <BlockStack gap="200">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon source={EmailIcon} tone="base" />
-                      <div style={{ flexGrow: 1 }}>
-                        <Text as="h2" variant="headingMd">10. Contact Us</Text>
-                      </div>
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={EmailIcon} tone="base" />
+                    <div className="flex-grow">
+                      <Text as="h2" variant="headingMd">10. Contact Us</Text>
                     </div>
-                  </BlockStack>
+                  </InlineStack>
                 </Box>
                 <Text as="p" variant="bodyMd">
                   For privacy concerns, questions, or to exercise your rights, please contact us:
