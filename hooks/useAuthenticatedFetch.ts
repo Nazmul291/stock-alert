@@ -1,14 +1,14 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useAppBridge } from '@/components/app-bridge-provider';
+// Using session-helpers instead of separate hook for session token access
 import TokenManager from '@/lib/token-manager';
 import FormPreservation from '@/lib/form-preservation';
 import RequestQueue from '@/lib/request-queue';
 import { triggerAuthNotification } from '@/components/auth-notification';
 
 export function useAuthenticatedFetch() {
-  const { appBridge, isReady } = useAppBridge();
+  // Using existing token manager system instead of separate hook
 
   const redirectToBounce = useCallback((targetUrl: string) => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -30,9 +30,10 @@ export function useAuthenticatedFetch() {
       const formPreservation = FormPreservation.getInstance();
       const requestQueue = RequestQueue.getInstance();
 
-      // Try to get session token using TokenManager (handles deduplication)
+      // Try to get session token using existing token manager
       try {
-        if (isReady && appBridge) {
+        const appBridge = (window as any).__SHOPIFY_APP__;
+        if (appBridge) {
           sessionToken = await tokenManager.getToken(appBridge);
         }
 
@@ -40,13 +41,14 @@ export function useAuthenticatedFetch() {
           headers.set('Authorization', `Bearer ${sessionToken}`);
         } else {
           // Don't show error immediately - App Bridge might still be loading
-          console.warn('[AuthenticatedFetch] No session token available, App Bridge ready:', isReady);
+          console.warn('[AuthenticatedFetch] No session token available');
 
           // Only show notification if App Bridge should be ready but token still failed
-          if (isReady && appBridge) {
+          if (appBridge) {
             // Wait a bit before showing error - token might be loading
-            setTimeout(() => {
-              if (!tokenManager.getToken(appBridge)) {
+            setTimeout(async () => {
+              const token = await tokenManager.getToken(appBridge);
+              if (!token) {
                 triggerAuthNotification('Session expired. Refreshing authentication...', 'warning');
               }
             }, 2000);
@@ -75,9 +77,10 @@ export function useAuthenticatedFetch() {
         console.warn('[AuthenticatedFetch] Received 401, attempting token refresh...');
 
         // Try to get a fresh token and retry once
-        if (isReady && appBridge && !(options.headers as any)?.['X-Retry-Attempted']) {
+        const appBridge = (window as any).__SHOPIFY_APP__;
+        if (appBridge && !(options.headers as any)?.['X-Retry-Attempted']) {
           try {
-            // Force refresh using TokenManager
+            // Get fresh token using token manager
             const freshToken = await tokenManager.getToken(appBridge, true);
 
             if (freshToken && freshToken !== sessionToken) {
@@ -148,7 +151,7 @@ export function useAuthenticatedFetch() {
 
       return response;
     },
-    [appBridge, isReady, redirectToBounce]
+    [redirectToBounce]
   );
 
   return authenticatedFetch;

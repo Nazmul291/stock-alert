@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import PolarisProvider from '@/components/polaris-provider';
-import { ShopifyProvider } from '@/components/providers/shopify-provider';
 import ReduxProvider from '@/components/redux-provider';
 import { AuthNotification } from '@/components/auth-notification';
 import AppBridgeInit from '@/components/app-bridge-init';
+import { ShopifyProvider } from '@/components/providers/shopify-provider';
 import { Suspense } from 'react';
 
 const inter = Inter({ subsets: ["latin"] });

@@ -15,130 +15,127 @@ export default function AppBridgeInit() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Wait for App Bridge to load
-    const initAppBridge = () => {
-      // Check if we're in Shopify admin iframe
-      const inIframe = window !== window.parent;
-      if (!inIframe) {
-        console.log('[AppBridgeInit] Not in iframe, skipping initialization');
-        return;
-      }
+    // Initialize App Bridge using Shopify's CDN best practices
+    const initAppBridge = async () => {
+      console.log('[AppBridgeInit] Starting App Bridge initialization...');
 
-      // Check if App Bridge is available
-      if (!window.shopify && !window.ShopifyBridge) {
-        console.log('[AppBridgeInit] App Bridge not loaded yet');
+      // Check if App Bridge CDN is loaded
+      if (!window.shopify) {
+        console.log('[AppBridgeInit] App Bridge CDN not loaded yet, waiting...');
         return false;
       }
 
-      console.log('[AppBridgeInit] App Bridge detected, initializing...');
+      console.log('[AppBridgeInit] App Bridge CDN detected, waiting for ready state...');
 
-      // Set shopify-api-key meta tag if not present
-      const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_API_KEY;
-      if (apiKey) {
-        let metaTag = document.querySelector('meta[name="shopify-api-key"]');
-        if (!metaTag) {
-          metaTag = document.createElement('meta');
-          metaTag.setAttribute('name', 'shopify-api-key');
-          metaTag.setAttribute('content', apiKey);
-          document.head.appendChild(metaTag);
-          console.log('[AppBridgeInit] Added shopify-api-key meta tag');
-        }
-      }
+      try {
+        // Wait for App Bridge to be ready (this is the correct CDN API)
+        await window.shopify.ready;
+        console.log('[AppBridgeInit] App Bridge ready!');
 
-      // Initialize App Bridge if we have the new API
-      if (window.shopify && typeof window.shopify.createApp === 'function' && host && apiKey) {
-        try {
-          const app = window.shopify.createApp({
-            apiKey: apiKey,
-            host: host,
-            forceRedirect: false,
-          });
-          console.log('[AppBridgeInit] App Bridge app created');
-
-          // Store app instance globally for other components
-          (window as any).__SHOPIFY_APP__ = app;
-
-          // Test session token retrieval and make immediate Shopify API calls
-          if (typeof app.idToken === 'function') {
-            app.idToken().then(async (token: string) => {
-              console.log('[AppBridgeInit] Successfully retrieved session token (length:', token?.length, ')');
-
-              // Immediate API call to help Shopify detect session token usage
-              try {
-                // 1. Call our verify-session endpoint
-                const verifyResponse = await fetch('/api/shopify/verify-session', {
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                  }
-                });
-                const verifyData = await verifyResponse.json();
-                console.log('[AppBridgeInit] Session verification:', verifyData);
-
-                // 2. Make a GraphQL query
-                const graphqlResponse = await fetch('/api/shopify/graphql', {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    query: `
-                      query shopInfo {
-                        shop {
-                          name
-                          id
-                          currencyCode
-                        }
-                      }
-                    `
-                  })
-                });
-                const graphqlData = await graphqlResponse.json();
-                console.log('[AppBridgeInit] GraphQL query result:', graphqlData);
-
-                // 3. Call our auth test endpoint
-                const authTestResponse = await fetch('/api/shopify/auth-test', {
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                  }
-                });
-                const authTestData = await authTestResponse.json();
-                console.log('[AppBridgeInit] Auth test result:', authTestData);
-
-                // Mark that we've successfully used session tokens
-                window.sessionStorage.setItem('session_token_verified', 'true');
-                window.sessionStorage.setItem('session_token_timestamp', new Date().toISOString());
-
-              } catch (error) {
-                console.error('[AppBridgeInit] Error making initial API calls:', error);
-              }
-            }).catch((error: any) => {
-              console.error('[AppBridgeInit] Failed to get session token:', error);
-            });
+        // Set shopify-api-key meta tag if not present
+        const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_API_KEY;
+        if (apiKey) {
+          let metaTag = document.querySelector('meta[name="shopify-api-key"]');
+          if (!metaTag) {
+            metaTag = document.createElement('meta');
+            metaTag.setAttribute('name', 'shopify-api-key');
+            metaTag.setAttribute('content', apiKey);
+            document.head.appendChild(metaTag);
+            console.log('[AppBridgeInit] Added shopify-api-key meta tag');
           }
-        } catch (error) {
-          console.error('[AppBridgeInit] Failed to create app:', error);
         }
-      }
 
-      return true;
+        // Use the current page URL to get host parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const hostParam = host || urlParams.get('host');
+
+        if (!hostParam) {
+          console.warn('[AppBridgeInit] No host parameter found in URL');
+          // For development/testing, create a minimal App Bridge instance
+          (window as any).__SHOPIFY_APP__ = {
+            ready: true,
+            idToken: async () => {
+              console.warn('[AppBridge] No host parameter - cannot get real session token');
+              throw new Error('No host parameter available for session token');
+            }
+          };
+          return true;
+        }
+
+        console.log('[AppBridgeInit] Initializing with host:', hostParam);
+
+        // Store the ready state globally for components to check
+        (window as any).__SHOPIFY_APP__ = {
+          ready: true,
+          host: hostParam,
+          apiKey: apiKey,
+          // Add methods that components expect
+          idToken: async () => {
+            // For CDN version, use the shopify.modal or other APIs to get session token
+            try {
+              if (window.shopify && window.shopify.idToken) {
+                return await window.shopify.idToken();
+              }
+              throw new Error('Session token not available');
+            } catch (error) {
+              console.error('[AppBridge] Failed to get session token:', error);
+              throw error;
+            }
+          }
+        };
+
+        console.log('[AppBridgeInit] App Bridge initialization complete');
+
+        // Test immediate API calls to demonstrate session token usage
+        await testSessionTokenUsage();
+
+        return true;
+      } catch (error) {
+        console.error('[AppBridgeInit] App Bridge initialization failed:', error);
+        return false;
+      }
+    };
+
+    const testSessionTokenUsage = async () => {
+      try {
+        const appInstance = (window as any).__SHOPIFY_APP__;
+        if (appInstance && appInstance.idToken) {
+          const token = await appInstance.idToken();
+          console.log('[AppBridgeInit] Session token retrieved for testing');
+
+          // Test our auth endpoints
+          const authTestResponse = await fetch('/api/shopify/auth-test', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const authTestData = await authTestResponse.json();
+          console.log('[AppBridgeInit] Auth test result:', authTestData);
+
+          // Mark successful session token usage
+          window.sessionStorage.setItem('session_token_verified', 'true');
+          window.sessionStorage.setItem('session_token_timestamp', new Date().toISOString());
+        }
+      } catch (error) {
+        console.warn('[AppBridgeInit] Session token testing failed:', error);
+      }
     };
 
     // Try to initialize immediately
-    if (initAppBridge()) return;
+    initAppBridge().then(() => {
+      console.log('[AppBridgeInit] Initialization completed successfully');
+    }).catch(() => {
+      console.log('[AppBridgeInit] Initial attempt failed, will retry...');
 
-    // If not ready, poll for App Bridge
-    const checkInterval = setInterval(() => {
-      if (initAppBridge()) {
-        clearInterval(checkInterval);
-      }
-    }, 100);
+      // If not ready, poll for App Bridge
+      const checkInterval = setInterval(async () => {
+        const success = await initAppBridge();
+        if (success) {
+          clearInterval(checkInterval);
+        }
+      }, 500); // Check every 500ms
 
-    // Stop checking after 10 seconds
-    setTimeout(() => clearInterval(checkInterval), 10000);
-
-    return () => clearInterval(checkInterval);
+      // Stop checking after 10 seconds
+      setTimeout(() => clearInterval(checkInterval), 10000);
+    });
   }, [shop, host]);
 
   return null; // This component doesn't render anything

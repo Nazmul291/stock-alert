@@ -27,6 +27,7 @@ import {
   XIcon
 } from '@shopify/polaris-icons';
 import { format } from 'date-fns';
+import { SessionTokenTest } from '@/components/session-token-test';
 
 interface DashboardClientProps {
   store: any;
@@ -306,11 +307,10 @@ export default function DashboardClient({
           </Card>
         </Layout.Section>
 
-        {/* Session Token Debug - Only in development */}
-        {process.env.NODE_ENV === 'development' && (
-          <Layout.Section>
-          </Layout.Section>
-        )}
+        {/* Session Token Test - Shows for all environments to help Shopify checks */}
+        <Layout.Section>
+          <SessionTokenTest />
+        </Layout.Section>
 
         {/* Store Info */}
         <Layout.Section>

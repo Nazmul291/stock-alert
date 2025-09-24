@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "38a870cdc7f41175fd49a52689539f9d"
+client_id = "a4c382e2cb454fd7c45b655248b2d1f7"
 name = "Stock Alert"
 handle = "stock-alert-27"
 application_url = "https://stock-alert.nazmulcodes.org"

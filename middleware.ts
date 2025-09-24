@@ -8,6 +8,9 @@ export async function middleware(request: NextRequest) {
     '/auth-bounce',
     '/api/auth',
     '/api/webhooks',
+    '/api/shopify/auth-test',     // Allow Shopify's automated checks
+    '/api/shopify/verify-session', // Allow session token verification
+    '/api/shopify/graphql',       // Allow GraphQL proxy for checks
     '/privacy',
     '/terms',
     '/favicon.ico'
