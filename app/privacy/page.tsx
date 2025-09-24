@@ -49,7 +49,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={DataTableIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">1. Information We Collect</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">1. Information We Collect</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -88,7 +90,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={NotificationIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">2. How We Use Your Information</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">2. How We Use Your Information</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -114,7 +118,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={LockFilledIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">3. Data Storage and Security</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">3. Data Storage and Security</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -156,7 +162,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={LockIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">4. Data Sharing</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">4. Data Sharing</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -192,7 +200,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={ClockIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">5. Data Retention</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">5. Data Retention</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -229,7 +239,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={PersonIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">6. Your Rights</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">6. Your Rights</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -291,7 +303,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={SettingsIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">8. Cookies</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">8. Cookies</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -323,7 +337,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={EditIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">9. Policy Updates</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">9. Policy Updates</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
@@ -345,7 +361,9 @@ export default function PrivacyPolicy() {
                   <BlockStack gap="200">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Icon source={EmailIcon} tone="base" />
-                      <Text as="h2" variant="headingMd">10. Contact Us</Text>
+                      <div style={{ flexGrow: 1 }}>
+                        <Text as="h2" variant="headingMd">10. Contact Us</Text>
+                      </div>
                     </div>
                   </BlockStack>
                 </Box>
