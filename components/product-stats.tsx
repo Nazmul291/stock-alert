@@ -17,6 +17,7 @@ import {
   ViewIcon,
   HideIcon,
 } from '@shopify/polaris-icons';
+import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 
 interface ProductStatsProps {
   shop: string;
@@ -46,6 +47,7 @@ export default function ProductStats({ shop }: ProductStatsProps) {
   const [percentages, setPercentages] = useState<Percentages | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const authenticatedFetch = useAuthenticatedFetch();
 
   useEffect(() => {
     fetchStats();
@@ -56,14 +58,32 @@ export default function ProductStats({ shop }: ProductStatsProps) {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch(`/api/products/stats?shop=${shop}`);
-      if (!response.ok) throw new Error('Failed to fetch stats');
+      const response = await authenticatedFetch(`/api/products/stats?shop=${shop}`) as Response;
+
+      if (!response.ok) {
+        // Handle specific error cases
+        if (response.status === 401) {
+          // Session expired - the authenticatedFetch will handle redirect
+          console.log('Session expired, waiting for redirect...');
+          return;
+        } else if (response.status === 403) {
+          setError('Permission denied. Please reinstall the app.');
+        } else {
+          setError('Failed to load statistics');
+        }
+        return;
+      }
 
       const data = await response.json();
       setStats(data.stats);
       setPercentages(data.percentages);
       setError(null);
     } catch (err) {
+      // Network error or fetch was aborted (redirect in progress)
+      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+        console.log('Request aborted, likely due to redirect');
+        return;
+      }
       setError('Failed to load statistics');
       console.error('Error fetching stats:', err);
     } finally {
@@ -223,7 +243,7 @@ export default function ProductStats({ shop }: ProductStatsProps) {
                   <Icon source={ViewIcon} />
                   <Text as="p" fontWeight="medium">Active Products</Text>
                 </InlineStack>
-                <Badge tone="success">{stats.active}</Badge>
+                <Badge tone="success">{String(stats.active)}</Badge>
               </InlineStack>
             </div>
 
@@ -238,7 +258,7 @@ export default function ProductStats({ shop }: ProductStatsProps) {
                   <Icon source={HideIcon} />
                   <Text as="p" fontWeight="medium">Hidden Products</Text>
                 </InlineStack>
-                <Badge>{stats.hidden}</Badge>
+                <Badge>{String(stats.hidden)}</Badge>
               </InlineStack>
             </div>
           </div>

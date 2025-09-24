@@ -54,7 +54,7 @@ function AuthInitializerInner({ children }: { children: React.ReactNode }) {
             if (data.authenticated) {
               dispatch(setAuth({
                 shop: data.shop,
-                accessToken: data.hasToken ? 'stored' : null, // Don't expose actual token to client
+                accessToken: data.hasToken ? 'stored' : '', // Don't expose actual token to client, use empty string instead of null
                 storeId: data.storeId,
                 plan: data.plan,
               }));

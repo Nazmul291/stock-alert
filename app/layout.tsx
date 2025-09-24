@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import PolarisProvider from '@/components/polaris-provider';
-import AppBridgeProvider from '@/components/app-bridge-provider';
+import { ShopifyProvider } from '@/components/providers/shopify-provider';
 import ReduxProvider from '@/components/redux-provider';
 import SessionMonitor from '@/components/session-monitor';
+import { AuthNotification } from '@/components/auth-notification';
+import { Suspense } from 'react';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -30,12 +32,15 @@ export default function RootLayout({
       </head>
       <body className={inter.className} suppressHydrationWarning>
         <ReduxProvider>
-          <AppBridgeProvider>
-            <PolarisProvider>
-              <SessionMonitor />
-              {children}
-            </PolarisProvider>
-          </AppBridgeProvider>
+          <PolarisProvider>
+            <Suspense fallback={null}>
+              <ShopifyProvider>
+                <SessionMonitor />
+                <AuthNotification />
+                {children}
+              </ShopifyProvider>
+            </Suspense>
+          </PolarisProvider>
         </ReduxProvider>
       </body>
     </html>

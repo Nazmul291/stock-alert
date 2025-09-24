@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Spinner, Page, Card, Text, BlockStack } from '@shopify/polaris';
+import FormPreservation from '@/lib/form-preservation';
 
 export default function AuthBouncePage() {
   const [status, setStatus] = useState('Loading...');
@@ -87,7 +88,34 @@ export default function AuthBouncePage() {
           throw new Error('Unable to retrieve session token from App Bridge or URL');
         }
 
-        setStatus('Session token retrieved successfully! Redirecting...');
+        setStatus('Session token retrieved successfully!');
+
+        // Check for preserved form data and pending requests
+        const formPreservation = FormPreservation.getInstance();
+        const pendingRequests = formPreservation.getPendingRequests();
+
+        if (pendingRequests.length > 0) {
+          setStatus(`Processing ${pendingRequests.length} pending requests...`);
+
+          // Process pending requests with fresh token
+          for (const request of pendingRequests) {
+            try {
+              const headers = new Headers();
+              headers.set('Authorization', `Bearer ${sessionToken}`);
+              headers.set('Content-Type', 'application/json');
+
+              await fetch(request.url, {
+                method: request.method,
+                headers,
+                body: request.body ? JSON.stringify(request.body) : undefined
+              });
+            } catch (error) {
+              console.error('[AuthBounce] Failed to retry request:', error);
+            }
+          }
+        }
+
+        setStatus('Redirecting...');
 
         // Build redirect URL with session token and all original parameters
         const redirectUrl = new URL(redirectTo, window.location.origin);
@@ -103,6 +131,7 @@ export default function AuthBouncePage() {
         redirectUrl.searchParams.set('id_token', sessionToken);
         redirectUrl.searchParams.set('session_verified', 'true');
         redirectUrl.searchParams.set('bounced_at', Date.now().toString());
+        redirectUrl.searchParams.set('form_preserved', formPreservation.getPreservedFormData() ? 'true' : 'false');
 
         // Small delay to show success message
         setTimeout(() => {
@@ -144,11 +173,11 @@ export default function AuthBouncePage() {
             {status}
           </Text>
           {error && (
-            <Text variant="bodyMd" tone="critical">
+            <Text variant="bodyMd" tone="critical" as="p">
               Error: {error}
             </Text>
           )}
-          <Text variant="bodySm" tone="subdued">
+          <Text variant="bodySm" tone="subdued" as="p">
             Please wait while we authenticate your session...
           </Text>
         </BlockStack>

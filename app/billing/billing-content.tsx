@@ -79,7 +79,7 @@ export default function BillingContent({
       const response = await authenticatedFetch('/api/billing', {
         method: 'POST',
         body: JSON.stringify({ plan: 'free' }),
-      });
+      }) as Response;
 
       if (response.ok) {
         router.refresh();

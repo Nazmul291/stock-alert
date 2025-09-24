@@ -2,7 +2,10 @@
 
 import { useCallback } from 'react';
 import { useAppBridge } from '@/components/app-bridge-provider';
-import { getSessionToken, getSessionTokenFromURL } from './session-helpers';
+import TokenManager from '@/lib/token-manager';
+import FormPreservation from '@/lib/form-preservation';
+import RequestQueue from '@/lib/request-queue';
+import { triggerAuthNotification } from '@/components/auth-notification';
 
 export function useAuthenticatedFetch() {
   const { appBridge, isReady } = useAppBridge();
@@ -23,28 +26,25 @@ export function useAuthenticatedFetch() {
     async (url: string, options: RequestInit = {}) => {
       const headers = new Headers(options.headers);
       let sessionToken: string | null = null;
+      const tokenManager = TokenManager.getInstance();
+      const formPreservation = FormPreservation.getInstance();
+      const requestQueue = RequestQueue.getInstance();
 
-      // Try to get session token (prefer fresh tokens from App Bridge)
+      // Try to get session token using TokenManager (handles deduplication)
       try {
-        // Try App Bridge first for fresh tokens if available
         if (isReady && appBridge) {
-          try {
-            sessionToken = await getSessionToken(appBridge);
-          } catch (error) {
-            // App Bridge failed, fall back to URL token
-          }
-        }
-
-        // Fall back to URL token if App Bridge failed or not ready
-        if (!sessionToken) {
-          sessionToken = getSessionTokenFromURL();
+          sessionToken = await tokenManager.getToken(appBridge);
         }
 
         if (sessionToken) {
           headers.set('Authorization', `Bearer ${sessionToken}`);
+        } else {
+          console.warn('[AuthenticatedFetch] No session token available');
+          triggerAuthNotification('Unable to authenticate. Please reload the page.', 'warning');
         }
       } catch (error) {
-        // Silent fail, continue without token
+        console.error('[AuthenticatedFetch] Failed to get token:', error);
+        // Continue without token
       }
 
       // Always set Content-Type if not provided
@@ -59,38 +59,80 @@ export function useAuthenticatedFetch() {
         credentials: 'include',
       });
 
-      // If we get 401 and it's not an auth-related endpoint, try to refresh session
+      // Handle 401 Unauthorized
       if (response.status === 401 && !url.includes('/api/auth') && !url.includes('/auth-bounce')) {
-        // Try to get a fresh token from App Bridge and retry once
+        console.warn('[AuthenticatedFetch] Received 401, attempting token refresh...');
+
+        // Try to get a fresh token and retry once
         if (isReady && appBridge && !(options.headers as any)?.['X-Retry-Attempted']) {
           try {
-            const freshToken = await getSessionToken(appBridge, true); // Force refresh on 401
+            // Force refresh using TokenManager
+            const freshToken = await tokenManager.getToken(appBridge, true);
+
             if (freshToken && freshToken !== sessionToken) {
-              // We got a fresh token, retry the request
+              console.log('[AuthenticatedFetch] Got fresh token, retrying request...');
+
+              // Use request queue for retry with automatic backoff
               const retryHeaders = new Headers(options.headers);
               retryHeaders.set('Authorization', `Bearer ${freshToken}`);
-              retryHeaders.set('X-Retry-Attempted', 'true'); // Prevent infinite retry
+              retryHeaders.set('X-Retry-Attempted', 'true');
 
-              return fetch(url, {
+              const retryResponse = await requestQueue.enqueuePriority(url, {
                 ...options,
                 headers: retryHeaders,
                 credentials: 'include',
               });
+
+              if (retryResponse.ok) {
+                console.log('[AuthenticatedFetch] Retry successful with fresh token');
+              } else {
+                console.warn('[AuthenticatedFetch] Retry failed, status:', retryResponse.status);
+              }
+
+              return retryResponse;
             }
           } catch (error) {
-            // Fresh token fetch failed, continue with redirect
+            console.error('[AuthenticatedFetch] Fresh token fetch failed:', error);
           }
         }
 
+        // If we're still here, all retries failed
         const responseBody = await response.text();
         if (responseBody.includes('session token') || responseBody.includes('Unauthorized')) {
-          // Redirect to bounce page to get fresh session token
+          // Save pending request for retry after redirect
+          if (options.body) {
+            formPreservation.savePendingRequest(
+              url,
+              options.method || 'GET',
+              typeof options.body === 'string' ? JSON.parse(options.body) : options.body
+            );
+          }
+
+          // Notify user
+          triggerAuthNotification('Session expired. Refreshing authentication...', 'warning');
+
+          // Clear token cache
+          tokenManager.clearCache();
+
+          console.log('[AuthenticatedFetch] Redirecting to auth-bounce for fresh session...');
           const currentPath = window.location.pathname;
           redirectToBounce(currentPath + window.location.search);
 
           // Return a promise that never resolves since we're redirecting
           return new Promise(() => {});
         }
+      }
+
+      // Handle 429 Too Many Requests - use request queue for automatic retry
+      if (response.status === 429) {
+        console.warn('[AuthenticatedFetch] Rate limited, queueing for retry...');
+        triggerAuthNotification('Too many requests. Retrying automatically...', 'warning');
+
+        return requestQueue.enqueue(url, {
+          ...options,
+          headers,
+          credentials: 'include',
+        });
       }
 
       return response;

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Text, ProgressBar, Badge, Box, BlockStack, InlineStack, Button } from '@shopify/polaris';
 import { useRouter } from 'next/navigation';
+import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 
 interface PlanUsageProps {
   shop: string;
@@ -32,12 +33,13 @@ export default function PlanUsage({ shop, host, plan, searchParams }: PlanUsageP
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(false); // Don't show loading initially
   const router = useRouter();
+  const authenticatedFetch = useAuthenticatedFetch();
 
   useEffect(() => {
     async function fetchUsage() {
       setLoading(true); // Only show loading when actively fetching
       try {
-        const response = await fetch(`/api/products/validate?shop=${shop}`);
+        const response = await authenticatedFetch(`/api/products/validate?shop=${shop}`) as Response;
         if (response.ok) {
           const data = await response.json();
           setUsage(data);

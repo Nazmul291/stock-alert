@@ -1,64 +1,42 @@
 'use client';
 
-import { Suspense } from 'react';
-import { NavMenu } from '@shopify/app-bridge-react';
-import { useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
-interface AppBridgeProviderProps {
-  children: React.ReactNode;
-}
+// This file now only exports the hook since navigation is handled by ShopifyProvider
+// Following Shopify's recommended architecture
 
-function AppBridgeProviderInner({ children }: AppBridgeProviderProps) {
-  const searchParams = useSearchParams();
-  const shop = searchParams.get('shop');
-  const host = searchParams.get('host');
-
-  // Helper to add query params to URLs
-  const getUrl = (path: string) => {
-    const params = new URLSearchParams();
-    if (shop) params.set('shop', shop);
-    if (host) params.set('host', host);
-    const idToken = searchParams.get('id_token');
-    if (idToken) params.set('id_token', idToken);
-    return `${path}?${params.toString()}`;
-  };
-
-  return (
-    <>
-      {/* App Bridge v4 NavMenu - works without provider */}
-      {host && (
-        <NavMenu>
-          <a href={getUrl('/')} rel="home">Home</a>
-          <a href={getUrl('/products')}>Products</a>
-          <a href={getUrl('/settings')}>Settings</a>
-          <a href={getUrl('/billing')}>Billing</a>
-        </NavMenu>
-      )}
-      {children}
-    </>
-  );
-}
-
-export default function AppBridgeProvider({ children }: AppBridgeProviderProps) {
-  return (
-    <Suspense fallback={<>{children}</>}>
-      <AppBridgeProviderInner>{children}</AppBridgeProviderInner>
-    </Suspense>
-  );
-}
-
-// App Bridge v4 provides direct access via window.shopify
+// Hook to access App Bridge
 export function useAppBridge() {
-  return {
-    appBridge: typeof window !== 'undefined' ? window.shopify : null,
-    isReady: typeof window !== 'undefined' && !!window.shopify
-  };
+  const [appBridge, setAppBridge] = useState<any>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const bridge = window.shopify || window.ShopifyBridge;
+      if (bridge) {
+        setAppBridge(bridge);
+        setIsReady(true);
+      }
+    }
+  }, []);
+
+  return { appBridge, isReady };
+}
+
+// Empty default export for backward compatibility
+export default function AppBridgeProvider({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }
 
 declare global {
   interface Window {
     shopify?: {
       idToken?: () => Promise<string>;
+      createApp?: (config: any) => any;
+      [key: string]: any;
+    };
+    ShopifyBridge?: {
+      getSessionToken?: () => Promise<string>;
       createApp?: (config: any) => any;
       [key: string]: any;
     };
