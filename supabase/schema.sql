@@ -462,10 +462,32 @@ BEGIN
         ALTER TABLE store_settings RENAME COLUMN enable_email_alerts TO email_notifications;
     END IF;
     
-    IF EXISTS (SELECT 1 FROM information_schema.columns 
-               WHERE table_name = 'store_settings' 
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name = 'store_settings'
                AND column_name = 'enable_slack_alerts') THEN
         ALTER TABLE store_settings RENAME COLUMN enable_slack_alerts TO slack_notifications;
+    END IF;
+
+    -- Add inventory_status field if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name = 'inventory_tracking'
+                   AND column_name = 'inventory_status') THEN
+        ALTER TABLE inventory_tracking ADD COLUMN inventory_status VARCHAR(20) DEFAULT 'in_stock';
+
+        -- Add constraint for valid status values
+        ALTER TABLE inventory_tracking ADD CONSTRAINT chk_valid_inventory_status
+            CHECK (inventory_status IN ('in_stock', 'low_stock', 'out_of_stock', 'deactivated'));
+
+        -- Create index for efficient status queries
+        CREATE INDEX IF NOT EXISTS idx_inventory_tracking_status ON inventory_tracking(store_id, inventory_status);
+
+        -- Initialize existing records with appropriate status based on current_quantity
+        UPDATE inventory_tracking
+        SET inventory_status = CASE
+            WHEN current_quantity = 0 THEN 'out_of_stock'
+            WHEN current_quantity <= 5 THEN 'low_stock'  -- Using default threshold
+            ELSE 'in_stock'
+        END;
     END IF;
 END $$;
 

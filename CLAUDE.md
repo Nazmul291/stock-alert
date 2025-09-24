@@ -7,6 +7,11 @@
 - never use depricated or legacy polarish or appbridge components
 - always use .env.local to rtrive any configuration or environment variable
 - always put all the docummentation, sumary inside the /docs/ folder
+- never assume or guise issue findout the exact issue 
+- always work with verifyed source and docuentation
+- always adapt the existing files to work with and never change the api routes
+- always avoid creating unnecessery files
+
 
 ### Please strictly follow these rules while developing or updating this app:
 - Always use descriptive variable and function names.

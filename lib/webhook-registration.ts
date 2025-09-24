@@ -6,8 +6,11 @@ export interface WebhookConfig {
 }
 
 export async function registerWebhooks(shop: string, accessToken: string): Promise<void> {
-  const appUrl = process.env.NEXT_PUBLIC_HOST || 'https://dev.nazmulcodes.org';
-  
+  const appUrl = process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_HOST || 'https://dev.nazmulcodes.org';
+
+  console.log('[Webhook Registration] Starting for shop:', shop);
+  console.log('[Webhook Registration] Using app URL:', appUrl);
+
   // Only register the essential webhooks for inventory tracking
   // NOTE: Shopify webhook topics are lowercase!
   const webhooks: WebhookConfig[] = [
@@ -16,10 +19,12 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
       address: `${appUrl}/api/webhooks/uninstall`,
     },
     {
-      topic: 'inventory_levels/update', 
+      topic: 'inventory_levels/update',
       address: `${appUrl}/api/webhooks/inventory`,
     },
   ];
+
+  console.log('[Webhook Registration] Webhooks to register:', webhooks);
 
 
   // Initialize GraphQL client

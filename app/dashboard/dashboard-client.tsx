@@ -27,7 +27,6 @@ import {
   XIcon
 } from '@shopify/polaris-icons';
 import { format } from 'date-fns';
-import { SessionTokenTest } from '@/components/session-token-test';
 
 interface DashboardClientProps {
   store: any;
@@ -36,6 +35,7 @@ interface DashboardClientProps {
     lowStock: number;
     outOfStock: number;
     hidden: number;
+    deactivated: number;
     alertsToday: number;
   };
   setupProgress: any;
@@ -54,22 +54,81 @@ export default function DashboardClient({
 }: DashboardClientProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [showUpgradeBanner, setShowUpgradeBanner] = useState(false);
+  const [verifyingAccess, setVerifyingAccess] = useState(false);
+  const [accessVerified, setAccessVerified] = useState<any>(null);
 
   useEffect(() => {
     // Check if we just upgraded
     const urlParams = new URLSearchParams(window.location.search);
-    
+
     if (urlParams.get('upgraded') === 'true') {
       setShowUpgradeBanner(true);
       // Remove the upgraded param from URL
       urlParams.delete('upgraded');
       const newUrl = `${window.location.pathname}?${urlParams.toString()}`;
       window.history.replaceState({}, '', newUrl);
-      
+
       // Hide banner after 5 seconds
       setTimeout(() => setShowUpgradeBanner(false), 5000);
     }
+
+    // Check for scope warnings and verify access if needed
+    // Always verify on first load after authentication
+    if (store?.scope_warning || urlParams.get('authenticated') === '1') {
+      console.log('[Dashboard] Triggering access verification');
+      console.log('[Dashboard] Reason:', store?.scope_warning ? 'scope warning present' : 'just authenticated');
+      verifyAccess();
+    }
   }, []);
+
+  const verifyAccess = async () => {
+    setVerifyingAccess(true);
+    try {
+      // Get session token for API call
+      const appInstance = (window as any).__SHOPIFY_APP__;
+      if (appInstance && appInstance.idToken) {
+        const token = await appInstance.idToken();
+
+        const response = await fetch('/api/verify-access', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (!response.ok) {
+          console.error('[Dashboard] Verify access failed:', response.status, response.statusText);
+          const errorText = await response.text();
+          console.error('[Dashboard] Error response:', errorText);
+          return;
+        }
+
+        const result = await response.json();
+        console.log('[Dashboard] Access verification result:', result);
+
+        // Only set if we got a valid response
+        if (result && typeof result === 'object' && 'canFunction' in result) {
+          setAccessVerified(result);
+
+          // If access is not sufficient, show warning
+          if (!result.canFunction) {
+            console.warn('[Dashboard] Insufficient access detected');
+            console.log('[Dashboard] Actual access:', result.actualAccess);
+            console.log('[Dashboard] Granted scopes:', result.grantedScopes);
+          } else {
+            console.log('[Dashboard] ✅ Access verified successfully');
+          }
+        } else {
+          console.error('[Dashboard] Invalid verification response:', result);
+        }
+      } else {
+        console.warn('[Dashboard] App Bridge not ready for verification');
+      }
+    } catch (error) {
+      console.error('[Dashboard] Failed to verify access:', error);
+    } finally {
+      setVerifyingAccess(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -116,6 +175,57 @@ export default function DashboardClient({
             onDismiss={() => setShowUpgradeBanner(false)}
           >
             You have been upgraded to the Professional plan. All pro features are now available.
+          </Banner>
+        </div>
+      )}
+
+      {/* Scope Warning Banner */}
+      {(store?.scope_warning || (accessVerified && !accessVerified?.canFunction)) && (
+        <div style={{ marginBottom: '16px' }}>
+          <Banner
+            title="Permission Issue Detected"
+            tone="warning"
+            action={{
+              content: verifyingAccess ? 'Verifying...' : 'Verify Access',
+              onAction: verifyAccess,
+              disabled: verifyingAccess
+            }}
+          >
+            {accessVerified && !accessVerified.canFunction ? (
+              <BlockStack gap="200">
+                <Text as="p">
+                  The app cannot access required resources. Missing permissions:
+                </Text>
+                <List type="bullet">
+                  {!accessVerified.actualAccess?.canReadProducts && (
+                    <List.Item>Cannot read products (read_products scope needed)</List.Item>
+                  )}
+                  {!accessVerified.actualAccess?.canReadInventory && (
+                    <List.Item>Cannot read inventory (read_inventory scope needed)</List.Item>
+                  )}
+                </List>
+                <Text as="p" fontWeight="bold">
+                  Please uninstall and reinstall the app to fix this issue.
+                </Text>
+              </BlockStack>
+            ) : (
+              <Text as="p">
+                {store?.scope_warning || 'Unusual permissions detected. Click "Verify Access" to test functionality.'}
+              </Text>
+            )}
+          </Banner>
+        </div>
+      )}
+
+      {/* Access Verified Success */}
+      {accessVerified && accessVerified.canFunction && (
+        <div style={{ marginBottom: '16px' }}>
+          <Banner
+            title="Access Verified"
+            tone="success"
+            onDismiss={() => setAccessVerified(null)}
+          >
+            ✅ The app has all required permissions and is working correctly.
           </Banner>
         </div>
       )}
@@ -172,7 +282,7 @@ export default function DashboardClient({
         <Layout.Section>
           <Text variant="headingLg" as="h2">Inventory Overview</Text>
           <div style={{ marginTop: '1rem' }}>
-            <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 5 }} gap="400">
+            <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 6 }} gap="400">
               <Card>
                 <Box padding="400">
                   <BlockStack gap="200">
@@ -209,6 +319,16 @@ export default function DashboardClient({
                     <Icon source={HideIcon} tone="base" />
                     <Text variant="headingXl" as="h3">{stats.hidden}</Text>
                     <Text variant="bodyMd" tone="subdued">Hidden</Text>
+                  </BlockStack>
+                </Box>
+              </Card>
+
+              <Card>
+                <Box padding="400">
+                  <BlockStack gap="200">
+                    <Icon source={HideIcon} tone="subdued" />
+                    <Text variant="headingXl" as="h3">{stats.deactivated}</Text>
+                    <Text variant="bodyMd" tone="subdued">Deactivated</Text>
                   </BlockStack>
                 </Box>
               </Card>
@@ -307,10 +427,6 @@ export default function DashboardClient({
           </Card>
         </Layout.Section>
 
-        {/* Session Token Test - Shows for all environments to help Shopify checks */}
-        <Layout.Section>
-          <SessionTokenTest />
-        </Layout.Section>
 
         {/* Store Info */}
         <Layout.Section>

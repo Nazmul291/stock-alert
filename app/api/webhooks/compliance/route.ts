@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { supabaseAdmin } from '@/lib/supabase';
 
 // Verify webhook signature
 function verifyWebhookSignature(rawBody: string, signature: string): boolean {
@@ -34,37 +35,167 @@ export async function POST(req: NextRequest) {
       case 'customers/data_request':
         // Handle customer data request (GDPR)
         console.log('[WEBHOOK] Customer data request for shop:', shop);
-        // In production, you would:
-        // 1. Gather all customer data
-        // 2. Send it to the provided email
-        // For now, just acknowledge
+        console.log('[WEBHOOK] Customer ID:', data.customer?.id);
+        console.log('[WEBHOOK] Data request ID:', data.data_request?.id);
+
+        // This app doesn't store any customer data
+        // We only store shop, product, and inventory information
+        // No PII (Personally Identifiable Information) is collected
+
+        // Log the request for compliance records
+        await supabaseAdmin
+          .from('gdpr_requests')
+          .insert({
+            shop_domain: shop,
+            request_type: 'customers_data_request',
+            customer_id: data.customer?.id,
+            request_id: data.data_request?.id,
+            status: 'completed',
+            response: 'No customer data stored',
+            processed_at: new Date().toISOString()
+          })
+          .catch(err => console.error('[WEBHOOK] Failed to log GDPR request:', err));
+
         return NextResponse.json({
-          message: 'Customer data request received',
+          message: 'Customer data request processed',
           shop_domain: shop,
-          customer_id: data.customer?.id
+          customer_id: data.customer?.id,
+          data_found: false,
+          note: 'This app does not store any customer personal data'
         }, { status: 200 });
 
       case 'customers/redact':
         // Handle customer data deletion request (GDPR)
         console.log('[WEBHOOK] Customer redaction request for shop:', shop);
-        // In production, you would:
-        // 1. Delete/anonymize customer data
-        // 2. Keep only what's legally required
+        console.log('[WEBHOOK] Customer ID to redact:', data.customer?.id);
+
+        // Since we don't store customer data, there's nothing to delete
+        // However, we should check and clean any potential references
+
+        try {
+          // Get store ID
+          const { data: store } = await supabaseAdmin
+            .from('stores')
+            .select('id')
+            .eq('shop_domain', shop)
+            .single();
+
+          if (store) {
+            // Check if there are any customer-specific settings or data
+            // (Currently we don't have any, but this is where you'd delete them)
+
+            // Log the redaction request for compliance
+            await supabaseAdmin
+              .from('gdpr_requests')
+              .insert({
+                shop_domain: shop,
+                request_type: 'customers_redact',
+                customer_id: data.customer?.id,
+                request_id: data.data_request?.id,
+                status: 'completed',
+                response: 'No customer data to redact',
+                processed_at: new Date().toISOString()
+              });
+          }
+
+          console.log('[WEBHOOK] Customer redaction completed - no data to delete');
+        } catch (error) {
+          console.error('[WEBHOOK] Error processing customer redaction:', error);
+        }
+
         return NextResponse.json({
-          message: 'Customer data redaction received',
+          message: 'Customer data redaction completed',
           shop_domain: shop,
-          customer_id: data.customer?.id
+          customer_id: data.customer?.id,
+          data_deleted: false,
+          note: 'No customer data stored to delete'
         }, { status: 200 });
 
       case 'shop/redact':
         // Handle shop data deletion (when app is uninstalled)
         console.log('[WEBHOOK] Shop redaction request for shop:', shop);
-        // In production, you would:
-        // 1. Delete all shop data after 48 hours
-        // 2. Keep only what's legally required
+
+        try {
+          // Delete all shop data from database
+          // This is called 48 hours after app uninstall
+
+          // Get store record
+          const { data: store } = await supabaseAdmin
+            .from('stores')
+            .select('id')
+            .eq('shop_domain', shop)
+            .single();
+
+          if (store) {
+            console.log('[WEBHOOK] Deleting all data for store:', store.id);
+
+            // Delete in order due to foreign key constraints
+            // 1. Delete inventory tracking records
+            await supabaseAdmin
+              .from('inventory_tracking')
+              .delete()
+              .eq('store_id', store.id);
+
+            // 2. Delete product settings
+            await supabaseAdmin
+              .from('product_settings')
+              .delete()
+              .eq('store_id', store.id);
+
+            // 3. Delete store settings
+            await supabaseAdmin
+              .from('store_settings')
+              .delete()
+              .eq('store_id', store.id);
+
+            // 4. Delete setup progress
+            await supabaseAdmin
+              .from('setup_progress')
+              .delete()
+              .eq('store_id', store.id);
+
+            // 5. Delete notification logs
+            await supabaseAdmin
+              .from('notification_logs')
+              .delete()
+              .eq('store_id', store.id);
+
+            // 6. Delete billing records
+            await supabaseAdmin
+              .from('billing_records')
+              .delete()
+              .eq('store_id', store.id);
+
+            // 7. Finally delete the store record itself
+            await supabaseAdmin
+              .from('stores')
+              .delete()
+              .eq('id', store.id);
+
+            console.log('[WEBHOOK] Shop data deletion completed');
+
+            // Log the redaction for compliance
+            await supabaseAdmin
+              .from('gdpr_requests')
+              .insert({
+                shop_domain: shop,
+                request_type: 'shop_redact',
+                status: 'completed',
+                response: 'All shop data deleted',
+                processed_at: new Date().toISOString()
+              });
+          } else {
+            console.log('[WEBHOOK] No shop data found to delete');
+          }
+        } catch (error) {
+          console.error('[WEBHOOK] Error during shop data deletion:', error);
+          // Don't throw - we should always return 200 to Shopify
+        }
+
         return NextResponse.json({
-          message: 'Shop data redaction received',
-          shop_domain: shop
+          message: 'Shop data redaction completed',
+          shop_domain: shop,
+          status: 'completed'
         }, { status: 200 });
 
       default:

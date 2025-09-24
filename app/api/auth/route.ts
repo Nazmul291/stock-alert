@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { shopify } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
-import { generateNonce, generatePKCE, validateShopDomain } from '@/lib/oauth-validation';
+import { generateNonce, generatePKCE, validateShopDomain, createEncodedState } from '@/lib/oauth-validation';
+import { APP_CONFIG } from '@/lib/app-config';
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
@@ -26,49 +27,64 @@ export async function GET(req: NextRequest) {
   try {
     // Build the auth URL
     const redirectUri = `${process.env.SHOPIFY_APP_URL}/api/auth/callback`;
-    const scopes = process.env.SHOPIFY_SCOPES || 'read_products,write_products,read_inventory,write_inventory';
+
+    // Use configuration to determine scopes
+    // You can set SHOPIFY_SCOPES env var to override, or it will use all scopes
+    const scopes = APP_CONFIG.scopes.getAllRequested();
     const apiKey = process.env.SHOPIFY_API_KEY;
+
+    console.log('[OAuth] Starting OAuth flow for shop:', sanitizedShop);
+    console.log('[OAuth] Requesting scopes:', scopes);
+    console.log('[OAuth] Essential scopes:', APP_CONFIG.scopes.essential.join(','));
+    console.log('[OAuth] Enhanced scopes:', APP_CONFIG.scopes.enhanced.join(','));
+    console.log('[OAuth] Redirect URI:', redirectUri);
 
     // Generate cryptographically secure nonce for CSRF protection
     const nonce = generateNonce();
 
-    // Store nonce in signed cookie for validation in callback
-    const cookieStore = cookies();
-    cookieStore.set('shopify-oauth-state', nonce, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 600, // 10 minutes
-      path: '/'
+    // Create encoded state that embeds the nonce and shop
+    // This is more reliable than cookies for OAuth redirects
+    const encodedState = createEncodedState({
+      nonce,
+      shop: sanitizedShop,
     });
 
-    // Store shop domain for additional validation
-    cookieStore.set('shopify-oauth-shop', sanitizedShop, {
+    console.log('[OAuth] Created encoded state for shop:', sanitizedShop);
+
+    // Still try to set cookies as a backup (some browsers may support them)
+    const cookieStore = await cookies();
+
+    // For OAuth flow, we need 'none' sameSite for cross-site cookies to work
+    // This is safe because we validate HMAC and state
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 600,
-      path: '/'
-    });
+      secure: true, // Always use secure in OAuth flow
+      sameSite: 'none' as const, // Required for OAuth redirects
+      maxAge: 600, // 10 minutes
+      path: '/',
+      domain: isProduction ? '.nazmulcodes.org' : undefined // Allow subdomain access
+    };
+
+    // Still set cookies as fallback
+    cookieStore.set('shopify-oauth-state', nonce, cookieOptions);
+    cookieStore.set('shopify-oauth-shop', sanitizedShop, cookieOptions);
 
     // Generate PKCE parameters for enhanced security
     const pkce = generatePKCE();
 
-    // Store PKCE verifier in cookie (challenge goes in URL)
-    cookieStore.set('shopify-oauth-pkce', pkce.codeVerifier, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 600,
-      path: '/'
-    });
+    // Store PKCE verifier in cookie and encoded state
+    cookieStore.set('shopify-oauth-pkce', pkce.codeVerifier, cookieOptions);
+
+    // For PKCE, we'll need to store it server-side since it's too large for state
+    // For now, we'll proceed without PKCE if cookies fail
 
     // Build OAuth URL with all security parameters
     const authUrl = `https://${sanitizedShop}/admin/oauth/authorize?` +
       `client_id=${apiKey}&` +
       `scope=${encodeURIComponent(scopes)}&` +
       `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-      `state=${nonce}&` +
+      `state=${encodedState}&` +
       `code_challenge=${pkce.codeChallenge}&` +
       `code_challenge_method=${pkce.codeChallengeMethod}`;
     

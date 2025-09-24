@@ -76,6 +76,7 @@ export async function requireSessionToken(req: NextRequest): Promise<{
   isAuthenticated: boolean;
   shopDomain: string | null;
   sessionTokenPayload: SessionTokenPayload | null;
+  sessionToken?: string;
   error?: string;
   errorCode?: string;
 }> {
@@ -103,6 +104,9 @@ export async function requireSessionToken(req: NextRequest): Promise<{
     };
   }
 
+  // Extract raw token
+  const rawToken = authHeader.substring(7);
+
   const sessionTokenPayload = await getSessionTokenFromRequest(req);
 
   if (!sessionTokenPayload) {
@@ -110,6 +114,7 @@ export async function requireSessionToken(req: NextRequest): Promise<{
       isAuthenticated: false,
       shopDomain: null,
       sessionTokenPayload: null,
+      sessionToken: rawToken,
       error: 'Invalid or expired session token',
       errorCode: 'INVALID_SESSION_TOKEN'
     };
@@ -121,5 +126,6 @@ export async function requireSessionToken(req: NextRequest): Promise<{
     isAuthenticated: true,
     shopDomain,
     sessionTokenPayload,
+    sessionToken: rawToken,
   };
 }

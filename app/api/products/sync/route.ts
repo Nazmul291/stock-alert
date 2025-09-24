@@ -33,6 +33,15 @@ export async function GET(req: NextRequest) {
     const planLimits = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS];
     const maxProducts = planLimits.maxProducts;
 
+    // Get store settings to determine low stock threshold
+    const { data: storeSettings } = await supabaseAdmin
+      .from('store_settings')
+      .select('low_stock_threshold')
+      .eq('store_id', store.id)
+      .single();
+
+    const lowStockThreshold = storeSettings?.low_stock_threshold || 5;
+
     // Get current distinct product count for this store
     const { data: currentProducts } = await supabaseAdmin
       .from('inventory_tracking')
@@ -266,6 +275,17 @@ export async function GET(req: NextRequest) {
         }
       }
       
+      // Determine correct inventory status based on quantity and store threshold
+      let inventoryStatus: 'in_stock' | 'low_stock' | 'out_of_stock' | 'deactivated';
+
+      if (totalQuantity === 0) {
+        inventoryStatus = 'out_of_stock';
+      } else if (totalQuantity <= lowStockThreshold) {
+        inventoryStatus = 'low_stock';
+      } else {
+        inventoryStatus = 'in_stock';
+      }
+
       inventoryData.push({
         store_id: store.id,
         product_id: product.id,
@@ -274,6 +294,7 @@ export async function GET(req: NextRequest) {
         sku: skus.join(', ') || null, // Combine all SKUs
         current_quantity: totalQuantity,
         previous_quantity: totalQuantity,
+        inventory_status: inventoryStatus,
         is_hidden: false,
         last_checked_at: new Date().toISOString(),
       });

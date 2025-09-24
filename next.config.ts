@@ -3,13 +3,19 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Performance optimizations
   reactStrictMode: true,
-  
+
   // Skip type checking and linting during build
   typescript: {
     ignoreBuildErrors: true,
   },
   eslint: {
     ignoreDuringBuilds: true,
+  },
+
+  // Allow cross-origin requests from dev domain
+  experimental: {
+    // This is the new way in Next.js 15
+    allowedOrigins: ['https://dev.nazmulcodes.org', 'https://stock-alert.nazmulcodes.org'],
   },
   
   // Allow Shopify admin to load the app

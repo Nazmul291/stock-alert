@@ -8,6 +8,22 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { sendLowStockAlert, sendOutOfStockAlert } from '@/lib/notifications';
 import crypto from 'crypto';
 
+// In-memory cache for duplicate prevention (3-second TTL)
+const requestCache = new Map<string, number>();
+
+// Auto-cleanup function to remove expired cache entries
+const cleanupCache = () => {
+  const now = Date.now();
+  for (const [key, timestamp] of requestCache.entries()) {
+    if (now - timestamp > 3000) { // 3 seconds
+      requestCache.delete(key);
+    }
+  }
+};
+
+// Run cleanup every 10 seconds
+setInterval(cleanupCache, 10000);
+
 async function verifyWebhook(req: NextRequest, body: string): Promise<boolean> {
   const hmacHeader = req.headers.get('x-shopify-hmac-sha256');
   if (!hmacHeader) {
@@ -34,16 +50,23 @@ async function processInventoryUpdate(
 ) {
   try {
     // Get store from database
-    const { data: store } = await supabaseAdmin
+    const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('*')
       .eq('shop_domain', shop)
       .single();
 
     if (!store) {
-      console.error('Store not found:', shop);
+      console.error('[Webhook] Store not found:', shop);
+      console.error('[Webhook] Store query error:', storeError);
       return;
     }
+
+    console.log('[Webhook] Found store:', {
+      id: store.id,
+      id_type: typeof store.id,
+      shop_domain: store.shop_domain
+    });
 
     const graphqlClient = await getGraphQLClient(shop, store.access_token);
 
@@ -129,6 +152,29 @@ export async function POST(req: NextRequest) {
 
     if (!shop) {
       return NextResponse.json({ error: 'Missing shop domain' }, { status: 400 });
+    }
+
+    // IMMEDIATE CACHE-BASED DUPLICATE PREVENTION
+    if (webhookTopic === 'inventory_levels/update') {
+      const inventoryItemId = data.inventory_item_id;
+      const cacheKey = `${shop}_${inventoryItemId}_${data.available || 0}`;
+      const now = Date.now();
+
+      // Check if this exact request is already cached (within 3 seconds)
+      if (requestCache.has(cacheKey)) {
+        const cachedTime = requestCache.get(cacheKey)!;
+        if (now - cachedTime < 3000) { // 3 seconds
+          console.log(`[Webhook] CACHE BLOCKED: Duplicate inventory update for ${inventoryItemId} (${now - cachedTime}ms ago)`);
+          return NextResponse.json({
+            success: true,
+            message: 'Duplicate request blocked by cache'
+          }, { status: 200 });
+        }
+      }
+
+      // Cache this request immediately
+      requestCache.set(cacheKey, now);
+      console.log(`[Webhook] CACHE SET: ${cacheKey} cached for 3 seconds`);
     }
 
     // Handle products/update webhooks separately
@@ -299,6 +345,50 @@ async function continueProcessing(
       }, { status: 200 });
     }
 
+    // Check if product is deactivated (for plan limits)
+    const previousStatus = existingTracking?.inventory_status || 'in_stock';
+
+    if (previousStatus === 'deactivated') {
+      console.log('[Webhook] Skipping deactivated product:', product.title);
+      return; // Skip processing for deactivated products
+    }
+
+    // Get product-specific settings first (needed for threshold calculation)
+    const { data: productSettings } = await supabaseAdmin
+      .from('product_settings')
+      .select('*')
+      .eq('store_id', store.id)
+      .eq('product_id', productId)
+      .single();
+
+    // Determine inventory status based on quantity and settings
+    const threshold = productSettings?.custom_threshold || settings.low_stock_threshold;
+    let newStatus: 'in_stock' | 'low_stock' | 'out_of_stock' | 'deactivated';
+
+    console.log('[Webhook] Status determination:', {
+      totalQuantity,
+      threshold,
+      settings_threshold: settings.low_stock_threshold,
+      product_threshold: productSettings?.custom_threshold
+    });
+
+    if (totalQuantity === 0) {
+      newStatus = 'out_of_stock';
+    } else if (totalQuantity <= threshold) {
+      newStatus = 'low_stock';
+    } else {
+      newStatus = 'in_stock';
+    }
+
+    console.log('[Webhook] Status change check:', {
+      product: product.title,
+      previousStatus,
+      newStatus,
+      quantity: totalQuantity,
+      threshold,
+      statusChanged: previousStatus !== newStatus
+    });
+
     // Update product-level inventory (no variant_id!)
     const updateData = {
       store_id: store.id,
@@ -308,6 +398,7 @@ async function continueProcessing(
       sku: variantDetails.map(v => v.sku).filter(Boolean).join(', '),
       current_quantity: totalQuantity,
       previous_quantity: previousQuantity,
+      inventory_status: newStatus,
       is_hidden: existingTracking?.is_hidden || false,
       last_checked_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -336,37 +427,111 @@ async function continueProcessing(
         }, { status: 200 });
       }
     } else {
+      // Check plan limits before adding new product
+      const { canAddProduct } = await import('@/lib/plan-enforcement');
+      const canAdd = await canAddProduct(store.id);
+
+      if (!canAdd.canAdd) {
+        console.log('[Webhook] Cannot add product due to plan limits:', canAdd.reason);
+        // Insert as deactivated if plan limit is reached
+        updateData.inventory_status = 'deactivated';
+      }
+
       // Insert new product
       const { error: insertError } = await supabaseAdmin
         .from('inventory_tracking')
         .insert(updateData);
-      
+
       if (insertError) {
+        console.error('[Webhook] Failed to insert new product:', insertError);
         // Still return success to Shopify - we don't want retries
-        return NextResponse.json({ 
+        return NextResponse.json({
           success: true,
           warning: 'Product not in database, skipping update'
         }, { status: 200 });
       }
-    }
-    
-    // Get product-specific settings
-    const { data: productSettings } = await supabaseAdmin
-      .from('product_settings')
-      .select('*')
-      .eq('store_id', store.id)
-      .eq('product_id', productId)
-      .single();
 
-    const threshold = productSettings?.custom_threshold || settings.low_stock_threshold;
+      if (!canAdd.canAdd) {
+        console.log('[Webhook] Product added as deactivated due to plan limits');
+        return; // Skip further processing for deactivated products
+      }
+    }
+
+    // Extract product-specific exclusion settings
     const excludeFromAutoHide = productSettings?.exclude_from_auto_hide || false;
     const excludeFromAlerts = productSettings?.exclude_from_alerts || false;
     
-    // Handle auto-hide for completely out of stock products
-    if (totalQuantity === 0 && settings.auto_hide_enabled && !excludeFromAutoHide) {
-      
-      
+    // Status-based alert system - only send alerts when status changes
+    if (previousStatus !== newStatus && !excludeFromAlerts) {
+      console.log('[Webhook] Status changed, sending alert:', {
+        product: product.title,
+        productId: productId,
+        previousStatus,
+        newStatus,
+        timestamp: new Date().toISOString()
+      });
 
+      // Create unique webhook ID for tracking duplicates
+      const webhookId = `webhook_${store.id}_${productId}_${Date.now()}`;
+      console.log('[Webhook] Processing webhook:', webhookId);
+
+      // Check for recent alerts to prevent duplicates (within last 5 seconds)
+      const fiveSecondsAgo = new Date(Date.now() - 5 * 1000).toISOString();
+      let alertType = '';
+
+      if (newStatus === 'out_of_stock' && previousStatus !== 'out_of_stock') {
+        alertType = 'out_of_stock';
+      } else if (newStatus === 'low_stock' && previousStatus === 'in_stock') {
+        alertType = 'low_stock';
+      } else if (newStatus === 'in_stock' && previousStatus !== 'in_stock') {
+        alertType = 'restock';
+      }
+
+      if (alertType) {
+        // Status-based alert system - send alerts when status changes
+        if (previousStatus !== newStatus && !excludeFromAlerts) {
+          console.log('[Webhook] Status changed, sending alert:', {
+            product: product.title,
+            productId: productId,
+            previousStatus,
+            newStatus,
+            timestamp: new Date().toISOString()
+          });
+          const productWithSku = { ...product, sku: existingTracking?.sku || updateData.sku };
+
+          if (newStatus === 'out_of_stock' && previousStatus !== 'out_of_stock') {
+            console.log('[Webhook] Sending out of stock alert for:', product.title);
+            await sendOutOfStockAlert(store, productWithSku, null, settings);
+          } else if (newStatus === 'low_stock' && previousStatus === 'in_stock') {
+            console.log('[Webhook] Sending low stock alert for:', product.title);
+            await sendLowStockAlert(store, productWithSku, null, totalQuantity, threshold, settings);
+          } else if (newStatus === 'in_stock' && previousStatus !== 'in_stock') {
+            console.log('[Webhook] Sending restock alert for:', product.title);
+            const { sendRestockAlert } = await import('@/lib/notifications');
+            await sendRestockAlert(store, productWithSku, null, totalQuantity, settings);
+          }
+        } else if (previousStatus === newStatus) {
+          console.log('[Webhook] Status unchanged, no alert needed:', {
+            product: product.title,
+            status: newStatus,
+            quantity: totalQuantity
+          });
+        } else {
+          console.log('[Webhook] Alert excluded for product:', product.title);
+        }
+      }
+    } else if (previousStatus === newStatus) {
+      console.log('[Webhook] Status unchanged, no alert needed:', {
+        product: product.title,
+        status: newStatus,
+        quantity: totalQuantity
+      });
+    } else {
+      console.log('[Webhook] Alert excluded for product:', product.title);
+    }
+
+    // Handle auto-hide for completely out of stock products
+    if (newStatus === 'out_of_stock' && settings.auto_hide_enabled && !excludeFromAutoHide) {
       try {
         // Use GraphQL mutation to update product status (avoiding REST API deprecation)
         const productUpdateMutation = `
@@ -392,14 +557,9 @@ async function continueProcessing(
           }
         });
 
-        
-
         if (hideResponse?.data?.productUpdate?.userErrors?.length > 0) {
-          
           throw new Error(`GraphQL errors: ${JSON.stringify(hideResponse.data.productUpdate.userErrors)}`);
         }
-
-        
 
         await supabaseAdmin
           .from('inventory_tracking')
@@ -407,15 +567,8 @@ async function continueProcessing(
           .eq('store_id', store.id)
           .eq('product_id', productId);
 
-        
       } catch (error: any) {
         // Error caught but not logged in production
-      }
-
-      if (!excludeFromAlerts) {
-        // Pass product with SKU for notification
-        const productWithSku = { ...product, sku: existingTracking?.sku || updateData.sku };
-        await sendOutOfStockAlert(store, productWithSku, null, settings);
       }
     }
     // Handle auto-republish when restocked
@@ -496,26 +649,8 @@ async function continueProcessing(
       }
     }
     
-    // Handle low stock alerts
-    if (totalQuantity > 0 && totalQuantity <= threshold && !excludeFromAlerts) {
-      // Set cooldown to prevent spam (24 hours for production)
-      const cooldownMs = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-      const shouldSendAlert = !existingTracking?.last_alert_sent_at || 
-        new Date().getTime() - new Date(existingTracking.last_alert_sent_at).getTime() > cooldownMs;
-      
-      
-      if (shouldSendAlert) {
-        // Pass product with SKU for notification
-        const productWithSku = { ...product, sku: existingTracking?.sku || updateData.sku };
-        await sendLowStockAlert(store, productWithSku, null, totalQuantity, threshold, settings);
-        
-        await supabaseAdmin
-          .from('inventory_tracking')
-          .update({ last_alert_sent_at: new Date().toISOString() })
-          .eq('store_id', store.id)
-          .eq('product_id', productId);
-      }
-    }
+    // Old cooldown-based alert system has been removed
+    // Now using status-based alerts above
     
     // Mark webhook as processed
     await supabaseAdmin

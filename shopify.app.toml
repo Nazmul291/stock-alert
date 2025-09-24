@@ -1,9 +1,9 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "a4c382e2cb454fd7c45b655248b2d1f7"
-name = "Stock Alert"
-handle = "stock-alert-27"
-application_url = "https://stock-alert.nazmulcodes.org"
+name = "Stock Alert Dev"
+handle = "stock-alert-dev-1"
+application_url = "https://dev.nazmulcodes.org"
 embedded = true
 
 [build]
@@ -16,9 +16,9 @@ scopes = "read_products,write_products,read_inventory,write_inventory"
 
 [auth]
 redirect_urls = [
-  "https://stock-alert.nazmulcodes.org/auth/callback",
-  "https://stock-alert.nazmulcodes.org/auth/shopify/callback",
-  "https://stock-alert.nazmulcodes.org/api/auth/callback"
+  "https://dev.nazmulcodes.org/auth/callback",
+  "https://dev.nazmulcodes.org/auth/shopify/callback",
+  "https://dev.nazmulcodes.org/api/auth/callback"
 ]
 
 [webhooks]
