@@ -207,7 +207,7 @@ async function continueProcessing(
   const client = await getShopifyClient(store.shop_domain, store.access_token);
 
   // Find which product this inventory_item_id belongs to
-  let productId = productGID.split('/').pop();
+  const productId = productGID.split('/').pop();
   let product = null;
 
   try {

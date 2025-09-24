@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   try {
     // Parse request body with proper error handling for production environments
     let plan;
-    let bodyText = '';
+    const bodyText = '';
 
     try {
       const body = await req.json();

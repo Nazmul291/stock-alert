@@ -1,5 +1,7 @@
 'use client';
 
+import { logger } from './logger';
+
 interface TokenRefreshState {
   isRefreshing: boolean;
   refreshPromise: Promise<string | null> | null;
@@ -33,21 +35,21 @@ class TokenManager {
   async getToken(appBridge: any, forceRefresh: boolean = false): Promise<string | null> {
     // Check if we're already refreshing
     if (this.state.isRefreshing && this.state.refreshPromise) {
-      console.log('[TokenManager] Already refreshing, waiting for existing refresh...');
+      logger.debug('[TokenManager] Already refreshing, waiting for existing refresh...');
       return this.state.refreshPromise;
     }
 
     // Check cooldown period
     const now = Date.now();
     if (!forceRefresh && now - this.state.lastRefreshTime < this.REFRESH_COOLDOWN) {
-      console.log('[TokenManager] In cooldown period, using cached token');
+      logger.debug('[TokenManager] In cooldown period, using cached token');
       const cached = this.getCachedToken();
       if (cached) return cached;
     }
 
     // Check if we've had too many failures
     if (this.state.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
-      console.error('[TokenManager] Max consecutive failures reached, need manual intervention');
+      logger.error('[TokenManager] Max consecutive failures reached, need manual intervention');
       return null;
     }
 
@@ -61,12 +63,12 @@ class TokenManager {
 
     // If App Bridge is not ready yet, wait a bit
     if (!appBridge || (!window.shopify && !window.ShopifyBridge)) {
-      console.log('[TokenManager] App Bridge not ready, waiting...');
+      logger.debug('[TokenManager] App Bridge not ready, waiting...');
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Check again after wait
       if (!window.shopify && !window.ShopifyBridge) {
-        console.log('[TokenManager] App Bridge still not ready after wait');
+        logger.debug('[TokenManager] App Bridge still not ready after wait');
         return this.getCachedToken(); // Return cached if available
       }
     }
@@ -133,7 +135,7 @@ class TokenManager {
         try {
           const token = await method();
           if (token && this.isTokenValid(token)) {
-            console.log('[TokenManager] Successfully obtained token');
+            logger.debug('[TokenManager] Successfully obtained token');
             return token;
           }
         } catch (error) {
@@ -141,10 +143,10 @@ class TokenManager {
         }
       }
 
-      console.error('[TokenManager] All token refresh methods failed');
+      logger.error('[TokenManager] All token refresh methods failed');
       return null;
     } catch (error) {
-      console.error('[TokenManager] Error refreshing token:', error);
+      logger.error('[TokenManager] Error refreshing token:', error);
       return null;
     }
   }
@@ -193,7 +195,7 @@ class TokenManager {
         sessionStorage.setItem(this.TOKEN_EXPIRY_KEY, expiryTime.toString());
       }
     } catch (error) {
-      console.error('[TokenManager] Error caching token:', error);
+      logger.error('[TokenManager] Error caching token:', error);
     }
   }
 
