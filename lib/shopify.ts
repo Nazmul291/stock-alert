@@ -30,9 +30,23 @@ export const shopify = shopifyApi({
 
 
 export async function getShopifyClient(shop: string, accessToken: string) {
+  // Import token decryption
+  const { decryptToken, isEncryptedToken } = await import('@/lib/token-encryption');
+
   // Validate inputs
   if (!shop || !accessToken) {
     throw new Error(`Invalid shop or accessToken: shop=${shop}, token exists=${!!accessToken}`);
+  }
+
+  // Decrypt token if it's encrypted
+  let actualToken = accessToken;
+  if (isEncryptedToken(accessToken)) {
+    try {
+      actualToken = await decryptToken(accessToken);
+    } catch (error) {
+      console.error('[Shopify Client] Failed to decrypt token:', error);
+      throw new Error('Failed to decrypt access token');
+    }
   }
 
   const session = new Session({
@@ -40,22 +54,40 @@ export async function getShopifyClient(shop: string, accessToken: string) {
     shop,
     state: '',
     isOnline: false,
-    accessToken,
+    accessToken: actualToken,
   });
 
   const client = new shopify.clients.Rest({ session });
-
 
   return client;
 }
 
 export async function getGraphQLClient(shop: string, accessToken: string) {
+  // Import token decryption
+  const { decryptToken, isEncryptedToken } = await import('@/lib/token-encryption');
+
+  // Validate inputs
+  if (!shop || !accessToken) {
+    throw new Error(`Invalid shop or accessToken: shop=${shop}, token exists=${!!accessToken}`);
+  }
+
+  // Decrypt token if it's encrypted
+  let actualToken = accessToken;
+  if (isEncryptedToken(accessToken)) {
+    try {
+      actualToken = await decryptToken(accessToken);
+    } catch (error) {
+      console.error('[GraphQL Client] Failed to decrypt token:', error);
+      throw new Error('Failed to decrypt access token');
+    }
+  }
+
   const session = new Session({
     id: `offline_${shop}`,
     shop,
     state: '',
     isOnline: false,
-    accessToken,
+    accessToken: actualToken,
   });
 
   return new shopify.clients.Graphql({ session });
