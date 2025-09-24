@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
               name: 'Stock Alert Pro',
               price: 9.99,
               return_url: `${host}/api/billing/callback?shop=${shop}`,
-              test: true,  // Test charges should always work
+              test: process.env.NODE_ENV != "production",
             },
           },
         });
