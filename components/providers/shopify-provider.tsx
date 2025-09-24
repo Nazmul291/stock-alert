@@ -53,6 +53,7 @@ export function ShopifyProvider({ children }: PropsWithChildren) {
           <a href={createAppUrl('/products')}>Products</a>
           <a href={createAppUrl('/settings')}>Settings</a>
           <a href={createAppUrl('/billing')}>Billing</a>
+          <a href={createAppUrl('/privacy')}>Privacy</a>
         </NavMenu>
       )}
       {children}
