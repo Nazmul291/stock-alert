@@ -41,7 +41,8 @@ class TokenManager {
     const now = Date.now();
     if (!forceRefresh && now - this.state.lastRefreshTime < this.REFRESH_COOLDOWN) {
       console.log('[TokenManager] In cooldown period, using cached token');
-      return this.getCachedToken();
+      const cached = this.getCachedToken();
+      if (cached) return cached;
     }
 
     // Check if we've had too many failures
@@ -55,6 +56,18 @@ class TokenManager {
       const cachedToken = this.getCachedToken();
       if (cachedToken && this.isTokenValid(cachedToken)) {
         return cachedToken;
+      }
+    }
+
+    // If App Bridge is not ready yet, wait a bit
+    if (!appBridge || (!window.shopify && !window.ShopifyBridge)) {
+      console.log('[TokenManager] App Bridge not ready, waiting...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Check again after wait
+      if (!window.shopify && !window.ShopifyBridge) {
+        console.log('[TokenManager] App Bridge still not ready after wait');
+        return this.getCachedToken(); // Return cached if available
       }
     }
 
@@ -145,6 +158,7 @@ class TokenManager {
   private getCachedToken(): string | null {
     if (typeof window === 'undefined') return null;
 
+    // First check sessionStorage
     const token = sessionStorage.getItem(this.TOKEN_CACHE_KEY);
     const expiry = sessionStorage.getItem(this.TOKEN_EXPIRY_KEY);
 
@@ -153,6 +167,15 @@ class TokenManager {
       if (Date.now() < expiryTime) {
         return token;
       }
+    }
+
+    // Also check URL for token (fallback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get('id_token');
+    if (urlToken && this.isTokenValid(urlToken)) {
+      // Cache it for future use
+      this.cacheToken(urlToken);
+      return urlToken;
     }
 
     return null;

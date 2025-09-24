@@ -50,10 +50,18 @@ export default function ProductStats({ shop }: ProductStatsProps) {
   const authenticatedFetch = useAuthenticatedFetch();
 
   useEffect(() => {
-    fetchStats();
-    // Refresh stats every 30 seconds
+    // Small delay to allow App Bridge to initialize
+    const initialTimeout = setTimeout(() => {
+      fetchStats();
+    }, 1000);
+
+    // Then refresh stats every 30 seconds
     const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
   }, [shop]);
 
   const fetchStats = async () => {
@@ -64,7 +72,8 @@ export default function ProductStats({ shop }: ProductStatsProps) {
         // Handle specific error cases
         if (response.status === 401) {
           // Session expired - the authenticatedFetch will handle redirect
-          console.log('Session expired, waiting for redirect...');
+          console.log('Session expired, authentication in progress...');
+          // Don't set error immediately - authentication might recover
           return;
         } else if (response.status === 403) {
           setError('Permission denied. Please reinstall the app.');

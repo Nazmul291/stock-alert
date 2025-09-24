@@ -39,8 +39,19 @@ export function useAuthenticatedFetch() {
         if (sessionToken) {
           headers.set('Authorization', `Bearer ${sessionToken}`);
         } else {
-          console.warn('[AuthenticatedFetch] No session token available');
-          triggerAuthNotification('Unable to authenticate. Please reload the page.', 'warning');
+          // Don't show error immediately - App Bridge might still be loading
+          console.warn('[AuthenticatedFetch] No session token available, App Bridge ready:', isReady);
+
+          // Only show notification if App Bridge should be ready but token still failed
+          if (isReady && appBridge) {
+            // Wait a bit before showing error - token might be loading
+            setTimeout(() => {
+              if (!tokenManager.getToken(appBridge)) {
+                triggerAuthNotification('Session expired. Refreshing authentication...', 'warning');
+              }
+            }, 2000);
+          }
+          // Continue request without token - will trigger 401 handling if needed
         }
       } catch (error) {
         console.error('[AuthenticatedFetch] Failed to get token:', error);
