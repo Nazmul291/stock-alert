@@ -115,23 +115,80 @@ export default function SessionMonitor() {
           tokenInfo = { error: 'Failed to decode token' };
         }
 
-        const response = await fetch('/api/session-check', {
-          headers: {
-            'Authorization': `Bearer ${sessionToken}`,
-            'Content-Type': 'application/json'
-          }
+        // Make parallel requests - our API and Shopify Admin API
+        const [sessionResponse, shopifyResponse, graphqlResponse] = await Promise.all([
+          // 1. Our session check endpoint
+          fetch('/api/session-check', {
+            headers: {
+              'Authorization': `Bearer ${sessionToken}`,
+              'Content-Type': 'application/json'
+            }
+          }),
+
+          // 2. Shopify Admin API verification
+          fetch('/api/shopify/verify-session', {
+            headers: {
+              'Authorization': `Bearer ${sessionToken}`,
+              'Content-Type': 'application/json'
+            }
+          }).catch(err => ({ ok: false, error: err.message })),
+
+          // 3. GraphQL query to Shopify
+          fetch('/api/shopify/graphql', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${sessionToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              query: `
+                query monitorCheck {
+                  shop {
+                    id
+                    name
+                    primaryDomain {
+                      url
+                    }
+                  }
+                }
+              `
+            })
+          }).catch(err => ({ ok: false, error: err.message }))
+        ]);
+
+        const sessionResult = await sessionResponse.json();
+        const shopifyResult = shopifyResponse.ok && !shopifyResponse.error ?
+          await (shopifyResponse as Response).json() :
+          { error: shopifyResponse.error || 'Failed' };
+        const graphqlResult = graphqlResponse.ok && !graphqlResponse.error ?
+          await (graphqlResponse as Response).json() :
+          { error: graphqlResponse.error || 'Failed' };
+
+        // Log to console for Shopify detection
+        console.log('[SessionMonitor] Session check completed:', {
+          sessionCheck: sessionResponse.ok,
+          shopifyAdmin: shopifyResponse.ok,
+          graphql: graphqlResponse.ok,
+          tokenUsed: true,
+          timestamp: new Date().toISOString()
         });
 
-        const result = await response.json();
         setStatus({
-          status: response.status,
-          ok: response.ok,
-          result,
+          status: sessionResponse.status,
+          ok: sessionResponse.ok,
+          result: sessionResult,
+          shopifyAdminCheck: shopifyResult,
+          graphqlCheck: graphqlResult,
           tokenLength: sessionToken.length,
           hasAppBridge: !!window.shopify || !!window.ShopifyBridge,
           appBridgeReady: isReady,
           tokenSource: tokenSource,
-          tokenInfo: tokenInfo
+          tokenInfo: tokenInfo,
+          checksPerformed: {
+            session: sessionResponse.ok,
+            shopifyAdmin: shopifyResponse.ok,
+            graphql: graphqlResponse.ok
+          }
         });
       } catch (error) {
         setStatus({
@@ -165,7 +222,27 @@ export default function SessionMonitor() {
     }}>
       <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>
         Session Monitor (What Shopify Sees)
+        {status.checksPerformed && (
+          <span style={{
+            marginLeft: '10px',
+            padding: '2px 6px',
+            background: '#4CAF50',
+            color: 'white',
+            borderRadius: '3px',
+            fontSize: '10px',
+            animation: 'pulse 1s infinite'
+          }}>
+            ACTIVE
+          </span>
+        )}
       </div>
+      <style jsx>{`
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.5; }
+          100% { opacity: 1; }
+        }
+      `}</style>
 
       <div style={{ marginBottom: '5px' }}>
         <strong>App Bridge:</strong> {status.hasAppBridge ? '✅ Loaded' : '❌ Missing'}
@@ -186,10 +263,21 @@ export default function SessionMonitor() {
       </div>
 
       <div style={{ marginBottom: '5px' }}>
-        <strong>API Response:</strong> {
-          status.ok ? '✅ 200 OK' :
-          status.status ? `❌ ${status.status}` : '⏳ Checking...'
-        }
+        <strong>API Checks:</strong>
+        <div style={{ marginLeft: '10px', fontSize: '10px' }}>
+          <div>Session: {
+            status.ok ? '✅ OK' :
+            status.status ? `❌ ${status.status}` : '⏳ ...'
+          }</div>
+          <div>Shopify Admin: {
+            status.checksPerformed?.shopifyAdmin ? '✅ OK' :
+            status.checksPerformed?.shopifyAdmin === false ? '❌ Failed' : '⏳ ...'
+          }</div>
+          <div>GraphQL: {
+            status.checksPerformed?.graphql ? '✅ OK' :
+            status.checksPerformed?.graphql === false ? '❌ Failed' : '⏳ ...'
+          }</div>
+        </div>
       </div>
 
       {status.tokenInfo && (

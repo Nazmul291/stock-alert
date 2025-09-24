@@ -6,6 +6,8 @@ import { ShopifyProvider } from '@/components/providers/shopify-provider';
 import ReduxProvider from '@/components/redux-provider';
 import SessionMonitor from '@/components/session-monitor';
 import { AuthNotification } from '@/components/auth-notification';
+import SessionTokenTester from '@/components/session-token-tester';
+import AppBridgeInit from '@/components/app-bridge-init';
 import { Suspense } from 'react';
 
 const inter = Inter({ subsets: ["latin"] });
@@ -35,7 +37,9 @@ export default function RootLayout({
           <PolarisProvider>
             <Suspense fallback={null}>
               <ShopifyProvider>
+                <AppBridgeInit />
                 <SessionMonitor />
+                <SessionTokenTester />
                 <AuthNotification />
                 {children}
               </ShopifyProvider>
