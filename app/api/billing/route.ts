@@ -144,6 +144,7 @@ export async function POST(req: NextRequest) {
               price: 9.99,
               return_url: `${host}/api/billing/callback?shop=${shop}`,
               test: process.env.NODE_ENV != "production",
+              trial_days: 7,
             },
           },
         });
