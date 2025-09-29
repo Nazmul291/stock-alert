@@ -17,8 +17,6 @@ export default function SessionAuth() {
   }, []);
 
   const initializeSessionAuth = async () => {
-    console.log('[SessionAuth] Starting session token authentication...');
-
     try {
       // Wait for App Bridge to be ready
       await waitForAppBridge();
@@ -40,8 +38,6 @@ export default function SessionAuth() {
   };
 
   const waitForAppBridge = async (): Promise<void> => {
-    console.log('[SessionAuth] Waiting for App Bridge...');
-
     return new Promise((resolve, reject) => {
       let attempts = 0;
       const maxAttempts = 50; // 5 seconds
@@ -51,7 +47,6 @@ export default function SessionAuth() {
 
         // Check if App Bridge CDN is loaded
         if (typeof window !== 'undefined' && window.shopify) {
-          console.log('[SessionAuth] ✅ App Bridge CDN ready');
           resolve();
           return;
         }
@@ -59,7 +54,6 @@ export default function SessionAuth() {
         // Check custom App Bridge instance
         const appInstance = (window as any).__SHOPIFY_APP__;
         if (appInstance && appInstance.ready) {
-          console.log('[SessionAuth] ✅ Custom App Bridge ready');
           resolve();
           return;
         }
@@ -70,10 +64,6 @@ export default function SessionAuth() {
           return;
         }
 
-        if (attempts % 10 === 0) {
-          console.log(`[SessionAuth] Still waiting... (${attempts}/${maxAttempts})`);
-        }
-
         setTimeout(checkAppBridge, 100);
       };
 
@@ -82,7 +72,6 @@ export default function SessionAuth() {
   };
 
   const performSessionAuth = async () => {
-    console.log('[SessionAuth] Performing session token authentication...');
     setAuthState('authenticating');
 
     try {
@@ -90,18 +79,14 @@ export default function SessionAuth() {
       let sessionToken;
 
       if (window.shopify && window.shopify.idToken) {
-        console.log('[SessionAuth] Getting session token from App Bridge CDN...');
         sessionToken = await window.shopify.idToken();
       } else {
         const appInstance = (window as any).__SHOPIFY_APP__;
         if (!appInstance?.idToken) {
           throw new Error('Session token not available');
         }
-        console.log('[SessionAuth] Getting session token from custom App Bridge...');
         sessionToken = await appInstance.idToken();
       }
-
-      console.log('[SessionAuth] Session token acquired, authenticating...');
 
       // Call our session authentication endpoint
       const response = await fetch('/api/auth/session', {
@@ -115,7 +100,6 @@ export default function SessionAuth() {
       const result = await response.json();
 
       if (response.ok && result.success) {
-        console.log('[SessionAuth] ✅ Authentication successful!');
         setAuthResult(result);
         setAuthState('authenticated');
 

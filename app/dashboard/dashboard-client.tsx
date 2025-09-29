@@ -75,8 +75,6 @@ export default function DashboardClient({
     // Check for scope warnings and verify access if needed
     // Always verify on first load after authentication
     if (store?.scope_warning || urlParams.get('authenticated') === '1') {
-      console.log('[Dashboard] Triggering access verification');
-      console.log('[Dashboard] Reason:', store?.scope_warning ? 'scope warning present' : 'just authenticated');
       verifyAccess();
     }
   }, []);
@@ -103,7 +101,6 @@ export default function DashboardClient({
         }
 
         const result = await response.json();
-        console.log('[Dashboard] Access verification result:', result);
 
         // Only set if we got a valid response
         if (result && typeof result === 'object' && 'canFunction' in result) {
@@ -112,10 +109,6 @@ export default function DashboardClient({
           // If access is not sufficient, show warning
           if (!result.canFunction) {
             console.warn('[Dashboard] Insufficient access detected');
-            console.log('[Dashboard] Actual access:', result.actualAccess);
-            console.log('[Dashboard] Granted scopes:', result.grantedScopes);
-          } else {
-            console.log('[Dashboard] ✅ Access verified successfully');
           }
         } else {
           console.error('[Dashboard] Invalid verification response:', result);

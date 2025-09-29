@@ -17,20 +17,14 @@ export default function AppBridgeInit() {
 
     // Initialize App Bridge using Shopify's CDN best practices
     const initAppBridge = async () => {
-      console.log('[AppBridgeInit] Starting App Bridge initialization...');
-
       // Check if App Bridge CDN is loaded
       if (!window.shopify) {
-        console.log('[AppBridgeInit] App Bridge CDN not loaded yet, waiting...');
         return false;
       }
-
-      console.log('[AppBridgeInit] App Bridge CDN detected, waiting for ready state...');
 
       try {
         // Wait for App Bridge to be ready (this is the correct CDN API)
         await window.shopify.ready;
-        console.log('[AppBridgeInit] App Bridge ready!');
 
         // Set shopify-api-key meta tag if not present
         const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_API_KEY;
@@ -41,7 +35,6 @@ export default function AppBridgeInit() {
             metaTag.setAttribute('name', 'shopify-api-key');
             metaTag.setAttribute('content', apiKey);
             document.head.appendChild(metaTag);
-            console.log('[AppBridgeInit] Added shopify-api-key meta tag');
           }
         }
 
@@ -61,8 +54,6 @@ export default function AppBridgeInit() {
           };
           return true;
         }
-
-        console.log('[AppBridgeInit] Initializing with host:', hostParam);
 
         // Store the ready state globally for components to check
         (window as any).__SHOPIFY_APP__ = {
@@ -84,8 +75,6 @@ export default function AppBridgeInit() {
           }
         };
 
-        console.log('[AppBridgeInit] App Bridge initialization complete');
-
         // Test immediate API calls to demonstrate session token usage
         await testSessionTokenUsage();
 
@@ -101,14 +90,12 @@ export default function AppBridgeInit() {
         const appInstance = (window as any).__SHOPIFY_APP__;
         if (appInstance && appInstance.idToken) {
           const token = await appInstance.idToken();
-          console.log('[AppBridgeInit] Session token retrieved for testing');
 
           // Test our auth endpoints
           const authTestResponse = await fetch('/api/shopify/auth-test', {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           const authTestData = await authTestResponse.json();
-          console.log('[AppBridgeInit] Auth test result:', authTestData);
 
           // Mark successful session token usage
           window.sessionStorage.setItem('session_token_verified', 'true');
@@ -121,10 +108,8 @@ export default function AppBridgeInit() {
 
     // Try to initialize immediately
     initAppBridge().then(() => {
-      console.log('[AppBridgeInit] Initialization completed successfully');
+      // Initialization completed
     }).catch(() => {
-      console.log('[AppBridgeInit] Initial attempt failed, will retry...');
-
       // If not ready, poll for App Bridge
       const checkInterval = setInterval(async () => {
         const success = await initAppBridge();

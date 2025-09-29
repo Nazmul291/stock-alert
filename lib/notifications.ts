@@ -22,17 +22,6 @@ export async function sendLowStockAlert(
   threshold: number,
   settings: StoreSettings
 ) {
-  const alertId = `low_stock_${store.id}_${product.id.split('/').pop()}_${Date.now()}`;
-  console.log(`[Notifications] ${alertId} - sendLowStockAlert called:`, {
-    store_id: store.id,
-    store_id_type: typeof store.id,
-    product_id: product.id.split('/').pop(),
-    product_title: product.title,
-    currentQuantity,
-    threshold,
-    email_notifications: settings.email_notifications,
-    timestamp: new Date().toISOString()
-  });
   // Handle product-level tracking where variant might be null
   const variantTitle = variant?.title || null;
   const sku = variant?.sku || product?.sku || null;
@@ -82,9 +71,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
         });
 
         // Log alert in database
-        console.log('[Notifications] Logging low stock alert to database...');
-
-        const { data: alertData, error: alertError } = await supabaseAdmin
+        const { error: alertError } = await supabaseAdmin
           .from('alert_history')
           .insert({
             store_id: store.id,
@@ -100,8 +87,6 @@ Stock Alert - Automated inventory monitoring for your Shopify store
 
         if (alertError) {
           console.error('[Notifications] Failed to log low stock alert:', alertError);
-        } else {
-          console.log('[Notifications] Successfully logged alert:', alertData);
         }
       } catch (error) {
         // Email send error handling preserved
@@ -190,14 +175,6 @@ export async function sendOutOfStockAlert(
   variant: any,
   settings: StoreSettings
 ) {
-  const alertId = `out_of_stock_${store.id}_${product.id.split('/').pop()}_${Date.now()}`;
-  console.log(`[Notifications] ${alertId} - sendOutOfStockAlert called:`, {
-    store_id: store.id,
-    product_id: product.id.split('/').pop(),
-    product_title: product.title,
-    email_notifications: settings.email_notifications,
-    timestamp: new Date().toISOString()
-  });
   // Handle product-level tracking where variant might be null
   const variantTitle = variant?.title || null;
   const sku = variant?.sku || product?.sku || null;
@@ -245,9 +222,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
         });
 
         // Log alert in database
-        console.log('[Notifications] Logging out of stock alert to database...');
-
-        const { data: outOfStockData, error: outOfStockAlertError } = await supabaseAdmin
+        const { error: outOfStockAlertError } = await supabaseAdmin
           .from('alert_history')
           .insert({
             store_id: store.id,
@@ -263,8 +238,6 @@ Stock Alert - Automated inventory monitoring for your Shopify store
 
         if (outOfStockAlertError) {
           console.error('[Notifications] Failed to log out of stock alert:', outOfStockAlertError);
-        } else {
-          console.log('[Notifications] Successfully logged out of stock alert:', outOfStockData);
         }
       } catch (error) {
         // Email send error handling preserved
@@ -354,16 +327,6 @@ export async function sendRestockAlert(
   currentQuantity: number,
   settings: StoreSettings
 ) {
-  const alertId = `restock_${store.id}_${product.id.split('/').pop()}_${Date.now()}`;
-  console.log(`[Notifications] ${alertId} - sendRestockAlert called:`, {
-    store_id: store.id,
-    product_id: product.id.split('/').pop(),
-    product_title: product.title,
-    currentQuantity,
-    email_notifications: settings.email_notifications,
-    timestamp: new Date().toISOString()
-  });
-
   // Handle product-level tracking where variant might be null
   const variantTitle = variant?.title || null;
   const sku = variant?.sku || product?.sku || null;
@@ -413,9 +376,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
         });
 
         // Log alert in database
-        console.log('[Notifications] Logging restock alert to database...');
-
-        const { data: alertData, error: alertError } = await supabaseAdmin
+        const { error: alertError } = await supabaseAdmin
           .from('alert_history')
           .insert({
             store_id: store.id,
@@ -431,8 +392,6 @@ Stock Alert - Automated inventory monitoring for your Shopify store
 
         if (alertError) {
           console.error('[Notifications] Failed to log restock alert:', alertError);
-        } else {
-          console.log('[Notifications] Successfully logged restock alert:', alertData);
         }
       } catch (error) {
         console.error('[Notifications] Failed to send restock email:', error);

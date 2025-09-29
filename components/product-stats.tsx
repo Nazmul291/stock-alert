@@ -72,7 +72,6 @@ export default function ProductStats({ shop }: ProductStatsProps) {
         // Handle specific error cases
         if (response.status === 401) {
           // Session expired - the authenticatedFetch will handle redirect
-          console.log('Session expired, authentication in progress...');
           // Don't set error immediately - authentication might recover
           return;
         } else if (response.status === 403) {
@@ -90,7 +89,6 @@ export default function ProductStats({ shop }: ProductStatsProps) {
     } catch (err) {
       // Network error or fetch was aborted (redirect in progress)
       if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-        console.log('Request aborted, likely due to redirect');
         return;
       }
       setError('Failed to load statistics');

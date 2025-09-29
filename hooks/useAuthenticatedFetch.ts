@@ -84,7 +84,6 @@ export function useAuthenticatedFetch() {
             const freshToken = await tokenManager.getToken(appBridge, true);
 
             if (freshToken && freshToken !== sessionToken) {
-              console.log('[AuthenticatedFetch] Got fresh token, retrying request...');
 
               // Use request queue for retry with automatic backoff
               const retryHeaders = new Headers(options.headers);
@@ -98,7 +97,6 @@ export function useAuthenticatedFetch() {
               });
 
               if (retryResponse.ok) {
-                console.log('[AuthenticatedFetch] Retry successful with fresh token');
               } else {
                 console.warn('[AuthenticatedFetch] Retry failed, status:', retryResponse.status);
               }
@@ -128,7 +126,6 @@ export function useAuthenticatedFetch() {
           // Clear token cache
           tokenManager.clearCache();
 
-          console.log('[AuthenticatedFetch] Redirecting to auth-bounce for fresh session...');
           const currentPath = window.location.pathname;
           redirectToBounce(currentPath + window.location.search);
 

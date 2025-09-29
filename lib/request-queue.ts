@@ -47,7 +47,6 @@ class RequestQueue {
         timestamp: Date.now()
       };
 
-      console.log('[RequestQueue] Enqueuing request:', url);
       this.queue.push(request);
       this.processQueue();
     });
@@ -79,7 +78,6 @@ class RequestQueue {
   // Process individual request
   private async processRequest(request: QueuedRequest): Promise<void> {
     try {
-      console.log(`[RequestQueue] Processing request: ${request.url} (attempt ${request.retryCount + 1}/${request.maxRetries + 1})`);
 
       const response = await fetch(request.url, request.options);
 
@@ -88,7 +86,6 @@ class RequestQueue {
         request.retryCount++;
         const delay = this.calculateRetryDelay(request.retryCount);
 
-        console.log(`[RequestQueue] Request failed with ${response.status}, retrying in ${delay}ms...`);
 
         setTimeout(() => {
           this.queue.unshift(request); // Add back to front of queue
@@ -104,7 +101,6 @@ class RequestQueue {
         request.retryCount++;
         const delay = this.calculateRetryDelay(request.retryCount);
 
-        console.log(`[RequestQueue] Network error, retrying in ${delay}ms...`);
 
         setTimeout(() => {
           this.queue.unshift(request);
@@ -142,7 +138,6 @@ class RequestQueue {
       request.reject(new Error('Queue cleared'));
     });
     this.queue = [];
-    console.log('[RequestQueue] Queue cleared');
   }
 
   // Get queue status
@@ -176,7 +171,6 @@ class RequestQueue {
         timestamp: Date.now()
       };
 
-      console.log('[RequestQueue] Priority enqueuing request:', url);
       this.queue.unshift(request);
       this.processQueue();
     });

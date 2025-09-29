@@ -16,8 +16,6 @@ export interface PlanEnforcementResult {
 export async function enforcePlanLimits(storeId: string, plan: string): Promise<PlanEnforcementResult> {
   const maxProducts = APP_CONFIG.plans.getMaxProducts(plan);
 
-  console.log(`[Plan Enforcement] Enforcing ${plan} plan limits for store ${storeId}, max products: ${maxProducts}`);
-
   if (maxProducts === -1) {
     // Unlimited plan - activate all products
     const { data: reactivated, error } = await supabaseAdmin
@@ -72,8 +70,6 @@ export async function enforcePlanLimits(storeId: string, plan: string): Promise<
   const productsToDeactivate = activeProducts.slice(maxProducts);
   const productIds = productsToDeactivate.map(p => p.id);
 
-  console.log(`[Plan Enforcement] Deactivating ${productIds.length} products to enforce ${plan} plan limits`);
-
   const { error: deactivateError } = await supabaseAdmin
     .from('inventory_tracking')
     .update({
@@ -106,7 +102,6 @@ export async function enforcePlanLimits(storeId: string, plan: string): Promise<
  * Handle plan downgrade - enforce new limits immediately
  */
 export async function handlePlanDowngrade(storeId: string, newPlan: string): Promise<PlanEnforcementResult> {
-  console.log(`[Plan Enforcement] Plan downgraded for store ${storeId} to ${newPlan}`);
 
   // Update store plan first
   await supabaseAdmin
@@ -122,7 +117,6 @@ export async function handlePlanDowngrade(storeId: string, newPlan: string): Pro
  * Handle plan upgrade - reactivate deactivated products if within new limits
  */
 export async function handlePlanUpgrade(storeId: string, newPlan: string): Promise<PlanEnforcementResult> {
-  console.log(`[Plan Enforcement] Plan upgraded for store ${storeId} to ${newPlan}`);
 
   // Update store plan first
   await supabaseAdmin

@@ -24,7 +24,6 @@ export async function GET(req: NextRequest) {
 
     const client = await getShopifyClient(shop, store.access_token);
 
-    console.log('[Scope Test] Testing with scopes:', store.scope);
 
     const testResults = {
       shop,
@@ -48,10 +47,8 @@ export async function GET(req: NextRequest) {
         count: productsResponse.body.products?.length || 0,
         firstProduct: productsResponse.body.products?.[0]?.title
       };
-      console.log('[Scope Test] ✅ Can READ products');
     } catch (error: any) {
       testResults.tests.readProducts.error = error.message;
-      console.log('[Scope Test] ❌ Cannot READ products:', error.message);
     }
 
     // Test 2: Try to READ inventory
@@ -65,10 +62,8 @@ export async function GET(req: NextRequest) {
       testResults.tests.readInventory.data = {
         count: inventoryResponse.body.inventory_levels?.length || 0
       };
-      console.log('[Scope Test] ✅ Can READ inventory');
     } catch (error: any) {
       testResults.tests.readInventory.error = error.message;
-      console.log('[Scope Test] ❌ Cannot READ inventory:', error.message);
     }
 
     // Test 3: Check if we could write (but don't actually write)

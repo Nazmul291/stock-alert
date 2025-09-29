@@ -62,11 +62,6 @@ async function processInventoryUpdate(
       return;
     }
 
-    console.log('[Webhook] Found store:', {
-      id: store.id,
-      id_type: typeof store.id,
-      shop_domain: store.shop_domain
-    });
 
     const graphqlClient = await getGraphQLClient(shop, store.access_token);
 
@@ -75,7 +70,6 @@ async function processInventoryUpdate(
     const inventoryItemId = data.inventory_item_id;
 
     if (!inventoryItemId) {
-      console.log('No inventory item ID in webhook payload');
       return;
     }
 
@@ -136,7 +130,6 @@ async function processInventoryLogic(
   const response = await graphqlClient.request(query);
   const product = response?.data?.inventoryItem?.variant?.product;
   if (!product) {
-    console.log('Could not determine product GID for inventory update');
     return;
   }
 
@@ -175,7 +168,6 @@ export async function POST(req: NextRequest) {
       if (requestCache.has(cacheKey)) {
         const cachedTime = requestCache.get(cacheKey)!;
         if (now - cachedTime < 3000) { // 3 seconds
-          console.log(`[Webhook] CACHE BLOCKED: Duplicate inventory update for ${inventoryItemId} (${now - cachedTime}ms ago)`);
           return NextResponse.json({
             success: true,
             message: 'Duplicate request blocked by cache'
@@ -185,7 +177,6 @@ export async function POST(req: NextRequest) {
 
       // Cache this request immediately
       requestCache.set(cacheKey, now);
-      console.log(`[Webhook] CACHE SET: ${cacheKey} cached for 3 seconds`);
     }
 
     // Handle products/update webhooks separately
@@ -266,7 +257,6 @@ async function continueProcessing(
 
 
   if (!product) {
-    console.log('Could not determine product for inventory update');
     return;
   }
     
@@ -298,8 +288,7 @@ async function continueProcessing(
     
     // Check if quantity actually changed - skip notifications if same
     if (totalQuantity === previousQuantity) {
-      console.log(totalQuantity, previousQuantity)
-      return NextResponse.json({ 
+      return NextResponse.json({
         success: true,
         info: 'Quantity unchanged, notifications skipped'
       }, { status: 200 });
@@ -309,7 +298,6 @@ async function continueProcessing(
     const previousStatus = existingTracking?.inventory_status || 'in_stock';
 
     if (previousStatus === 'deactivated') {
-      console.log('[Webhook] Skipping deactivated product:', product.title);
       return; // Skip processing for deactivated products
     }
 
@@ -335,7 +323,7 @@ async function continueProcessing(
     }
 
     // Update product-level inventory (no variant_id!)
-    const updateData = {
+    const updateData: any = {
       store_id: store.id,
       product_id: productId,
       product_title: product.title,
@@ -377,7 +365,6 @@ async function continueProcessing(
       const canAdd = await canAddProduct(store.id);
 
       if (!canAdd.canAdd) {
-        console.log('[Webhook] Cannot add product due to plan limits:', canAdd.reason);
         // Insert as deactivated if plan limit is reached
         updateData.inventory_status = 'deactivated';
       }
@@ -397,12 +384,10 @@ async function continueProcessing(
       }
 
       if (!canAdd.canAdd) {
-        console.log('[Webhook] Product added as deactivated due to plan limits');
         return; // Skip further processing for deactivated products
       }
     }
 
-    console.log("product full details", product);
 
     // Extract product-specific exclusion settings
     const excludeFromAutoHide = productSettings?.exclude_from_auto_hide || false;
@@ -410,71 +395,16 @@ async function continueProcessing(
     
     // Status-based alert system - only send alerts when status changes
     if (previousStatus !== newStatus && !excludeFromAlerts) {
-      console.log('[Webhook] Status changed, sending alert:', {
-        product: product.title,
-        productId: productId,
-        previousStatus,
-        newStatus,
-        timestamp: new Date().toISOString()
-      });
-
-      // Create unique webhook ID for tracking duplicates
-      const webhookId = `webhook_${store.id}_${productId}_${Date.now()}`;
-      console.log('[Webhook] Processing webhook:', webhookId);
-
-      // Check for recent alerts to prevent duplicates (within last 5 seconds)
-      const fiveSecondsAgo = new Date(Date.now() - 5 * 1000).toISOString();
-      let alertType = '';
+      const productWithSku = { ...product, sku: existingTracking?.sku || updateData.sku };
 
       if (newStatus === 'out_of_stock' && previousStatus !== 'out_of_stock') {
-        alertType = 'out_of_stock';
+        await sendOutOfStockAlert(store, productWithSku, null, settings);
       } else if (newStatus === 'low_stock' && previousStatus === 'in_stock') {
-        alertType = 'low_stock';
+        await sendLowStockAlert(store, productWithSku, null, totalQuantity, threshold, settings);
       } else if (newStatus === 'in_stock' && previousStatus !== 'in_stock') {
-        alertType = 'restock';
+        const { sendRestockAlert } = await import('@/lib/notifications');
+        await sendRestockAlert(store, productWithSku, null, totalQuantity, settings);
       }
-
-      if (alertType) {
-        // Status-based alert system - send alerts when status changes
-        if (previousStatus !== newStatus && !excludeFromAlerts) {
-          console.log('[Webhook] Status changed, sending alert:', {
-            product: product.title,
-            productId: productId,
-            previousStatus,
-            newStatus,
-            timestamp: new Date().toISOString()
-          });
-          const productWithSku = { ...product, sku: existingTracking?.sku || updateData.sku };
-
-          if (newStatus === 'out_of_stock' && previousStatus !== 'out_of_stock') {
-            console.log('[Webhook] Sending out of stock alert for:', product.title);
-            await sendOutOfStockAlert(store, productWithSku, null, settings);
-          } else if (newStatus === 'low_stock' && previousStatus === 'in_stock') {
-            console.log('[Webhook] Sending low stock alert for:', product.title);
-            await sendLowStockAlert(store, productWithSku, null, totalQuantity, threshold, settings);
-          } else if (newStatus === 'in_stock' && previousStatus !== 'in_stock') {
-            console.log('[Webhook] Sending restock alert for:', product.title);
-            const { sendRestockAlert } = await import('@/lib/notifications');
-            await sendRestockAlert(store, productWithSku, null, totalQuantity, settings);
-          }
-        } else if (previousStatus === newStatus) {
-          console.log('[Webhook] Status unchanged, no alert needed:', {
-            product: product.title,
-            status: newStatus,
-            quantity: totalQuantity
-          });
-        } else {
-          console.log('[Webhook] Alert excluded for product:', product.title);
-        }
-      }
-    } else if (previousStatus === newStatus) {
-      console.log('[Webhook] Status unchanged, no alert needed:', {
-        product: product.title,
-        status: newStatus,
-        quantity: totalQuantity
-      });
-    } else {
-      console.log('[Webhook] Alert excluded for product:', product.title);
     }
 
     // Handle auto-hide for completely out of stock products

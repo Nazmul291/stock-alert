@@ -48,7 +48,6 @@ class FormPreservation {
 
     try {
       sessionStorage.setItem(this.STORAGE_KEY, JSON.stringify(existing));
-      console.log('[FormPreservation] Saved form data for', formId);
     } catch (error) {
       console.error('[FormPreservation] Failed to save form data:', error);
     }
@@ -71,7 +70,6 @@ class FormPreservation {
     if (match) {
       // Remove from storage after retrieval
       this.removePreservedForm(match);
-      console.log('[FormPreservation] Retrieved and removed form data');
       return match;
     }
 
@@ -94,7 +92,6 @@ class FormPreservation {
 
     try {
       sessionStorage.setItem(this.REQUEST_KEY, JSON.stringify(existing));
-      console.log('[FormPreservation] Saved pending request:', url);
     } catch (error) {
       console.error('[FormPreservation] Failed to save request:', error);
     }
@@ -109,7 +106,6 @@ class FormPreservation {
     // Clear after retrieval
     if (requests.length > 0) {
       sessionStorage.removeItem(this.REQUEST_KEY);
-      console.log('[FormPreservation] Retrieved', requests.length, 'pending requests');
     }
 
     return requests;
@@ -178,7 +174,6 @@ class FormPreservation {
       });
     });
 
-    console.log('[FormPreservation] Restored form data');
   }
 
   // Clean up expired data

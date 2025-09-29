@@ -27,7 +27,6 @@ export function SessionTokenTest() {
 
         if (response.ok && data.authenticated) {
           setApiCallStatus('success');
-          console.log('[SessionTokenTest] Authenticated API call successful:', data);
         } else {
           setApiCallStatus('error');
           console.warn('[SessionTokenTest] Authenticated API call failed:', data);
@@ -47,7 +46,6 @@ export function SessionTokenTest() {
           if (token) {
             setSessionTokenStatus('success');
             setLastTokenTest(new Date().toISOString());
-            console.log('[SessionTokenTest] Session token test successful');
 
             // Test authenticated API call
             await testAuthenticatedCall();

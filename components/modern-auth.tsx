@@ -17,7 +17,6 @@ export default function ModernAuth() {
   }, []);
 
   const initializeAuth = async () => {
-    console.log('[ModernAuth] Starting authentication flow...');
 
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -25,7 +24,6 @@ export default function ModernAuth() {
       const host = urlParams.get('host');
       const embedded = urlParams.get('embedded');
 
-      console.log('[ModernAuth] Context:', { shop, host, embedded, isEmbedded: embedded === '1' });
 
       if (!shop) {
         throw new Error('Shop parameter is required for authentication');
@@ -34,10 +32,8 @@ export default function ModernAuth() {
       // Check if we're actually in the Shopify admin iframe
       const inShopifyAdmin = window.top !== window.self && host;
 
-      console.log('[ModernAuth] In Shopify admin?', inShopifyAdmin);
 
       if (inShopifyAdmin && embedded === '1') {
-        console.log('[ModernAuth] In Shopify admin, trying App Bridge approach');
         try {
           // Try App Bridge with a shorter timeout
           await waitForAppBridge();
@@ -48,7 +44,6 @@ export default function ModernAuth() {
           await performDirectTokenExchange();
         }
       } else {
-        console.log('[ModernAuth] Not in Shopify admin, using legacy OAuth');
         await performDirectTokenExchange();
       }
 
@@ -71,7 +66,6 @@ export default function ModernAuth() {
 
         // Log current state for debugging
         if (attempts === 1 || attempts % 10 === 0) {
-          console.log(`[ModernAuth] Checking App Bridge (${attempts}/${maxAttempts}):`, {
             shopifyExists: !!window.shopify,
             customAppExists: !!(window as any).__SHOPIFY_APP__,
             inIframe: window.top !== window.self
@@ -80,14 +74,12 @@ export default function ModernAuth() {
 
         // Check if App Bridge CDN is loaded and ready
         if (typeof window !== 'undefined' && window.shopify) {
-          console.log('[ModernAuth] App Bridge CDN detected, waiting for ready...');
 
           // Use a race condition with timeout
           Promise.race([
             window.shopify.ready,
             new Promise((_, reject) => setTimeout(() => reject(new Error('App Bridge ready timeout')), 2000))
           ]).then(() => {
-            console.log('[ModernAuth] ✅ App Bridge ready via CDN');
             resolve();
           }).catch((error) => {
             console.error('[ModernAuth] App Bridge ready failed:', error);
@@ -99,7 +91,6 @@ export default function ModernAuth() {
         // Check our custom instance as fallback
         const appInstance = (window as any).__SHOPIFY_APP__;
         if (appInstance && appInstance.ready) {
-          console.log('[ModernAuth] ✅ App Bridge ready via custom instance');
           resolve();
           return;
         }
@@ -125,7 +116,6 @@ export default function ModernAuth() {
   };
 
   const performTokenExchange = async () => {
-    console.log('[ModernAuth] Starting token exchange...');
     setAuthState('authenticating');
 
     try {
@@ -133,17 +123,14 @@ export default function ModernAuth() {
       let sessionToken;
 
       if (window.shopify && window.shopify.idToken) {
-        console.log('[ModernAuth] Using App Bridge CDN for token');
         sessionToken = await window.shopify.idToken();
       } else {
         const appInstance = (window as any).__SHOPIFY_APP__;
         if (!appInstance?.idToken) {
           throw new Error('Session token not available from either CDN or custom instance');
         }
-        console.log('[ModernAuth] Using custom App Bridge instance for token');
         sessionToken = await appInstance.idToken();
       }
-      console.log('[ModernAuth] Session token acquired');
 
       // Exchange session token for access token
       const response = await fetch('/api/auth/token-exchange', {
@@ -160,13 +147,11 @@ export default function ModernAuth() {
       }
 
       const result = await response.json();
-      console.log('[ModernAuth] Token exchange successful:', result);
 
       setTokenExchangeResult(result);
 
       // If successful, redirect to dashboard
       if (result.success) {
-        console.log('[ModernAuth] Authentication complete, redirecting...');
         const urlParams = new URLSearchParams(window.location.search);
         window.location.href = `/dashboard?${urlParams.toString()}`;
       }
@@ -178,7 +163,6 @@ export default function ModernAuth() {
   };
 
   const performDirectTokenExchange = async () => {
-    console.log('[ModernAuth] Attempting direct token exchange without App Bridge...');
     setAuthState('authenticating');
 
     try {

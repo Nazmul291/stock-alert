@@ -11,14 +11,12 @@ export async function GET(req: NextRequest) {
     const authResult = await requireSessionToken(req);
 
     if (!authResult.isAuthenticated) {
-      console.log('[VerifySession] No valid session token');
       return NextResponse.json({
         authenticated: false,
         error: 'Invalid or missing session token',
       }, { status: 401 });
     }
 
-    console.log('[VerifySession] Valid session token for shop:', authResult.shopDomain);
 
     // Get the access token for this shop
     const { supabaseAdmin } = await import('@/lib/supabase');
@@ -48,7 +46,6 @@ export async function GET(req: NextRequest) {
 
     if (shopifyResponse.ok) {
       const shopData = await shopifyResponse.json();
-      console.log('[VerifySession] Successfully verified with Shopify API for:', shopData.shop?.name);
 
       return NextResponse.json({
         authenticated: true,
@@ -142,7 +139,6 @@ export async function POST(req: NextRequest) {
 
     const data = await shopifyResponse.json();
 
-    console.log('[VerifySession] GraphQL query successful for:', authResult.shopDomain);
 
     return NextResponse.json({
       authenticated: true,

@@ -19,7 +19,6 @@ export async function POST(req: NextRequest) {
     const topic = req.headers.get('X-Shopify-Topic');
     const shop = req.headers.get('X-Shopify-Shop-Domain');
 
-    console.log('[WEBHOOK] Compliance webhook received:', topic);
 
     // Verify webhook signature
     if (!signature || !verifyWebhookSignature(rawBody, signature)) {
@@ -34,9 +33,6 @@ export async function POST(req: NextRequest) {
     switch (topic) {
       case 'customers/data_request':
         // Handle customer data request (GDPR)
-        console.log('[WEBHOOK] Customer data request for shop:', shop);
-        console.log('[WEBHOOK] Customer ID:', data.customer?.id);
-        console.log('[WEBHOOK] Data request ID:', data.data_request?.id);
 
         // This app doesn't store any customer data
         // We only store shop, product, and inventory information
@@ -66,8 +62,6 @@ export async function POST(req: NextRequest) {
 
       case 'customers/redact':
         // Handle customer data deletion request (GDPR)
-        console.log('[WEBHOOK] Customer redaction request for shop:', shop);
-        console.log('[WEBHOOK] Customer ID to redact:', data.customer?.id);
 
         // Since we don't store customer data, there's nothing to delete
         // However, we should check and clean any potential references
@@ -98,7 +92,6 @@ export async function POST(req: NextRequest) {
               });
           }
 
-          console.log('[WEBHOOK] Customer redaction completed - no data to delete');
         } catch (error) {
           console.error('[WEBHOOK] Error processing customer redaction:', error);
         }
@@ -113,7 +106,6 @@ export async function POST(req: NextRequest) {
 
       case 'shop/redact':
         // Handle shop data deletion (when app is uninstalled)
-        console.log('[WEBHOOK] Shop redaction request for shop:', shop);
 
         try {
           // Delete all shop data from database
@@ -127,7 +119,6 @@ export async function POST(req: NextRequest) {
             .single();
 
           if (store) {
-            console.log('[WEBHOOK] Deleting all data for store:', store.id);
 
             // Delete in order due to foreign key constraints
             // 1. Delete inventory tracking records
@@ -172,7 +163,6 @@ export async function POST(req: NextRequest) {
               .delete()
               .eq('id', store.id);
 
-            console.log('[WEBHOOK] Shop data deletion completed');
 
             // Log the redaction for compliance
             await supabaseAdmin
@@ -185,7 +175,6 @@ export async function POST(req: NextRequest) {
                 processed_at: new Date().toISOString()
               });
           } else {
-            console.log('[WEBHOOK] No shop data found to delete');
           }
         } catch (error) {
           console.error('[WEBHOOK] Error during shop data deletion:', error);
@@ -199,7 +188,6 @@ export async function POST(req: NextRequest) {
         }, { status: 200 });
 
       default:
-        console.log('[WEBHOOK] Unknown compliance webhook topic:', topic);
         return NextResponse.json({
           message: 'Webhook received',
           topic: topic

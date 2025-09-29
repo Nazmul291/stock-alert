@@ -10,8 +10,6 @@ import { registerWebhooks } from '@/lib/webhook-registration';
  */
 export async function POST(req: NextRequest) {
   try {
-    console.log('[Session Auth] Starting session token authentication...');
-
     // Require valid session token from App Bridge
     const authResult = await requireSessionToken(req);
 
@@ -24,20 +22,6 @@ export async function POST(req: NextRequest) {
 
     const { shopDomain, sessionToken, sessionTokenPayload } = authResult;
 
-    console.log('[Session Auth] Valid session token received for:', shopDomain);
-
-    // Log payload if available
-    if (sessionTokenPayload) {
-      console.log('[Session Auth] Session payload:', {
-        iss: sessionTokenPayload.iss,
-        dest: sessionTokenPayload.dest,
-        aud: sessionTokenPayload.aud,
-        sub: sessionTokenPayload.sub
-      });
-    } else {
-      console.log('[Session Auth] Session token validated (no payload details available)');
-    }
-
     // Exchange session token for access token using Shopify's token exchange endpoint
     const tokenExchangeUrl = `https://${shopDomain}/admin/oauth/access_token`;
 
@@ -48,8 +32,6 @@ export async function POST(req: NextRequest) {
       subject_token: sessionToken,
       subject_token_type: 'urn:ietf:params:oauth:token-type:id_token'
     };
-
-    console.log('[Session Auth] Requesting token exchange from Shopify...');
 
     const response = await fetch(tokenExchangeUrl, {
       method: 'POST',
@@ -73,8 +55,6 @@ export async function POST(req: NextRequest) {
     }
 
     const tokenData = await response.json();
-    console.log('[Session Auth] Token exchange successful!');
-    console.log('[Session Auth] Granted scopes:', tokenData.scope);
 
     // Parse granted scopes
     const grantedScopes = tokenData.scope.split(',').map((s: string) => s.trim());
@@ -90,23 +70,10 @@ export async function POST(req: NextRequest) {
     const canAccessInventory = hasReadInventory || hasWriteInventory;
     const canFunction = canAccessProducts && canAccessInventory;
 
-    console.log('[Session Auth] Scope analysis:', {
-      grantedScopes,
-      hasReadProducts,
-      hasReadInventory,
-      hasWriteProducts,
-      hasWriteInventory,
-      canAccessProducts,
-      canAccessInventory,
-      canFunction
-    });
-
     // Encrypt the access token
     const encryptedToken = await encryptToken(tokenData.access_token);
 
     // Use upsert approach to handle both insert and update
-    console.log('[Session Auth] Using upsert to store/update shop data...');
-
     const { data: store, error: upsertError } = await supabaseAdmin
       .from('stores')
       .upsert(
@@ -135,11 +102,8 @@ export async function POST(req: NextRequest) {
       throw new Error('Upsert succeeded but no store data returned');
     }
 
-    console.log('[Session Auth] Store upserted successfully:', store.id);
-
     // Create default store settings if they don't exist
     try {
-      console.log('[Session Auth] Checking/creating default store settings...');
 
       const { data: existingSettings, error: settingsCheckError } = await supabaseAdmin
         .from('store_settings')
@@ -169,11 +133,7 @@ export async function POST(req: NextRequest) {
         if (settingsError) {
           console.error('[Session Auth] Failed to create default settings:', settingsError);
           // Don't fail the whole flow for settings creation
-        } else {
-          console.log('[Session Auth] ✅ Default settings created:', newSettings.id);
         }
-      } else {
-        console.log('[Session Auth] Settings already exist, skipping creation');
       }
     } catch (error) {
       console.error('[Session Auth] Error handling settings:', error);
@@ -182,8 +142,6 @@ export async function POST(req: NextRequest) {
 
     // Create setup progress record if it doesn't exist
     try {
-      console.log('[Session Auth] Checking/creating setup progress...');
-
       const { data: existingProgress, error: progressCheckError } = await supabaseAdmin
         .from('setup_progress')
         .select('id')
@@ -209,11 +167,7 @@ export async function POST(req: NextRequest) {
 
         if (progressError) {
           console.error('[Session Auth] Failed to create setup progress:', progressError);
-        } else {
-          console.log('[Session Auth] ✅ Setup progress created:', newProgress.id);
         }
-      } else {
-        console.log('[Session Auth] Setup progress already exists, skipping creation');
       }
     } catch (error) {
       console.error('[Session Auth] Error handling setup progress:', error);
@@ -222,21 +176,15 @@ export async function POST(req: NextRequest) {
     // Register webhooks after successful authentication
     if (canFunction) {
       try {
-        console.log('[Session Auth] Registering webhooks...');
-
         // Decrypt token for webhook registration (registerWebhooks expects plain token)
         const plainToken = await decryptToken(encryptedToken);
         await registerWebhooks(shopDomain, plainToken);
-
-        console.log('[Session Auth] ✅ Webhooks registered successfully');
       } catch (error: any) {
         console.error('[Session Auth] Failed to register webhooks:', error);
         // Don't fail the entire auth flow for webhook registration errors
         // Log warning but continue
         console.warn('[Session Auth] ⚠️ Authentication succeeded but webhook registration failed');
       }
-    } else {
-      console.log('[Session Auth] ⚠️ Skipping webhook registration - insufficient scopes');
     }
 
     // Fetch shop information if we don't have email
@@ -251,8 +199,6 @@ export async function POST(req: NextRequest) {
             .from('stores')
             .update({ email: shopResponse.body.shop.email })
             .eq('id', store.id);
-
-          console.log('[Session Auth] Updated store email from shop info');
         }
       } catch (error) {
         console.warn('[Session Auth] Failed to fetch shop info:', error);

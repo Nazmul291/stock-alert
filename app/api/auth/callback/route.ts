@@ -45,11 +45,9 @@ export async function GET(req: NextRequest) {
     if (state) {
       const decodedState = decodeAndValidateState(state);
       if (decodedState.valid && decodedState.data) {
-        console.log('[OAuth Callback] Successfully decoded state parameter');
         validatedNonce = decodedState.data.nonce;
         validatedShop = decodedState.data.shop;
       } else {
-        console.log('[OAuth Callback] Failed to decode state:', decodedState.error);
       }
     }
 
@@ -63,7 +61,6 @@ export async function GET(req: NextRequest) {
     const expectedNonce = validatedNonce || storedState;
     const expectedShop = validatedShop || storedShop;
 
-    console.log('[OAuth Callback] Auth validation:', {
       stateFromURL: state?.substring(0, 20) + '...',
       decodedNonce: validatedNonce?.substring(0, 20) + '...',
       decodedShop: validatedShop,
@@ -173,8 +170,6 @@ export async function GET(req: NextRequest) {
     const accessToken = tokenData.access_token;
     const scope = tokenData.scope;
 
-    console.log('[OAuth Callback] Token exchange successful');
-    console.log('[OAuth Callback] Granted scopes:', scope);
 
     // Parse granted scopes
     const grantedScopes = scope
@@ -187,7 +182,6 @@ export async function GET(req: NextRequest) {
     const hasReadProducts = grantedScopes.includes('read_products');
     const hasReadInventory = grantedScopes.includes('read_inventory');
 
-    console.log('[OAuth Callback] Scope Analysis:', {
       granted: grantedScopes,
       hasReadProducts,
       hasWriteProducts,
@@ -204,7 +198,6 @@ export async function GET(req: NextRequest) {
 
     // Ideal case: We have read scopes (with or without write)
     if (hasReadProducts && hasReadInventory) {
-      console.log('[OAuth Callback] ✅ All required read scopes granted');
       proceedWithInstallation = true;
     }
     // Edge case: Only write scopes granted (unusual but might work)
@@ -239,7 +232,6 @@ export async function GET(req: NextRequest) {
       }, { status: 403 });
     }
 
-    console.log('[OAuth Callback] ✅ Proceeding with installation');
     if (scopeWarning) {
       console.warn('[OAuth Callback] Warning:', scopeWarning);
     }

@@ -55,7 +55,6 @@ export function useFormPreservation(options: UseFormPreservationOptions) {
     const preserved = preservation.getPreservedFormData(formId);
     if (preserved) {
       // This removes it from storage
-      console.log(`[useFormPreservation] Cleared preserved data for ${formId}`);
     }
   }, [formId, preservation]);
 
@@ -77,7 +76,6 @@ export function useFormPreservation(options: UseFormPreservationOptions) {
     if (restoreOnMount && formRef.current) {
       const restored = restoreForm();
       if (restored) {
-        console.log(`[useFormPreservation] Restored form data for ${formId}`);
       }
     }
   }, [restoreOnMount, restoreForm, formId]);

@@ -21,7 +21,6 @@ export async function POST(req: NextRequest) {
 
     const { shopDomain, sessionToken } = authResult;
 
-    console.log('[Token Exchange] Starting token exchange for shop:', shopDomain);
 
     // Make token exchange request to Shopify
     const tokenExchangeUrl = `https://${shopDomain}/admin/oauth/access_token`;
@@ -36,7 +35,6 @@ export async function POST(req: NextRequest) {
       requested_token_type: 'urn:x-oath:params:oauth:token-type:offline-access'
     };
 
-    console.log('[Token Exchange] Making request to Shopify...');
 
     const response = await fetch(tokenExchangeUrl, {
       method: 'POST',
@@ -58,7 +56,6 @@ export async function POST(req: NextRequest) {
     }
 
     const tokenData = await response.json();
-    console.log('[Token Exchange] Success! Received scopes:', tokenData.scope);
 
     // Parse granted scopes
     const grantedScopes = tokenData.scope.split(',').map((s: string) => s.trim());
@@ -68,7 +65,6 @@ export async function POST(req: NextRequest) {
     const hasReadInventory = grantedScopes.includes('read_inventory');
     const canFunction = hasReadProducts && hasReadInventory;
 
-    console.log('[Token Exchange] Scope analysis:', {
       granted: grantedScopes,
       hasReadProducts,
       hasReadInventory,
@@ -100,7 +96,6 @@ export async function POST(req: NextRequest) {
         .update(storeData)
         .eq('id', existingStore.id);
 
-      console.log('[Token Exchange] Updated existing store record');
     } else {
       await supabaseAdmin
         .from('stores')
@@ -110,7 +105,6 @@ export async function POST(req: NextRequest) {
           created_at: new Date().toISOString()
         });
 
-      console.log('[Token Exchange] Created new store record');
     }
 
     return NextResponse.json({

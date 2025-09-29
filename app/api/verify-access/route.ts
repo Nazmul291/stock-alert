@@ -120,9 +120,6 @@ export async function GET(req: NextRequest) {
     accessTests.actualAccess.canWriteInventory = grantedScopes.includes('write_inventory');
 
     // Log actual granted scopes for debugging
-    console.log('[Access Verification] Granted scopes in database:', store.scope);
-    console.log('[Access Verification] Parsed granted scopes:', grantedScopes);
-    console.log('[Access Verification] Testing actual API access with write scopes...');
 
     // Generate recommendation
     if (accessTests.canFunction) {
@@ -154,10 +151,6 @@ export async function GET(req: NextRequest) {
     }
 
     // Log verification results
-    console.log('[Access Verification] Results for', shopDomain, ':');
-    console.log('[Access Verification] Can function:', accessTests.canFunction);
-    console.log('[Access Verification] Actual access:', accessTests.actualAccess);
-    console.log('[Access Verification] Recommendation:', accessTests.recommendation);
 
     return NextResponse.json(accessTests, {
       status: accessTests.canFunction ? 200 : 206 // 206 = Partial Content

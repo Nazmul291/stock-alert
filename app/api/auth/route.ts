@@ -33,11 +33,6 @@ export async function GET(req: NextRequest) {
     const scopes = APP_CONFIG.scopes.getAllRequested();
     const apiKey = process.env.SHOPIFY_API_KEY;
 
-    console.log('[OAuth] Starting OAuth flow for shop:', sanitizedShop);
-    console.log('[OAuth] Requesting scopes:', scopes);
-    console.log('[OAuth] Essential scopes:', APP_CONFIG.scopes.essential.join(','));
-    console.log('[OAuth] Enhanced scopes:', APP_CONFIG.scopes.enhanced.join(','));
-    console.log('[OAuth] Redirect URI:', redirectUri);
 
     // Generate cryptographically secure nonce for CSRF protection
     const nonce = generateNonce();
@@ -49,7 +44,6 @@ export async function GET(req: NextRequest) {
       shop: sanitizedShop,
     });
 
-    console.log('[OAuth] Created encoded state for shop:', sanitizedShop);
 
     // Still try to set cookies as a backup (some browsers may support them)
     const cookieStore = await cookies();

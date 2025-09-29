@@ -11,7 +11,6 @@ export async function POST(req: NextRequest) {
     const authResult = await requireSessionToken(req);
 
     if (!authResult.isAuthenticated) {
-      console.log('[GraphQL] Authentication failed');
       return NextResponse.json({
         error: 'Unauthorized',
         message: 'Invalid or missing session token',
@@ -20,8 +19,6 @@ export async function POST(req: NextRequest) {
 
     const { query, variables } = await req.json();
 
-    console.log('[GraphQL] Authenticated request from shop:', authResult.shopDomain);
-    console.log('[GraphQL] Query:', query?.substring(0, 100));
 
     // Get the access token for this shop from database
     const { supabaseAdmin } = await import('@/lib/supabase');
@@ -58,8 +55,6 @@ export async function POST(req: NextRequest) {
     const data = await shopifyResponse.json();
 
     // Log for Shopify detection
-    console.log('[GraphQL] Successfully proxied GraphQL request with session token');
-    console.log('[GraphQL] Response status:', shopifyResponse.status);
 
     return NextResponse.json(data, {
       status: shopifyResponse.status,
