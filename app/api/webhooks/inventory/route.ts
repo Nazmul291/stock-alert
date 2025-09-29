@@ -127,7 +127,23 @@ async function processInventoryLogic(
       }
     }`;
 
-  const response = await graphqlClient.request(query);
+  let response;
+  try {
+    // Add timeout wrapper for GraphQL request (10 seconds)
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('GraphQL request timeout')), 10000)
+    );
+
+    response = await Promise.race([
+      graphqlClient.request(query),
+      timeoutPromise
+    ]);
+  } catch (error: any) {
+    console.error('[Webhook] GraphQL request failed:', error.message);
+    // Skip this update if request fails - webhook will retry later
+    return;
+  }
+
   const product = response?.data?.inventoryItem?.variant?.product;
   if (!product) {
     return;
@@ -425,14 +441,22 @@ async function continueProcessing(
             }
           }`;
 
-        const hideResponse = await graphqlClient.request(productUpdateMutation, {
-          variables: {
-            product: {
-              id: product.id,
-              status: 'DRAFT'
+        // Add timeout for mutation (5 seconds)
+        const mutationTimeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Mutation timeout')), 5000)
+        );
+
+        const hideResponse = await Promise.race([
+          graphqlClient.request(productUpdateMutation, {
+            variables: {
+              product: {
+                id: product.id,
+                status: 'DRAFT'
+              }
             }
-          }
-        });
+          }),
+          mutationTimeout
+        ]);
 
         if (hideResponse?.data?.productUpdate?.userErrors?.length > 0) {
           throw new Error(`GraphQL errors: ${JSON.stringify(hideResponse.data.productUpdate.userErrors)}`);
@@ -445,7 +469,7 @@ async function continueProcessing(
           .eq('product_id', productId);
 
       } catch (error: any) {
-        // Error caught but not logged in production
+        console.error('[Webhook] Auto-hide failed:', error.message);
       }
     }
     // Handle auto-republish when restocked
@@ -482,38 +506,36 @@ async function continueProcessing(
               }
             }`;
 
-          const updateResponse = await graphqlClient.request(productUpdateMutation, {
-            variables: {
-              product: {
-                id: product.id,
-                status: 'ACTIVE'
-              }
-            }
-          });
+          // Add timeout for mutation (5 seconds)
+          const mutationTimeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Mutation timeout')), 5000)
+          );
 
-          
+          const updateResponse = await Promise.race([
+            graphqlClient.request(productUpdateMutation, {
+              variables: {
+                product: {
+                  id: product.id,
+                  status: 'ACTIVE'
+                }
+              }
+            }),
+            mutationTimeout
+          ]);
 
           if (updateResponse?.data?.productUpdate?.userErrors?.length > 0) {
-            
             throw new Error(`GraphQL errors: ${JSON.stringify(updateResponse.data.productUpdate.userErrors)}`);
           }
 
-          
-
           // Update the is_hidden flag in our database
-          const { error: dbError } = await supabaseAdmin
+          await supabaseAdmin
             .from('inventory_tracking')
             .update({ is_hidden: false })
             .eq('store_id', store.id)
             .eq('product_id', productId);
 
-          if (dbError) {
-            
-          } else {
-            
-          }
         } catch (error: any) {
-          // Error caught but not logged in production
+          console.error('[Webhook] Auto-republish failed:', error.message);
         }
       } else {
         
