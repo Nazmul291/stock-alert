@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   // Performance optimizations
   reactStrictMode: true,
 
+  // Enable standalone output for Docker deployment
+  output: 'standalone',
+
   // Skip type checking and linting during build
   typescript: {
     ignoreBuildErrors: true,
@@ -12,10 +15,8 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
 
-  // Allow cross-origin requests from dev domain
+  // Experimental features
   experimental: {
-    // This is the new way in Next.js 15
-    allowedOrigins: ['https://dev.nazmulcodes.org', 'https://stock-alert.nazmulcodes.org'],
   },
   
   // Allow Shopify admin to load the app
