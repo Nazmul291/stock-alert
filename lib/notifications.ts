@@ -22,11 +22,11 @@ export async function sendLowStockAlert(
   threshold: number,
   settings: StoreSettings
 ) {
-  const alertId = `low_stock_${store.id}_${product.id}_${Date.now()}`;
+  const alertId = `low_stock_${store.id}_${product.id.split('/').pop()}_${Date.now()}`;
   console.log(`[Notifications] ${alertId} - sendLowStockAlert called:`, {
     store_id: store.id,
     store_id_type: typeof store.id,
-    product_id: product.id,
+    product_id: product.id.split('/').pop(),
     product_title: product.title,
     currentQuantity,
     threshold,
@@ -42,7 +42,7 @@ export async function sendLowStockAlert(
     storeName: store.shop_domain.replace('.myshopify.com', ''),
     shopDomain: store.shop_domain,
     productTitle: product.title,
-    productId: product.id,
+    productId: product.id.split('/').pop(),
     sku,
     currentQuantity,
     threshold,
@@ -59,7 +59,7 @@ ${sku ? `SKU: ${sku}` : ''}
 Current Quantity: ${currentQuantity}
 Threshold: ${threshold}
 
-View Product: https://${store.shop_domain}/admin/products/${product.id}
+View Product: https://${store.shop_domain}/admin/products/${product.id.split('/').pop()}
 
 ---
 Stock Alert - Automated inventory monitoring for your Shopify store
@@ -88,7 +88,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
           .from('alert_history')
           .insert({
             store_id: store.id,
-            product_id: product.id,
+            product_id: product.id.split('/').pop(),
             product_title: product.title,
             alert_type: 'low_stock',
             quantity_at_alert: currentQuantity,
@@ -154,7 +154,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
                   type: 'plain_text',
                   text: 'View in Shopify',
                 },
-                url: `https://${store.shop_domain}/admin/products/${product.id}`,
+                url: `https://${store.shop_domain}/admin/products/${product.id.split('/').pop()}`,
               },
             ],
           },
@@ -166,7 +166,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
         .from('alert_history')
         .insert({
           store_id: store.id,
-          product_id: product.id,
+          product_id: product.id.split('/').pop(),
           product_title: product.title,
           alert_type: 'low_stock',
           quantity_at_alert: currentQuantity,
@@ -190,10 +190,10 @@ export async function sendOutOfStockAlert(
   variant: any,
   settings: StoreSettings
 ) {
-  const alertId = `out_of_stock_${store.id}_${product.id}_${Date.now()}`;
+  const alertId = `out_of_stock_${store.id}_${product.id.split('/').pop()}_${Date.now()}`;
   console.log(`[Notifications] ${alertId} - sendOutOfStockAlert called:`, {
     store_id: store.id,
-    product_id: product.id,
+    product_id: product.id.split('/').pop(),
     product_title: product.title,
     email_notifications: settings.email_notifications,
     timestamp: new Date().toISOString()
@@ -207,7 +207,7 @@ export async function sendOutOfStockAlert(
     storeName: store.shop_domain.replace('.myshopify.com', ''),
     shopDomain: store.shop_domain,
     productTitle: product.title,
-    productId: product.id,
+    productId: product.id.split('/').pop(),
     sku,
     variantTitle
   });
@@ -222,7 +222,7 @@ ${sku ? `SKU: ${sku}` : ''}
 
 This product is now out of stock.
 
-View Product: https://${store.shop_domain}/admin/products/${product.id}
+View Product: https://${store.shop_domain}/admin/products/${product.id.split('/').pop()}
 
 ---
 Stock Alert - Automated inventory monitoring for your Shopify store
@@ -251,7 +251,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
           .from('alert_history')
           .insert({
             store_id: store.id,
-            product_id: product.id,
+            product_id: product.id.split('/').pop(),
             product_title: product.title,
             alert_type: 'out_of_stock',
             quantity_at_alert: 0,
@@ -317,7 +317,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
                   type: 'plain_text',
                   text: 'View in Shopify',
                 },
-                url: `https://${store.shop_domain}/admin/products/${product.id}`,
+                url: `https://${store.shop_domain}/admin/products/${product.id.split('/').pop()}`,
               },
             ],
           },
@@ -329,7 +329,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
         .from('alert_history')
         .insert({
           store_id: store.id,
-          product_id: product.id,
+          product_id: product.id.split('/').pop(),
           product_title: product.title,
           alert_type: 'out_of_stock',
           quantity_at_alert: 0,
@@ -354,10 +354,10 @@ export async function sendRestockAlert(
   currentQuantity: number,
   settings: StoreSettings
 ) {
-  const alertId = `restock_${store.id}_${product.id}_${Date.now()}`;
+  const alertId = `restock_${store.id}_${product.id.split('/').pop()}_${Date.now()}`;
   console.log(`[Notifications] ${alertId} - sendRestockAlert called:`, {
     store_id: store.id,
-    product_id: product.id,
+    product_id: product.id.split('/').pop(),
     product_title: product.title,
     currentQuantity,
     email_notifications: settings.email_notifications,
@@ -373,7 +373,7 @@ export async function sendRestockAlert(
     storeName: store.shop_domain.replace('.myshopify.com', ''),
     shopDomain: store.shop_domain,
     productTitle: product.title,
-    productId: product.id,
+    productId: product.id.split('/').pop(),
     sku,
     currentQuantity,
     variantTitle
@@ -390,7 +390,7 @@ Current Quantity: ${currentQuantity}
 
 This product is back in stock!
 
-View Product: https://${store.shop_domain}/admin/products/${product.id}
+View Product: https://${store.shop_domain}/admin/products/${product.id.split('/').pop()}
 
 ---
 Stock Alert - Automated inventory monitoring for your Shopify store
@@ -419,7 +419,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
           .from('alert_history')
           .insert({
             store_id: store.id,
-            product_id: product.id,
+            product_id: product.id.split('/').pop(),
             product_title: product.title,
             alert_type: 'restock',
             quantity_at_alert: currentQuantity,
@@ -485,7 +485,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
                   type: 'plain_text',
                   text: 'View in Shopify',
                 },
-                url: `https://${store.shop_domain}/admin/products/${product.id}`,
+                url: `https://${store.shop_domain}/admin/products/${product.id.split('/').pop()}`,
               },
             ],
           },
@@ -497,7 +497,7 @@ Stock Alert - Automated inventory monitoring for your Shopify store
         .from('alert_history')
         .insert({
           store_id: store.id,
-          product_id: product.id,
+          product_id: product.id.split('/').pop(),
           product_title: product.title,
           alert_type: 'restock',
           quantity_at_alert: currentQuantity,

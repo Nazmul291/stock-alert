@@ -274,14 +274,14 @@ async function continueProcessing(
     let totalQuantity = 0;
     const variantDetails = [];
     
-    console.log("product full details", product);
+    
     for (const variantNode of product.variants.edges) {
       const variant = variantNode.node;
-      totalQuantity += variant.inventory_quantity || 0;
+      totalQuantity += variant.inventoryQuantity || 0;
       variantDetails.push({
         title: variant.title,
         sku: variant.sku,
-        quantity: variant.inventory_quantity || 0
+        quantity: variant.inventoryQuantity || 0
       });
     }
     
@@ -298,6 +298,7 @@ async function continueProcessing(
     
     // Check if quantity actually changed - skip notifications if same
     if (totalQuantity === previousQuantity) {
+      console.log(totalQuantity, previousQuantity)
       return NextResponse.json({ 
         success: true,
         info: 'Quantity unchanged, notifications skipped'
@@ -322,14 +323,8 @@ async function continueProcessing(
 
     // Determine inventory status based on quantity and settings
     const threshold = productSettings?.custom_threshold || settings.low_stock_threshold;
-    let newStatus: 'in_stock' | 'low_stock' | 'out_of_stock' | 'deactivated';
-
-    console.log('[Webhook] Status determination:', {
-      totalQuantity,
-      threshold,
-      settings_threshold: settings.low_stock_threshold,
-      product_threshold: productSettings?.custom_threshold
-    });
+    type InventoryStatus = 'in_stock' | 'low_stock' | 'out_of_stock' | 'deactivated';
+    let newStatus: InventoryStatus;
 
     if (totalQuantity === 0) {
       newStatus = 'out_of_stock';
@@ -338,15 +333,6 @@ async function continueProcessing(
     } else {
       newStatus = 'in_stock';
     }
-
-    console.log('[Webhook] Status change check:', {
-      product: product.title,
-      previousStatus,
-      newStatus,
-      quantity: totalQuantity,
-      threshold,
-      statusChanged: previousStatus !== newStatus
-    });
 
     // Update product-level inventory (no variant_id!)
     const updateData = {
@@ -415,6 +401,8 @@ async function continueProcessing(
         return; // Skip further processing for deactivated products
       }
     }
+
+    console.log("product full details", product);
 
     // Extract product-specific exclusion settings
     const excludeFromAutoHide = productSettings?.exclude_from_auto_hide || false;
@@ -510,7 +498,7 @@ async function continueProcessing(
         const hideResponse = await graphqlClient.request(productUpdateMutation, {
           variables: {
             product: {
-              id: productGID,
+              id: product.id,
               status: 'DRAFT'
             }
           }
@@ -567,7 +555,7 @@ async function continueProcessing(
           const updateResponse = await graphqlClient.request(productUpdateMutation, {
             variables: {
               product: {
-                id: productGID,
+                id: product.id,
                 status: 'ACTIVE'
               }
             }
