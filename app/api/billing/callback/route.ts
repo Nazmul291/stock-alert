@@ -84,8 +84,10 @@ export async function GET(req: NextRequest) {
       });
       chargeDetails = chargeCheckResponse.body.recurring_application_charge;
 
+      console.log('[BILLING CALLBACK] Charge details:', chargeDetails);
+
       // Verify the charge is pending activation
-      if (chargeDetails.status !== 'accepted') {
+      if (chargeDetails.status !== 'active') {
         console.error('[BILLING CALLBACK] Charge not in accepted state:', chargeDetails.status);
         return NextResponse.json({
           error: 'Charge not ready for activation',

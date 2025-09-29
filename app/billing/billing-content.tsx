@@ -116,7 +116,7 @@ export default function BillingContent({
             <Card>
               <div style={{ padding: '20px' }}>
                 <h2 style={{ marginBottom: '10px' }}>Basic</h2>
-                <p style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>$0/month</p>
+                <p style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>Free</p>
                 
                 <List>
                   <List.Item>Auto-hide sold out products</List.Item>
