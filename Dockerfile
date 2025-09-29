@@ -67,4 +67,4 @@ EXPOSE ${PORT:-3000}
 ENV HOSTNAME="0.0.0.0"
 
 # Start the Next.js server
-CMD ["pnpm", "start"]
+CMD ["node", "server.js"]
