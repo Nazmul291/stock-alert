@@ -115,7 +115,7 @@ export default function BillingContent({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
             <Card>
               <div style={{ padding: '20px' }}>
-                <h2 style={{ marginBottom: '10px' }}>Free Plan</h2>
+                <h2 style={{ marginBottom: '10px' }}>Basic</h2>
                 <p style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>$0/month</p>
                 
                 <List>
@@ -148,12 +148,12 @@ export default function BillingContent({
 
             <Card>
               <div style={{ padding: '20px' }}>
-                <h2 style={{ marginBottom: '10px' }}>Pro Plan</h2>
+                <h2 style={{ marginBottom: '10px' }}>Professional</h2>
                 <p style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>$9.99/month</p>
                 <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>7-day free trial</p>
                 
                 <List>
-                  <List.Item>Everything in Free, plus:</List.Item>
+                  <List.Item>Everything in Basic, plus:</List.Item>
                   <List.Item>Slack notifications</List.Item>
                   <List.Item>Per-product thresholds</List.Item>
                   <List.Item>Auto-republish when restocked</List.Item>

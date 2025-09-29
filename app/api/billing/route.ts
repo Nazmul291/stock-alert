@@ -140,10 +140,10 @@ export async function POST(req: NextRequest) {
           path: 'recurring_application_charges.json',
           data: {
             recurring_application_charge: {
-              name: 'Stock Alert Pro',
+              name: 'Professional',
               price: 9.99,
               return_url: `${host}/api/billing/callback?shop=${shop}`,
-              test: process.env.NODE_ENV != "production",
+              test: process.env.TEST_PAYMENT == "true",
               trial_days: 7,
             },
           },
