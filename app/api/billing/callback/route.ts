@@ -47,7 +47,6 @@ export async function GET(req: NextRequest) {
         console.error('[BILLING CALLBACK] Invalid HMAC signature');
         return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 403 });
       }
-      console.log('[BILLING CALLBACK] HMAC validation successful');
     } else {
       console.warn('[BILLING CALLBACK] No HMAC provided - proceeding with caution');
     }
@@ -83,17 +82,6 @@ export async function GET(req: NextRequest) {
         path: `recurring_application_charges/${chargeId}`,
       });
       chargeDetails = chargeCheckResponse.body.recurring_application_charge;
-
-      console.log('[BILLING CALLBACK] Charge details:', chargeDetails);
-
-      // Verify the charge is pending activation
-      if (chargeDetails.status !== 'active') {
-        console.error('[BILLING CALLBACK] Charge not in accepted state:', chargeDetails.status);
-        return NextResponse.json({
-          error: 'Charge not ready for activation',
-          status: chargeDetails.status
-        }, { status: 400 });
-      }
     } catch (error) {
       console.error('[BILLING CALLBACK] Failed to verify charge:', error);
       return NextResponse.json({ error: 'Failed to verify charge' }, { status: 500 });
@@ -111,7 +99,7 @@ export async function GET(req: NextRequest) {
     const { error: billingUpdateError } = await supabaseAdmin
       .from('billing_records')
       .update({
-        status: 'active',
+        status: chargeDetails.status,
         activated_on: new Date().toISOString(),
         billing_on: charge.billing_on,
         confirmation_url: charge.confirmation_url,
@@ -135,8 +123,6 @@ export async function GET(req: NextRequest) {
     if (storeUpdateError) {
       console.error('[BILLING CALLBACK] Failed to update store plan:', storeUpdateError);
     }
-
-    console.log('[BILLING CALLBACK] Successfully activated subscription for shop:', shop);
 
     // For embedded apps, redirect to Shopify admin
     // For standalone, redirect to dashboard
