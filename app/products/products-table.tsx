@@ -206,17 +206,25 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
                 autoComplete="off"
               />
             </div>
-            <Select
-              label=""
-              options={[
-                { label: '25 per page', value: '25' },
-                { label: '50 per page', value: '50' },
-                { label: '100 per page', value: '100' },
-                { label: '250 per page', value: '250' },
-              ]}
-              value={pageSize}
-              onChange={handlePageSizeChange}
-            />
+            <InlineStack gap="200">
+              <Button
+                onClick={() => fetchProducts(currentPage, searchDebounce, pageSize)}
+                loading={isLoading}
+              >
+                Refresh
+              </Button>
+              <Select
+                label=""
+                options={[
+                  { label: '25 per page', value: '25' },
+                  { label: '50 per page', value: '50' },
+                  { label: '100 per page', value: '100' },
+                  { label: '250 per page', value: '250' },
+                ]}
+                value={pageSize}
+                onChange={handlePageSizeChange}
+              />
+            </InlineStack>
           </InlineStack>
 
           {isLoading ? (
