@@ -39,8 +39,20 @@ jobs:
         run: |
           docker push registry.heroku.com/stock-alert/web
 
-      - name: Release to Heroku
+      - name: Release to Heroku using API
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          heroku container:release web --app stock-alert
+          # Use Heroku API to release the container
+          curl -n -X PATCH https://api.heroku.com/apps/stock-alert/formation \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
+            -H "Authorization: Bearer $HEROKU_API_KEY" \
+            -d '{
+              "updates": [
+                {
+                  "type": "web",
+                  "docker_image": "'"$(docker inspect registry.heroku.com/stock-alert/web --format={{.Id}})"'"
+                }
+              ]
+            }'
