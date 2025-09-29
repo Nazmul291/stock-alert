@@ -116,22 +116,33 @@ async function processInventoryLogic(
         variant {
           product {
             id
+            title
+            status
+            variants(first: 250) {
+              edges {
+                node {
+                  id
+                  title
+                  sku
+                  inventoryQuantity
+                }
+              }
+            }
           }
         }
       }
     }`;
 
   const response = await graphqlClient.request(query);
-  const productGID = response?.data?.inventoryItem?.variant?.product?.id;
-
-  if (!productGID) {
+  const product = response?.data?.inventoryItem?.variant?.product;
+  if (!product) {
     console.log('Could not determine product GID for inventory update');
     return;
   }
 
   // Continue with the rest of the processing logic...
   // (All the remaining logic from the original handler will be here)
-  await continueProcessing(data, store, graphqlClient, productGID);
+  await continueProcessing(data, store, graphqlClient, product);
 }
 
 
@@ -226,7 +237,7 @@ async function continueProcessing(
   data: any,
   store: any,
   graphqlClient: any,
-  productGID: string
+  product: any
 ) {
   // Get store settings
   const { data: settings } = await supabaseAdmin
@@ -250,66 +261,12 @@ async function continueProcessing(
       processed: false,
     });
 
-  const client = await getShopifyClient(store.shop_domain, store.access_token);
-
   // Find which product this inventory_item_id belongs to
-  const productId = productGID.split('/').pop();
-  let product = null;
+  const productId = product.id.split('/').pop();
 
-  try {
-    // Fetch product using GraphQL to avoid REST API deprecation
-    const productQuery = `
-      query getProduct($id: ID!) {
-        product(id: $id) {
-          id
-          title
-          status
-          variants(first: 250) {
-            edges {
-              node {
-                id
-                title
-                sku
-                inventoryQuantity
-              }
-            }
-          }
-        }
-      }`;
 
-    const productResponse = await graphqlClient.request(productQuery, {
-      variables: {
-        id: productGID
-      }
-    });
-
-    if (productResponse?.data?.product) {
-      // Convert GraphQL response to REST format for compatibility
-      const gqlProduct = productResponse.data.product;
-      product = {
-        id: gqlProduct.id.split('/').pop(),
-        title: gqlProduct.title,
-        status: gqlProduct.status.toLowerCase(),
-        variants: gqlProduct.variants.edges.map((edge: any) => ({
-          id: edge.node.id.split('/').pop(),
-          title: edge.node.title,
-          sku: edge.node.sku,
-          inventory_quantity: edge.node.inventoryQuantity || 0
-        }))
-      };
-    }
-
-  } catch (apiError: any) {
-    console.error('Error fetching product:', apiError);
-  }
-
-  if (!productId || !product) {
+  if (!product) {
     console.log('Could not determine product for inventory update');
-    return;
-  }
-
-  if (!productGID) {
-    console.log('Could not determine product GID for inventory update');
     return;
   }
     
@@ -317,7 +274,9 @@ async function continueProcessing(
     let totalQuantity = 0;
     const variantDetails = [];
     
-    for (const variant of product.variants) {
+    console.log("product full details", product);
+    for (const variantNode of product.variants.edges) {
+      const variant = variantNode.node;
       totalQuantity += variant.inventory_quantity || 0;
       variantDetails.push({
         title: variant.title,
