@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
       product_title: item.product_title,
       variants: [item], // Keep single item as array for compatibility
       total_quantity: item.current_quantity,
+      inventory_status: item.inventory_status,
       sku: item.sku,
       is_hidden: item.is_hidden,
       last_checked_at: item.last_checked_at,

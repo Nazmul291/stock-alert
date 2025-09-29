@@ -27,6 +27,7 @@ interface Product {
   variants: any[];
   total_quantity: number;
   settings: any;
+  inventory_status: string;
 }
 
 interface ProductsTableProps {
@@ -175,12 +176,13 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
         firstSku
       ),
       product.total_quantity.toString(),
-      product.total_quantity === 0 ? (
-        <Badge tone="critical">Out of Stock</Badge>
-      ) : product.total_quantity <= 5 ? (
+      product.inventory_status === "in_stock" ? (
+        <Badge tone="success">In Stock</Badge>
+        
+      ) : product.inventory_status === "low_stock" ? (
         <Badge tone="warning">Low Stock</Badge>
       ) : (
-        <Badge tone="success">In Stock</Badge>
+        <Badge tone="critical">Out of Stock</Badge>
       ),
       product.settings?.custom_threshold || '-',
       <Button onClick={() => handleEditProduct(product)}>Edit Settings</Button>,
