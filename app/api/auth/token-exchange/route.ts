@@ -65,12 +65,6 @@ export async function POST(req: NextRequest) {
     const hasReadInventory = grantedScopes.includes('read_inventory');
     const canFunction = hasReadProducts && hasReadInventory;
 
-      granted: grantedScopes,
-      hasReadProducts,
-      hasReadInventory,
-      canFunction
-    });
-
     // Encrypt the access token before storing
     const encryptedToken = await encryptToken(tokenData.access_token);
 

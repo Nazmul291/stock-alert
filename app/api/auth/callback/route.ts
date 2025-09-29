@@ -61,14 +61,6 @@ export async function GET(req: NextRequest) {
     const expectedNonce = validatedNonce || storedState;
     const expectedShop = validatedShop || storedShop;
 
-      stateFromURL: state?.substring(0, 20) + '...',
-      decodedNonce: validatedNonce?.substring(0, 20) + '...',
-      decodedShop: validatedShop,
-      cookieNonce: storedState?.substring(0, 20) + '...',
-      cookieShop: storedShop,
-      shopFromURL: shop
-    });
-
     // CRITICAL: Validate the entire OAuth callback
     // We skip state validation here since we handle it differently
     const validation = {
@@ -181,13 +173,6 @@ export async function GET(req: NextRequest) {
     const hasWriteInventory = grantedScopes.includes('write_inventory');
     const hasReadProducts = grantedScopes.includes('read_products');
     const hasReadInventory = grantedScopes.includes('read_inventory');
-
-      granted: grantedScopes,
-      hasReadProducts,
-      hasWriteProducts,
-      hasReadInventory,
-      hasWriteInventory
-    });
 
     // WORKAROUND: Handle Shopify's unusual scope granting behavior
     // Sometimes Shopify grants only write scopes in certain configurations

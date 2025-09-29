@@ -66,10 +66,6 @@ export default function ModernAuth() {
 
         // Log current state for debugging
         if (attempts === 1 || attempts % 10 === 0) {
-            shopifyExists: !!window.shopify,
-            customAppExists: !!(window as any).__SHOPIFY_APP__,
-            inIframe: window.top !== window.self
-          });
         }
 
         // Check if App Bridge CDN is loaded and ready
