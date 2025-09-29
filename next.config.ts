@@ -3,13 +3,20 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Performance optimizations
   reactStrictMode: true,
-  
+
+  // Enable standalone output for Docker deployment
+  output: 'standalone',
+
   // Skip type checking and linting during build
   typescript: {
     ignoreBuildErrors: true,
   },
   eslint: {
     ignoreDuringBuilds: true,
+  },
+
+  // Experimental features
+  experimental: {
   },
   
   // Allow Shopify admin to load the app
@@ -25,6 +32,18 @@ const nextConfig: NextConfig = {
           {
             key: 'X-Frame-Options',
             value: 'ALLOWALL',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin',
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
           },
         ],
       },
@@ -45,12 +64,11 @@ const nextConfig: NextConfig = {
     ],
   },
   
-  // Temporarily disable console removal for debugging
+  // Remove console logs in production
   compiler: {
-    // removeConsole: process.env.NODE_ENV === 'production' ? {
-    //   exclude: ['error', 'warn'], // Keep console.error and console.warn in production
-    // } : false,
-    removeConsole: false, // Temporarily disabled for debugging
+    removeConsole: process.env.NODE_ENV === 'production' ? {
+      exclude: ['error', 'warn'], // Keep console.error and console.warn in production
+    } : false,
   },
 };
 

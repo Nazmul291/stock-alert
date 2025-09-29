@@ -1,11 +1,13 @@
+import { getGraphQLClient } from '@/lib/shopify';
+
 export interface WebhookConfig {
   topic: string;
   address: string;
 }
 
 export async function registerWebhooks(shop: string, accessToken: string): Promise<void> {
-  const appUrl = process.env.NEXT_PUBLIC_HOST || 'https://dev.nazmulcodes.org';
-  
+  const appUrl = process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_HOST || 'https://dev.nazmulcodes.org';
+
   // Only register the essential webhooks for inventory tracking
   // NOTE: Shopify webhook topics are lowercase!
   const webhooks: WebhookConfig[] = [
@@ -14,69 +16,91 @@ export async function registerWebhooks(shop: string, accessToken: string): Promi
       address: `${appUrl}/api/webhooks/uninstall`,
     },
     {
-      topic: 'inventory_levels/update', 
+      topic: 'inventory_levels/update',
       address: `${appUrl}/api/webhooks/inventory`,
     },
   ];
 
+  // Initialize GraphQL client
+  const client = await getGraphQLClient(shop, accessToken);
 
   for (const webhook of webhooks) {
     try {
-      // First, check if webhook already exists
-      const checkResponse = await fetch(
-        `https://${shop}/admin/api/2024-01/webhooks.json`,
-        {
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json',
-          },
+      // First, check if webhook already exists using GraphQL
+      const checkQuery = `
+        query getWebhookSubscriptions {
+          webhookSubscriptions(first: 100) {
+            edges {
+              node {
+                id
+                topic
+                endpoint {
+                  __typename
+                  ... on WebhookHttpEndpoint {
+                    callbackUrl
+                  }
+                }
+              }
+            }
+          }
         }
-      );
+      `;
 
-      if (checkResponse.ok) {
-        const { webhooks: existingWebhooks } = await checkResponse.json();
+      const checkResponse: any = await client.request(checkQuery);
+
+      if (checkResponse?.data?.webhookSubscriptions) {
+        const existingWebhooks = checkResponse.data.webhookSubscriptions.edges;
         const exists = existingWebhooks.some(
-          (w: any) => w.topic === webhook.topic && w.address === webhook.address
+          (edge: any) => {
+            const node = edge.node;
+            return node.topic === webhook.topic.toUpperCase().replace('/', '_') &&
+                   node.endpoint?.callbackUrl === webhook.address;
+          }
         );
 
         if (exists) {
           continue;
         }
       }
-
-      // Register the webhook
-      const response = await fetch(
-        `https://${shop}/admin/api/2024-01/webhooks.json`,
-        {
-          method: 'POST',
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            webhook: {
-              topic: webhook.topic,
-              address: webhook.address,
-              format: 'json',
-            },
-          }),
+      const createMutation = `
+        mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
+          webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+            webhookSubscription {
+              id
+              topic
+              endpoint {
+                __typename
+                ... on WebhookHttpEndpoint {
+                  callbackUrl
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
         }
-      );
+      `;
 
-      if (response.ok) {
-        const webhookData = await response.json();
-      } else {
-        const errorText = await response.text();
-        
-        // Try to parse error for more details
-        try {
-          const errorJson = JSON.parse(errorText);
-        } catch {
-          // Not JSON, continue silently
+      // Convert topic format (e.g., "app/uninstalled" -> "APP_UNINSTALLED")
+      const graphqlTopic = webhook.topic.toUpperCase().replace('/', '_');
+
+      const response: any = await client.request(createMutation, {
+        variables: {
+          topic: graphqlTopic,
+          webhookSubscription: {
+            callbackUrl: webhook.address,
+            format: 'JSON'
+          }
         }
+      });
+
+      if (response?.data?.webhookSubscriptionCreate?.userErrors?.length > 0) {
+        console.error(`Webhook registration error for ${webhook.topic}:`, response.data.webhookSubscriptionCreate.userErrors);
       }
     } catch (error) {
-      // Handle error silently
+      console.error(`Failed to register webhook ${webhook.topic}:`, error)
     }
   }
 

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button, Banner } from '@shopify/polaris';
 import { useRouter } from 'next/navigation';
+import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 
 interface SyncProductsButtonProps {
   shop: string;
@@ -14,6 +15,7 @@ export default function SyncProductsButton({ shop }: SyncProductsButtonProps) {
   const [bannerMessage, setBannerMessage] = useState('');
   const [bannerError, setBannerError] = useState(false);
   const router = useRouter();
+  const authenticatedFetch = useAuthenticatedFetch();
 
   const handleSync = async () => {
     if (!shop) return;
@@ -21,9 +23,9 @@ export default function SyncProductsButton({ shop }: SyncProductsButtonProps) {
     setIsLoading(true);
     
     try {
-      const response = await fetch(`/api/products/sync?shop=${shop}`, {
+      const response = await authenticatedFetch(`/api/products/sync?shop=${shop}`, {
         method: 'GET',
-      });
+      }) as Response;
 
       const data = await response.json();
 

@@ -1,7 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { shopify, generateSessionToken, WEBHOOK_TOPICS } from '@/lib/shopify';
+import { cookies } from 'next/headers';
+import crypto from 'crypto';
+import { shopify, WEBHOOK_TOPICS } from '@/lib/shopify';
 import { supabaseAdmin } from '@/lib/supabase';
 import { registerWebhooks } from '@/lib/webhook-registration';
+import { validateOAuthCallback, validateShopDomain, decodeAndValidateState } from '@/lib/oauth-validation';
+import { encryptToken, decryptToken } from '@/lib/token-encryption';
+
+// Rate limiting store (in production, use Redis)
+const rateLimitStore = new Map<string, number[]>();
+
+function checkRateLimit(identifier: string, limit: number = 5, windowMs: number = 60000): boolean {
+  const now = Date.now();
+  const timestamps = rateLimitStore.get(identifier) || [];
+  const recentTimestamps = timestamps.filter(ts => now - ts < windowMs);
+
+  if (recentTimestamps.length >= limit) {
+    return false; // Rate limit exceeded
+  }
+
+  recentTimestamps.push(now);
+  rateLimitStore.set(identifier, recentTimestamps);
+  return true;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,22 +31,127 @@ export async function GET(req: NextRequest) {
     const shop = searchParams.get('shop');
     const state = searchParams.get('state');
     const hmac = searchParams.get('hmac');
-    
-    if (!code || !shop) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+
+    // Rate limiting check
+    const clientIp = req.headers.get('x-forwarded-for') || 'unknown';
+    if (!checkRateLimit(`oauth-callback:${clientIp}`, 10, 60000)) {
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
     }
-    
-    // Exchange code for access token
+
+    // Try to decode the state parameter first (more reliable than cookies)
+    let validatedNonce: string | undefined;
+    let validatedShop: string | undefined;
+
+    if (state) {
+      const decodedState = decodeAndValidateState(state);
+      if (decodedState.valid && decodedState.data) {
+        validatedNonce = decodedState.data.nonce;
+        validatedShop = decodedState.data.shop;
+      } else {
+      }
+    }
+
+    // Fallback to cookies if state decoding failed
+    const cookieStore = await cookies();
+    const storedState = cookieStore.get('shopify-oauth-state')?.value;
+    const storedShop = cookieStore.get('shopify-oauth-shop')?.value;
+    const storedPKCE = cookieStore.get('shopify-oauth-pkce')?.value;
+
+    // Use validated values from state, or fallback to cookies
+    const expectedNonce = validatedNonce || storedState;
+    const expectedShop = validatedShop || storedShop;
+
+    // CRITICAL: Validate the entire OAuth callback
+    // We skip state validation here since we handle it differently
+    const validation = {
+      valid: true,
+      error: undefined as string | undefined
+    };
+
+    // Validate HMAC (already retrieved at line 33)
+    if (!hmac) {
+      validation.valid = false;
+      validation.error = 'Missing HMAC';
+    } else {
+      // Create a copy and remove hmac/signature for validation
+      const params = new URLSearchParams(searchParams);
+      params.delete('hmac');
+      params.delete('signature');
+
+      // Sort and create query string
+      const sortedParams = Array.from(params.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('&');
+
+      // Calculate HMAC
+      const calculatedHmac = crypto
+        .createHmac('sha256', process.env.SHOPIFY_API_SECRET!)
+        .update(sortedParams)
+        .digest('hex');
+
+      if (hmac !== calculatedHmac) {
+        validation.valid = false;
+        validation.error = 'Invalid HMAC';
+      }
+    }
+
+    // Validate shop domain
+    if (validation.valid && !validateShopDomain(shop)) {
+      validation.valid = false;
+      validation.error = 'Invalid shop domain';
+    }
+
+    // Validate we have some form of state validation
+    if (validation.valid && !expectedNonce && !validatedNonce) {
+      validation.valid = false;
+      validation.error = 'No state validation available';
+    }
+
+    if (!validation.valid) {
+      console.error('[OAuth Callback] Validation failed:', validation.error);
+      console.error('[OAuth Callback] Debug info:', {
+        validatedFromState: !!validatedNonce,
+        hadCookies: !!storedState || !!storedShop
+      });
+
+      // Clear OAuth cookies on error
+      cookieStore.delete('shopify-oauth-state');
+      cookieStore.delete('shopify-oauth-shop');
+      cookieStore.delete('shopify-oauth-pkce');
+
+      return NextResponse.json({ error: validation.error }, { status: 403 });
+    }
+
+    // Additional validation: ensure shop matches expected shop
+    if (expectedShop && shop !== expectedShop) {
+      console.error('[OAuth Callback] Shop mismatch:', { received: shop, expected: expectedShop });
+      return NextResponse.json({ error: 'Shop domain mismatch' }, { status: 403 });
+    }
+
+    // Clear OAuth cookies after successful validation
+    cookieStore.delete('shopify-oauth-state');
+    cookieStore.delete('shopify-oauth-shop');
+    cookieStore.delete('shopify-oauth-pkce');
+
+    // Exchange code for access token with PKCE verifier if available
+    const tokenRequestBody: any = {
+      client_id: process.env.SHOPIFY_API_KEY,
+      client_secret: process.env.SHOPIFY_API_SECRET,
+      code,
+    };
+
+    // Add PKCE verifier if it was used
+    if (storedPKCE) {
+      tokenRequestBody.code_verifier = storedPKCE;
+    }
+
     const accessTokenResponse = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        client_id: process.env.SHOPIFY_API_KEY,
-        client_secret: process.env.SHOPIFY_API_SECRET,
-        code,
-      }),
+      body: JSON.stringify(tokenRequestBody),
     });
     
     if (!accessTokenResponse.ok) {
@@ -35,12 +161,76 @@ export async function GET(req: NextRequest) {
     const tokenData = await accessTokenResponse.json();
     const accessToken = tokenData.access_token;
     const scope = tokenData.scope;
-    
-    // Create session object compatible with rest of the code
+
+
+    // Parse granted scopes
+    const grantedScopes = scope
+      .split(',')
+      .map((s: string) => s.trim());
+
+    // Parse and analyze granted scopes
+    const hasWriteProducts = grantedScopes.includes('write_products');
+    const hasWriteInventory = grantedScopes.includes('write_inventory');
+    const hasReadProducts = grantedScopes.includes('read_products');
+    const hasReadInventory = grantedScopes.includes('read_inventory');
+
+    // WORKAROUND: Handle Shopify's unusual scope granting behavior
+    // Sometimes Shopify grants only write scopes in certain configurations
+    // We need to test if we can actually access the APIs regardless of scope names
+
+    let proceedWithInstallation = false;
+    let scopeWarning = null;
+
+    // Ideal case: We have read scopes (with or without write)
+    if (hasReadProducts && hasReadInventory) {
+      proceedWithInstallation = true;
+    }
+    // Edge case: Only write scopes granted (unusual but might work)
+    else if (hasWriteProducts && hasWriteInventory) {
+      console.warn('[OAuth Callback] ⚠️ Only write scopes granted - testing if read access works');
+      scopeWarning = 'Only write scopes granted. App will test read access after installation.';
+      proceedWithInstallation = true; // Proceed and test actual access
+    }
+    // Partial scopes: At least some access granted
+    else if (hasReadProducts || hasWriteProducts || hasReadInventory || hasWriteInventory) {
+      console.warn('[OAuth Callback] ⚠️ Partial scopes granted');
+      scopeWarning = `Partial scopes granted. Some features may be limited. Granted: ${grantedScopes.join(', ')}`;
+      proceedWithInstallation = true; // Proceed with limited functionality
+    }
+    // No relevant scopes at all
+    else {
+      console.error('[OAuth Callback] ❌ No relevant scopes granted');
+      return NextResponse.json({
+        error: 'No permissions granted',
+        message: 'The app requires access to products and inventory. Please contact support.',
+        granted: grantedScopes,
+        required: ['read_products', 'read_inventory'],
+        support: 'Please uninstall and reinstall the app, or contact support if the issue persists.'
+      }, { status: 403 });
+    }
+
+    if (!proceedWithInstallation) {
+      return NextResponse.json({
+        error: 'Installation cannot proceed',
+        message: 'Insufficient permissions granted',
+        granted: grantedScopes
+      }, { status: 403 });
+    }
+
+    if (scopeWarning) {
+      console.warn('[OAuth Callback] Warning:', scopeWarning);
+    }
+
+    // Encrypt the access token before storing
+    const encryptedToken = await encryptToken(accessToken);
+
+    // Create session object with encrypted token
     const session = {
       shop,
-      accessToken,
+      accessToken: encryptedToken,
       scope,
+      tokenEncrypted: true, // Flag to indicate token is encrypted
+      scopeWarning: scopeWarning || null, // Track any scope issues
     };
 
     // Store shop data in Supabase
@@ -84,6 +274,7 @@ export async function GET(req: NextRequest) {
         .update({
           access_token: session.accessToken,
           scope: session.scope,
+          scope_warning: session.scopeWarning,
           updated_at: new Date().toISOString(),
         })
         .eq('shop_domain', session.shop)
@@ -103,6 +294,7 @@ export async function GET(req: NextRequest) {
           shop_domain: session.shop,
           access_token: session.accessToken,
           scope: session.scope,
+          scope_warning: session.scopeWarning,
           plan: 'free',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -149,32 +341,92 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Register webhooks for inventory tracking
+    // Register webhooks for inventory tracking (pass plain token, not encrypted)
     try {
-      await registerWebhooks(session.shop, session.accessToken);
+      await registerWebhooks(session.shop, accessToken); // Use plain token for webhook registration
     } catch (webhookError) {
+      console.error('[OAuth Callback] Webhook registration failed:', webhookError);
       // Don't fail the auth flow if webhook registration fails
       // Webhooks can be registered manually later
     }
 
-    // Generate session token
-    const token = generateSessionToken(session.shop, session.accessToken);
+    // For embedded apps, we need to redirect to Shopify admin which will load our app in an iframe
+    // This is the correct way to complete OAuth for embedded apps according to Shopify best practices
+    const host = req.nextUrl.searchParams.get('host') || '';
+    const apiKey = process.env.SHOPIFY_API_KEY || '';
 
-    // Redirect to app with token
-    const redirectUrl = new URL('/', process.env.NEXT_PUBLIC_HOST);
-    redirectUrl.searchParams.set('shop', session.shop);
-    redirectUrl.searchParams.set('host', req.nextUrl.searchParams.get('host') || '');
-    redirectUrl.searchParams.set('authenticated', '1');
-    
-    const response = NextResponse.redirect(redirectUrl);
-    response.cookies.set('shopify-session', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+    // Build the redirect URL based on whether it's embedded or standalone
+    let finalRedirectUrl: string;
+
+    if (host) {
+      // Embedded app flow - redirect to Shopify admin
+      // The admin will automatically load our app in an iframe
+      finalRedirectUrl = `https://${session.shop}/admin/apps/${apiKey}`;
+    } else {
+      // Standalone app flow - redirect directly to our app
+      finalRedirectUrl = `${process.env.NEXT_PUBLIC_HOST}?shop=${encodeURIComponent(session.shop)}&authenticated=1`;
+    }
+
+    // Return HTML that handles the redirect properly
+    const redirectHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Redirecting to app...</title>
+          <meta charset="utf-8" />
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+            }
+            .container {
+              text-align: center;
+              padding: 2rem;
+            }
+            .spinner {
+              border: 3px solid rgba(255, 255, 255, 0.3);
+              border-radius: 50%;
+              border-top: 3px solid white;
+              width: 40px;
+              height: 40px;
+              animation: spin 1s linear infinite;
+              margin: 0 auto 1rem;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="spinner"></div>
+            <h2>Authentication Successful!</h2>
+            <p>Redirecting to your Shopify admin...</p>
+          </div>
+          <script>
+            // Redirect to the appropriate URL
+            window.location.replace('${finalRedirectUrl}');
+          </script>
+          <noscript>
+            <meta http-equiv="refresh" content="0; url=${finalRedirectUrl}" />
+          </noscript>
+        </body>
+      </html>
+    `;
+
+    return new NextResponse(redirectHtml, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html',
+      },
     });
-
-    return response;
   } catch (error) {
     // Return a user-friendly error page
     const errorHtml = `

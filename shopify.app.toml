@@ -8,8 +8,7 @@ embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-dev_store_url = "muscled-production-app-test.myshopify.com"
-include_config_on_deploy = true
+dev_store_url = "stock-alert-2.myshopify.com"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
@@ -23,7 +22,17 @@ redirect_urls = [
 ]
 
 [webhooks]
-api_version = "2025-07"
+api_version = "2024-10"
+
+# Mandatory compliance webhooks
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/api/webhooks/compliance"
+
+# Inventory webhooks
+[[webhooks.subscriptions]]
+topics = ["inventory_levels/update", "products/update", "products/delete"]
+uri = "/api/webhooks/inventory"
 
 [pos]
 embedded = false

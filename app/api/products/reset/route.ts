@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { requireSessionToken } from '@/lib/session-token';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { shop } = body;
+    // Require valid session token for this destructive operation
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Get store from database
     const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('id')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (storeError || !store) {
@@ -77,18 +82,22 @@ export async function POST(req: NextRequest) {
 // GET method to check current product count
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const shop = searchParams.get('shop');
+    // Require valid session token
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Get store from database
     const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('id, plan')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (storeError || !store) {
@@ -113,7 +122,7 @@ export async function GET(req: NextRequest) {
     const variantCount = products?.length || 0;
 
     return NextResponse.json({
-      shop,
+      shop: shopDomain,
       plan: store.plan || 'free',
       productCount,
       variantCount,

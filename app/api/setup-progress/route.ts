@@ -1,21 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { verifyShopifySession } from '@/lib/auth-check';
+import { requireSessionToken } from '@/lib/session-token';
 
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const shop = searchParams.get('shop');
+    // Require valid session token
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Verify the shop exists and get store ID
     const { data: store } = await supabaseAdmin
       .from('stores')
       .select('id')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (!store) {
@@ -105,12 +109,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Calculate overall progress percentage
+    // Calculate overall progress percentage - only 3 steps now
     const steps = [
       'app_installed',
-      'global_settings_configured', 
-      'notifications_configured',
-      'product_thresholds_configured'
+      'global_settings_configured',
+      'notifications_configured'
     ];
 
     const completedSteps = steps.filter(step => progress && progress[step]).length;
@@ -130,19 +133,23 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const shop = searchParams.get('shop');
-    const body = await req.json();
+    // Require valid session token
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
+    const body = await req.json();
 
     // Verify the shop exists and get store ID
     const { data: store } = await supabaseAdmin
       .from('stores')
       .select('id')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (!store) {

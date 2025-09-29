@@ -1,21 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { validateProductLimit, getPlanLimits } from '@/lib/plan-limits';
+import { requireSessionToken } from '@/lib/session-token';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const shop = searchParams.get('shop');
+    // Require valid session token
+    const authResult = await requireSessionToken(request);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter is required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Get store information
     const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('id, plan')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (storeError || !store) {
@@ -63,12 +68,22 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { shop, productIds } = body;
+    // Require valid session token
+    const authResult = await requireSessionToken(request);
 
-    if (!shop || !productIds || !Array.isArray(productIds)) {
-      return NextResponse.json({ 
-        error: 'Shop and productIds array are required' 
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
+    }
+
+    const shopDomain = authResult.shopDomain!;
+    const body = await request.json();
+    const { productIds } = body;
+
+    if (!productIds || !Array.isArray(productIds)) {
+      return NextResponse.json({
+        error: 'productIds array is required'
       }, { status: 400 });
     }
 
@@ -76,7 +91,7 @@ export async function POST(request: NextRequest) {
     const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('id, plan')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (storeError || !store) {

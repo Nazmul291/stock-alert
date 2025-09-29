@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button, Banner, Modal, TextContainer } from '@shopify/polaris';
 import { useRouter } from 'next/navigation';
+import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 
 interface ResetProductsButtonProps {
   shop: string;
@@ -15,6 +16,7 @@ export default function ResetProductsButton({ shop }: ResetProductsButtonProps) 
   const [bannerMessage, setBannerMessage] = useState('');
   const [bannerError, setBannerError] = useState(false);
   const router = useRouter();
+  const authenticatedFetch = useAuthenticatedFetch();
 
   const handleModalChange = () => setModalActive(!modalActive);
 
@@ -25,13 +27,13 @@ export default function ResetProductsButton({ shop }: ResetProductsButtonProps) 
     setModalActive(false);
     
     try {
-      const response = await fetch(`/api/products/reset`, {
+      const response = await authenticatedFetch(`/api/products/reset`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ shop }),
-      });
+      }) as Response;
 
       const data = await response.json();
 

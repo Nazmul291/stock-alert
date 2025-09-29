@@ -32,9 +32,9 @@ export default async function HomePage({
       .eq('shop_domain', params.shop)
       .single();
     
-    // If no store or no access token, need to complete OAuth
+    // If no store or no access token, use session token authentication
     if (!store || !store.access_token) {
-      redirect(`/api/auth?shop=${params.shop}&embedded=1`);
+      redirect(`/auth/session?shop=${params.shop}&embedded=1&host=${params.host || ''}`);
     }
     
     // Fetch all dashboard data in parallel
@@ -115,7 +115,8 @@ async function getInventoryStats(storeId: string) {
       { count: totalProducts },
       { count: lowStock },
       { count: outOfStock },
-      { count: hidden }
+      { count: hidden },
+      { count: deactivated }
     ] = await Promise.all([
       supabaseAdmin
         .from('inventory_tracking')
@@ -139,7 +140,13 @@ async function getInventoryStats(storeId: string) {
         .from('inventory_tracking')
         .select('*', { count: 'exact', head: true })
         .eq('store_id', storeId)
-        .eq('is_hidden', true)
+        .eq('is_hidden', true),
+
+      supabaseAdmin
+        .from('inventory_tracking')
+        .select('*', { count: 'exact', head: true })
+        .eq('store_id', storeId)
+        .eq('inventory_status', 'deactivated')
     ]);
 
     const today = new Date();
@@ -156,6 +163,7 @@ async function getInventoryStats(storeId: string) {
       lowStock: lowStock || 0,
       outOfStock: outOfStock || 0,
       hidden: hidden || 0,
+      deactivated: deactivated || 0,
       alertsToday: alertsToday || 0
     };
   } catch (error) {
@@ -164,6 +172,7 @@ async function getInventoryStats(storeId: string) {
       lowStock: 0,
       outOfStock: 0,
       hidden: 0,
+      deactivated: 0,
       alertsToday: 0
     };
   }

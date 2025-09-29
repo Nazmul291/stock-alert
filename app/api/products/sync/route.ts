@@ -1,21 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { PLAN_LIMITS } from '@/lib/plan-limits';
+import { requireSessionToken } from '@/lib/session-token';
+import { getGraphQLClient } from '@/lib/shopify';
 
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const shop = searchParams.get('shop');
+    // Require valid session token
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Get store from database with plan information
     const { data: store } = await supabaseAdmin
       .from('stores')
       .select('id, access_token, plan')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (!store || !store.access_token) {
@@ -27,79 +33,178 @@ export async function GET(req: NextRequest) {
     const planLimits = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS];
     const maxProducts = planLimits.maxProducts;
 
+    // Get store settings to determine low stock threshold
+    const { data: storeSettings } = await supabaseAdmin
+      .from('store_settings')
+      .select('low_stock_threshold')
+      .eq('store_id', store.id)
+      .single();
+
+    const lowStockThreshold = storeSettings?.low_stock_threshold || 5;
+
     // Get current distinct product count for this store
     const { data: currentProducts } = await supabaseAdmin
       .from('inventory_tracking')
       .select('product_id')
       .eq('store_id', store.id);
-    
-    // Count distinct products (not variants)
-    const distinctProductIds = new Set(currentProducts?.map(p => p.product_id) || []);
+
+    // Count distinct products (not variants) - ensure all IDs are strings for comparison
+    const distinctProductIds = new Set(currentProducts?.map(p => String(p.product_id)) || []);
     const currentProductCount = distinctProductIds.size;
 
 
-    // First, verify the access token is valid with a lightweight API call
-    const shopInfoResponse = await fetch(
-      `https://${shop}/admin/api/2024-01/shop.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': store.access_token,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Initialize GraphQL client
+    const client = await getGraphQLClient(shopDomain, store.access_token);
 
-    if (!shopInfoResponse.ok) {
-      
-      if (shopInfoResponse.status === 401) {
-        return NextResponse.json({ 
+    // First, verify the access token is valid with a lightweight GraphQL query
+    try {
+      const shopQuery = `
+        query getShop {
+          shop {
+            id
+            name
+          }
+        }
+      `;
+
+      await client.request(shopQuery);
+    } catch (error: any) {
+      console.error('Shop query error:', error);
+      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+        return NextResponse.json({
           error: 'Authentication failed. The access token is invalid or expired. Please reinstall the app.',
-          requiresReauth: true 
+          requiresReauth: true
         }, { status: 401 });
       }
+      throw error;
     }
 
-    // Fetch products from Shopify with reasonable limit for plan
-    const fetchLimit = plan === 'free' ? 50 : 250; // Free plans don't need to fetch as many
-    
-    const productsResponse = await fetch(
-      `https://${shop}/admin/api/2024-01/products.json?limit=${fetchLimit}`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': store.access_token,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Fetch products from Shopify using GraphQL with pagination
+    const pageSize = 250; // Shopify's max limit per page
+    const maxFetchLimit = plan === 'free' ? 10 : 10000; // Free: 10 products, Pro: 10000 products
 
-    if (!productsResponse.ok) {
-      
+    const productsQuery = `
+      query getProducts($first: Int!, $after: String) {
+        products(first: $first, after: $after) {
+          edges {
+            node {
+              id
+              title
+              handle
+              status
+              totalInventory
+              tracksInventory
+              variants(first: 100) {
+                edges {
+                  node {
+                    id
+                    title
+                    sku
+                    inventoryQuantity
+                    inventoryItem {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    `;
+
+    let products = [];
+    let hasNextPage = true;
+    let cursor = null;
+
+    try {
+      // Fetch products with pagination
+      while (hasNextPage && products.length < maxFetchLimit) {
+        // For free plan, fetch only what's needed (10 products max)
+        const effectivePageSize = plan === 'free' ? Math.min(10, pageSize) : pageSize;
+        const currentPageSize = Math.min(effectivePageSize, maxFetchLimit - products.length);
+
+        const response: any = await client.request(productsQuery, {
+          variables: {
+            first: currentPageSize,
+            after: cursor
+          }
+        });
+
+        // Transform GraphQL response to match existing format
+        if (!response || !response.data || !response.data.products) {
+          throw new Error('Invalid response from Shopify GraphQL API');
+        }
+
+        const pageProducts = response.data.products.edges.map((edge: any) => {
+          const product = edge.node;
+          // Extract numeric ID from GID
+          const productId = product.id.split('/').pop();
+
+          return {
+            id: productId,
+            title: product.title,
+            handle: product.handle,
+            status: product.status,
+            variants: product.variants.edges.map((vEdge: any) => {
+              const variant = vEdge.node;
+              const variantId = variant.id.split('/').pop();
+              const inventoryItemId = variant.inventoryItem?.id?.split('/').pop();
+
+              return {
+                id: variantId,
+                title: variant.title,
+                sku: variant.sku,
+                inventory_quantity: variant.inventoryQuantity || 0,
+                inventory_item_id: inventoryItemId
+              };
+            })
+          };
+        });
+
+        products.push(...pageProducts);
+
+        // Check if there are more pages
+        hasNextPage = response.data.products.pageInfo.hasNextPage;
+        cursor = response.data.products.pageInfo.endCursor;
+
+        // Break if we've reached the plan limit
+        if (products.length >= maxFetchLimit) {
+          break;
+        }
+      }
+
+      // Trim to exact limit if we fetched more
+      if (products.length > maxFetchLimit) {
+        products = products.slice(0, maxFetchLimit);
+      }
+    } catch (error: any) {
+      console.error('Products fetch error:', error);
       // Handle specific error cases
-      if (productsResponse.status === 401) {
-        // Authentication error - token might be invalid or expired
-        return NextResponse.json({ 
+      if (error.message?.includes('Unauthorized') || error.message?.includes('401')) {
+        return NextResponse.json({
           error: 'Authentication failed. The app may need to be re-installed or re-authenticated.',
-          requiresReauth: true 
+          requiresReauth: true
         }, { status: 401 });
-      } else if (productsResponse.status === 403) {
-        // Permission error - app might not have required scopes
-        return NextResponse.json({ 
-          error: 'Permission denied. The app may not have the required permissions to access products.' 
+      } else if (error.message?.includes('Forbidden') || error.message?.includes('403')) {
+        return NextResponse.json({
+          error: 'Permission denied. The app may not have the required permissions to access products.'
         }, { status: 403 });
-      } else if (productsResponse.status === 429) {
-        // Rate limiting
-        return NextResponse.json({ 
-          error: 'Rate limit exceeded. Please try again in a few moments.' 
+      } else if (error.message?.includes('Throttled') || error.message?.includes('429')) {
+        return NextResponse.json({
+          error: 'Rate limit exceeded. Please try again in a few moments.'
         }, { status: 429 });
       }
-      
+
       // Generic error
-      return NextResponse.json({ 
-        error: `Failed to fetch products from Shopify (${productsResponse.status})` 
+      return NextResponse.json({
+        error: `Failed to fetch products from Shopify: ${error.message}`
       }, { status: 500 });
     }
-
-    const { products } = await productsResponse.json();
 
     // We already have the distinct product IDs from above
     const existingProductIds = distinctProductIds;
@@ -107,13 +212,11 @@ export async function GET(req: NextRequest) {
 
     // Calculate how many products we can sync based on plan limits
     const remainingSlots = Math.max(0, maxProducts - existingProductCount);
-    
-    if (remainingSlots === 0) {
-      const upgradeMessage = plan === 'free' 
-        ? 'Please upgrade to Professional to sync more products.'
-        : 'You have reached the maximum products for your plan.';
-        
-      return NextResponse.json({ 
+
+    if (remainingSlots === 0 && plan === 'free') {
+      const upgradeMessage = 'Please upgrade to Professional to sync more products.';
+
+      return NextResponse.json({
         error: `Product limit reached. You have already synced ${existingProductCount}/${maxProducts} products on the ${plan} plan. ${upgradeMessage}`,
         currentCount: existingProductCount,
         maxProducts: maxProducts,
@@ -126,17 +229,23 @@ export async function GET(req: NextRequest) {
     const inventoryData = [];
     const productsToSync = [];
     let newProductCount = 0;
+    let updatedProductCount = 0;
 
-    // Filter products - prioritize new products up to the limit
+    // For Pro plan, sync ALL products. For Free plan, respect the limit
     for (const product of products) {
-      if (!existingProductIds.has(product.id)) {
-        if (newProductCount < remainingSlots) {
+      const productIdStr = String(product.id);
+      const isExistingProduct = existingProductIds.has(productIdStr);
+
+      if (!isExistingProduct) {
+        // New product
+        if (plan === 'pro' || newProductCount < remainingSlots) {
           productsToSync.push(product);
           newProductCount++;
         }
       } else {
-        // Always include already synced products for updates
+        // Existing product - always update
         productsToSync.push(product);
+        updatedProductCount++;
       }
     }
 
@@ -166,6 +275,17 @@ export async function GET(req: NextRequest) {
         }
       }
       
+      // Determine correct inventory status based on quantity and store threshold
+      let inventoryStatus: 'in_stock' | 'low_stock' | 'out_of_stock' | 'deactivated';
+
+      if (totalQuantity === 0) {
+        inventoryStatus = 'out_of_stock';
+      } else if (totalQuantity <= lowStockThreshold) {
+        inventoryStatus = 'low_stock';
+      } else {
+        inventoryStatus = 'in_stock';
+      }
+
       inventoryData.push({
         store_id: store.id,
         product_id: product.id,
@@ -174,6 +294,7 @@ export async function GET(req: NextRequest) {
         sku: skus.join(', ') || null, // Combine all SKUs
         current_quantity: totalQuantity,
         previous_quantity: totalQuantity,
+        inventory_status: inventoryStatus,
         is_hidden: false,
         last_checked_at: new Date().toISOString(),
       });
@@ -203,9 +324,9 @@ export async function GET(req: NextRequest) {
         .eq('store_id', store.id)
         .in('product_id', inventoryData.map(item => item.product_id));
 
-      // Create a map for quick lookups
+      // Create a map for quick lookups - ensure keys are strings
       const existingMap = new Map(
-        existingProducts?.map(p => [p.product_id, p.id]) || []
+        existingProducts?.map(p => [String(p.product_id), p.id]) || []
       );
 
       // Separate into updates and inserts
@@ -213,7 +334,10 @@ export async function GET(req: NextRequest) {
       const inserts = [];
 
       for (const item of inventoryData) {
-        const existingId = existingMap.get(item.product_id);
+        // Ensure product_id is a string for consistent comparison
+        const productIdString = String(item.product_id);
+        const existingId = existingMap.get(productIdString);
+
         if (existingId) {
           updates.push({
             ...item,
@@ -236,7 +360,10 @@ export async function GET(req: NextRequest) {
         const { error } = await supabaseAdmin
           .from('inventory_tracking')
           .insert(inserts);
-        if (error) errors.push(`Insert error: ${error.message}`);
+
+        if (error) {
+          errors.push(`Insert error: ${error.message}`);
+        }
       }
 
       // Batch update existing products (Supabase upsert handles this)
@@ -244,11 +371,15 @@ export async function GET(req: NextRequest) {
         const { error } = await supabaseAdmin
           .from('inventory_tracking')
           .upsert(updates);
-        if (error) errors.push(`Update error: ${error.message}`);
+
+        if (error) {
+          errors.push(`Update error: ${error.message}`);
+        }
       }
 
       if (errors.length > 0) {
-        // Handle batch operation errors silently
+        // Log errors but continue - don't fail the whole sync for partial errors
+        console.error('Sync encountered some errors:', errors);
       }
     }
 
@@ -311,6 +442,10 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Internal server error in sync:', error);
+    return NextResponse.json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }

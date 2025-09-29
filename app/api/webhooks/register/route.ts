@@ -1,21 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { registerWebhooks } from '@/lib/webhook-registration';
+import { getGraphQLClient } from '@/lib/shopify';
+import { requireSessionToken } from '@/lib/session-token';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { shop } = body;
+    // Require valid session token for webhook management
+    const authResult = await requireSessionToken(req);
 
-    if (!shop) {
-      return NextResponse.json({ error: 'Shop parameter required' }, { status: 400 });
+    if (!authResult.isAuthenticated) {
+      return NextResponse.json({
+        error: authResult.error || 'Unauthorized'
+      }, { status: 401 });
     }
+
+    const shopDomain = authResult.shopDomain!;
 
     // Get store from database
     const { data: store, error: storeError } = await supabaseAdmin
       .from('stores')
       .select('id, access_token')
-      .eq('shop_domain', shop)
+      .eq('shop_domain', shopDomain)
       .single();
 
     if (storeError || !store || !store.access_token) {
@@ -24,29 +30,43 @@ export async function POST(req: NextRequest) {
 
 
     // Register webhooks
-    await registerWebhooks(shop, store.access_token);
+    await registerWebhooks(shopDomain, store.access_token);
 
-    // Verify registration by fetching the list
-    const response = await fetch(
-      `https://${shop}/admin/api/2024-01/webhooks.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': store.access_token,
-          'Content-Type': 'application/json',
-        },
+    // Initialize GraphQL client for verification
+    const client = await getGraphQLClient(shopDomain, store.access_token);
+
+    // Verify registration by fetching the list using GraphQL
+    const query = `
+      query getWebhookSubscriptions {
+        webhookSubscriptions(first: 100) {
+          edges {
+            node {
+              id
+              topic
+              endpoint {
+                __typename
+                ... on WebhookHttpEndpoint {
+                  callbackUrl
+                }
+              }
+            }
+          }
+        }
       }
-    );
+    `;
 
-    if (!response.ok) {
-      return NextResponse.json({ 
-        error: 'Failed to verify webhook registration' 
+    const response: any = await client.request(query);
+
+    if (!response?.data?.webhookSubscriptions) {
+      return NextResponse.json({
+        error: 'Failed to verify webhook registration'
       }, { status: 500 });
     }
 
-    const { webhooks } = await response.json();
-    
+    const webhooks = response.data.webhookSubscriptions.edges;
+
     // Check which webhooks were registered
-    const registeredTopics = webhooks.map((w: any) => w.topic);
+    const registeredTopics = webhooks.map((edge: any) => edge.node.topic);
     const expectedTopics = ['APP/UNINSTALLED', 'INVENTORY_LEVELS/UPDATE'];
     const missingTopics = expectedTopics.filter(topic => !registeredTopics.includes(topic));
 
@@ -55,7 +75,7 @@ export async function POST(req: NextRequest) {
       message: 'Webhook registration completed',
       registered: registeredTopics,
       missing: missingTopics,
-      total: webhooks.length
+      total: registeredTopics.length
     });
 
   } catch (error) {

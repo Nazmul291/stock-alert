@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect, useCallback } from 'react';
 import {
   DataTable,
   TextField,
@@ -13,6 +13,11 @@ import {
   InlineStack,
   Text,
   List,
+  Spinner,
+  Select,
+  Pagination,
+  BlockStack,
+  Card,
 } from '@shopify/polaris';
 import { updateProductSettings } from '@/app/actions/settings';
 
@@ -22,11 +27,21 @@ interface Product {
   variants: any[];
   total_quantity: number;
   settings: any;
+  inventory_status: string;
 }
 
 interface ProductsTableProps {
   products: Product[];
   shop: string;
+}
+
+interface PaginationData {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
 
 export default function ProductsTable({ products: initialProducts, shop }: ProductsTableProps) {
@@ -42,6 +57,54 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
     exclude_from_alerts: false,
   });
   const [isPending, startTransition] = useTransition();
+
+  // Pagination state
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState('50');
+  const [pagination, setPagination] = useState<PaginationData>({
+    page: 1,
+    pageSize: 50,
+    totalItems: initialProducts.length,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+  const [searchDebounce, setSearchDebounce] = useState('');
+
+  // Fetch products with pagination
+  const fetchProducts = useCallback(async (page: number, search: string, itemsPerPage: string) => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(
+        `/api/products/list?shop=${shop}&page=${page}&pageSize=${itemsPerPage}&search=${encodeURIComponent(search)}`
+      );
+
+      if (!response.ok) throw new Error('Failed to fetch products');
+
+      const data = await response.json();
+      setProducts(data.products);
+      setPagination(data.pagination);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [shop]);
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchDebounce(searchTerm);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Fetch products when search or pagination changes
+  useEffect(() => {
+    fetchProducts(currentPage, searchDebounce, pageSize);
+  }, [currentPage, searchDebounce, pageSize, fetchProducts]);
 
   const handleEditProduct = (product: Product) => {
     setSelectedProduct(product);
@@ -83,12 +146,16 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
     setSkuModalActive(true);
   };
 
-  const filteredProducts = products.filter(
-    (product) =>
-      product.product_title?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+  };
 
-  const productRows = filteredProducts.map((product) => {
+  const handlePageSizeChange = (value: string) => {
+    setPageSize(value);
+    setCurrentPage(1); // Reset to first page when changing page size
+  };
+
+  const productRows = products.map((product) => {
     // Get SKU from the first variant (SKU is stored as comma-separated string)
     const skuString = product.variants[0]?.sku || '';
     const skuArray = skuString ? skuString.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
@@ -109,12 +176,13 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
         firstSku
       ),
       product.total_quantity.toString(),
-      product.total_quantity === 0 ? (
-        <Badge tone="critical">Out of Stock</Badge>
-      ) : product.total_quantity <= 5 ? (
+      product.inventory_status === "in_stock" ? (
+        <Badge tone="success">In Stock</Badge>
+        
+      ) : product.inventory_status === "low_stock" ? (
         <Badge tone="warning">Low Stock</Badge>
       ) : (
-        <Badge tone="success">In Stock</Badge>
+        <Badge tone="critical">Out of Stock</Badge>
       ),
       product.settings?.custom_threshold || '-',
       <Button onClick={() => handleEditProduct(product)}>Edit Settings</Button>,
@@ -124,30 +192,81 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
   return (
     <>
       <div style={{ padding: '20px' }}>
-        <TextField
-          label=""
-          value={searchTerm}
-          onChange={setSearchTerm}
-          placeholder="Search products..."
-          autoComplete="off"
-        />
-      </div>
+        <BlockStack gap="400">
+          <InlineStack gap="400" align="space-between">
+            <div style={{ flex: 1, maxWidth: '400px' }}>
+              <TextField
+                label=""
+                value={searchTerm}
+                onChange={(value) => {
+                  setSearchTerm(value);
+                  setCurrentPage(1); // Reset to first page on search
+                }}
+                placeholder="Search products..."
+                autoComplete="off"
+              />
+            </div>
+            <InlineStack gap="200">
+              <Button
+                onClick={() => fetchProducts(currentPage, searchDebounce, pageSize)}
+                loading={isLoading}
+              >
+                Refresh
+              </Button>
+              <Select
+                label=""
+                options={[
+                  { label: '25 per page', value: '25' },
+                  { label: '50 per page', value: '50' },
+                  { label: '100 per page', value: '100' },
+                  { label: '250 per page', value: '250' },
+                ]}
+                value={pageSize}
+                onChange={handlePageSizeChange}
+              />
+            </InlineStack>
+          </InlineStack>
 
-      <div style={{ padding: '20px' }}>
-        {filteredProducts.length > 0 ? (
-          <DataTable
-            columnContentTypes={['text', 'text', 'numeric', 'text', 'text', 'text']}
-            headings={['Product', 'SKU', 'Total Stock', 'Status', 'Custom Threshold', 'Actions']}
-            rows={productRows}
-          />
-        ) : (
-          <EmptyState
-            heading="No products found"
-            image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-          >
-            <p>Products will appear here once your inventory is synced.</p>
-          </EmptyState>
-        )}
+          {isLoading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+              <Spinner accessibilityLabel="Loading products" size="large" />
+            </div>
+          ) : products.length > 0 ? (
+            <>
+              <DataTable
+                columnContentTypes={['text', 'text', 'numeric', 'text', 'text', 'text']}
+                headings={['Product', 'SKU', 'Total Stock', 'Status', 'Custom Threshold', 'Actions']}
+                rows={productRows}
+              />
+
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+                <Pagination
+                  hasPrevious={pagination.hasPreviousPage}
+                  onPrevious={() => handlePageChange(currentPage - 1)}
+                  hasNext={pagination.hasNextPage}
+                  onNext={() => handlePageChange(currentPage + 1)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'center', color: '#6d7175' }}>
+                <Text as="p" variant="bodySm">
+                  Page {pagination.page} of {pagination.totalPages} • Total products: {pagination.totalItems}
+                </Text>
+              </div>
+            </>
+          ) : (
+            <EmptyState
+              heading="No products found"
+              image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+            >
+              <p>
+                {searchTerm
+                  ? `No products matching "${searchTerm}"`
+                  : 'Products will appear here once your inventory is synced.'}
+              </p>
+            </EmptyState>
+          )}
+        </BlockStack>
       </div>
 
       <Modal

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 import {
   Page,
   Layout,
@@ -17,29 +18,29 @@ interface BillingContentProps {
   searchParams: { shop?: string; host?: string };
 }
 
-export default function BillingContent({ 
-  store, 
-  searchParams 
+export default function BillingContent({
+  store,
+  searchParams
 }: BillingContentProps) {
   const router = useRouter();
   const [upgrading, setUpgrading] = useState(false);
+  const authenticatedFetch = useAuthenticatedFetch();
 
   const handleUpgrade = async () => {
     setUpgrading(true);
     try {
-      const response = await fetch('/api/billing', {
+      const bodyData = { plan: 'pro' };
+
+      // Use test route for development
+      const response = await authenticatedFetch('/api/billing', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ plan: 'pro' }),
+        body: JSON.stringify(bodyData),
       });
 
       let data;
       try {
         data = await response.json();
       } catch (jsonError) {
-        console.error('Failed to parse response:', jsonError);
         alert('Failed to create billing charge: Invalid response from server');
         setUpgrading(false);
         return;
@@ -67,6 +68,7 @@ export default function BillingContent({
         setUpgrading(false);
       }
     } catch (error) {
+      alert(`Failed to upgrade: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setUpgrading(false);
     }
   };
@@ -74,13 +76,10 @@ export default function BillingContent({
   const handleDowngrade = async () => {
     setUpgrading(true);
     try {
-      const response = await fetch('/api/billing', {
+      const response = await authenticatedFetch('/api/billing', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ plan: 'free' }),
-      });
+      }) as Response;
 
       if (response.ok) {
         router.refresh();
@@ -116,8 +115,8 @@ export default function BillingContent({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
             <Card>
               <div style={{ padding: '20px' }}>
-                <h2 style={{ marginBottom: '10px' }}>Free Plan</h2>
-                <p style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>$0/month</p>
+                <h2 style={{ marginBottom: '10px' }}>Basic</h2>
+                <p style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>Free</p>
                 
                 <List>
                   <List.Item>Auto-hide sold out products</List.Item>
@@ -149,12 +148,12 @@ export default function BillingContent({
 
             <Card>
               <div style={{ padding: '20px' }}>
-                <h2 style={{ marginBottom: '10px' }}>Pro Plan</h2>
+                <h2 style={{ marginBottom: '10px' }}>Professional</h2>
                 <p style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>$9.99/month</p>
                 <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>7-day free trial</p>
                 
                 <List>
-                  <List.Item>Everything in Free, plus:</List.Item>
+                  <List.Item>Everything in Basic, plus:</List.Item>
                   <List.Item>Slack notifications</List.Item>
                   <List.Item>Per-product thresholds</List.Item>
                   <List.Item>Auto-republish when restocked</List.Item>

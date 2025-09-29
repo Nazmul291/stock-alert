@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import PolarisProvider from '@/components/polaris-provider';
-import AppBridgeProvider from '@/components/app-bridge-provider';
 import ReduxProvider from '@/components/redux-provider';
+import { AuthNotification } from '@/components/auth-notification';
+import AppBridgeInit from '@/components/app-bridge-init';
+import { ShopifyProvider } from '@/components/providers/shopify-provider';
+import { Suspense } from 'react';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -25,15 +28,19 @@ export default function RootLayout({
           rel="stylesheet" 
           href="https://unpkg.com/@shopify/polaris@12.27.0/build/esm/styles.css"
         />
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" data-api-key={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}></script>
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
       </head>
       <body className={inter.className} suppressHydrationWarning>
         <ReduxProvider>
-          <AppBridgeProvider>
-            <PolarisProvider>
-              {children}
-            </PolarisProvider>
-          </AppBridgeProvider>
+          <PolarisProvider>
+            <Suspense fallback={null}>
+              <ShopifyProvider>
+                <AppBridgeInit />
+                <AuthNotification />
+                {children}
+              </ShopifyProvider>
+            </Suspense>
+          </PolarisProvider>
         </ReduxProvider>
       </body>
     </html>
