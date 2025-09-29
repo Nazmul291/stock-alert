@@ -28,16 +28,18 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Accept build args for environment variables needed during build
+# Heroku automatically passes all config vars as ARG during Docker build
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_HOST
 ARG NEXT_PUBLIC_SHOPIFY_API_KEY
 
-# Set env vars for build
-ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
-ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
-ENV NEXT_PUBLIC_HOST=$NEXT_PUBLIC_HOST
-ENV NEXT_PUBLIC_SHOPIFY_API_KEY=$NEXT_PUBLIC_SHOPIFY_API_KEY
+# Set env vars for build - these will be inlined by Next.js
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+ENV NEXT_PUBLIC_HOST=${NEXT_PUBLIC_HOST}
+ENV NEXT_PUBLIC_SHOPIFY_API_KEY=${NEXT_PUBLIC_SHOPIFY_API_KEY}
+ENV NODE_ENV=production
 
 # Build Next.js app (standalone output enabled in next.config.ts)
 RUN pnpm build
@@ -66,5 +68,5 @@ EXPOSE ${PORT:-3000}
 
 ENV HOSTNAME="0.0.0.0"
 
-# Start the Next.js server
+# Start the Next.js server (only used when building with Docker, not Heroku buildpack)
 CMD ["node", "server.js"]
