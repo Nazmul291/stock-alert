@@ -18,6 +18,8 @@ import {
   Pagination,
   BlockStack,
   Card,
+  Banner,
+  Link,
 } from '@shopify/polaris';
 import { updateProductSettings } from '@/app/actions/settings';
 
@@ -33,6 +35,7 @@ interface Product {
 interface ProductsTableProps {
   products: Product[];
   shop: string;
+  storePlan: string;
 }
 
 interface PaginationData {
@@ -44,7 +47,7 @@ interface PaginationData {
   hasPreviousPage: boolean;
 }
 
-export default function ProductsTable({ products: initialProducts, shop }: ProductsTableProps) {
+export default function ProductsTable({ products: initialProducts, shop, storePlan }: ProductsTableProps) {
   const [products, setProducts] = useState(initialProducts);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -286,6 +289,16 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
         ]}
       >
         <Modal.Section>
+          {storePlan !== 'pro' && (
+            <div style={{ marginBottom: '16px' }}>
+              <Banner tone="info">
+                <p>
+                  Per-product thresholds are a <strong>Professional plan</strong> feature.
+                  <Link url={`/billing?shop=${shop}`}> Upgrade to unlock</Link>
+                </p>
+              </Banner>
+            </div>
+          )}
           <FormLayout>
             <TextField
               label="Custom low stock threshold"
@@ -295,20 +308,23 @@ export default function ProductsTable({ products: initialProducts, shop }: Produ
               placeholder="Leave empty to use global setting"
               helpText="Override the global threshold for this product"
               autoComplete="off"
+              disabled={storePlan !== 'pro'}
             />
-            
+
             <Checkbox
               label="Exclude from auto-hide"
               checked={productSettings.exclude_from_auto_hide}
               onChange={(value) => setProductSettings({ ...productSettings, exclude_from_auto_hide: value })}
               helpText="This product won't be hidden when out of stock"
+              disabled={storePlan !== 'pro'}
             />
-            
+
             <Checkbox
               label="Exclude from alerts"
               checked={productSettings.exclude_from_alerts}
               onChange={(value) => setProductSettings({ ...productSettings, exclude_from_alerts: value })}
               helpText="Don't send alerts for this product"
+              disabled={storePlan !== 'pro'}
             />
           </FormLayout>
         </Modal.Section>

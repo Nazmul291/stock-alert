@@ -10,7 +10,7 @@ export async function requireAuth(shop: string | undefined) {
   // Check if store exists in database (has completed OAuth)
   const { data: store } = await supabaseAdmin
     .from('stores')
-    .select('id, access_token')
+    .select('id, access_token, plan')
     .eq('shop_domain', shop)
     .single();
   
@@ -26,6 +26,7 @@ export async function requireAuth(shop: string | undefined) {
   return {
     id: store.id,
     access_token: store.access_token,
-    shop_domain: shop
+    shop_domain: shop,
+    plan: store.plan
   };
 }
