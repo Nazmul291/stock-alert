@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
       }, { status: 401 });
     }
 
-    const shopDomain = authResult.shopDomain!
+    const shopDomain = authResult.shopDomain!;
 
     // Get pagination parameters
     const page = parseInt(req.nextUrl.searchParams.get('page') || '1');

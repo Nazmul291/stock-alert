@@ -22,6 +22,7 @@ import {
   Link,
 } from '@shopify/polaris';
 import { updateProductSettings } from '@/app/actions/settings';
+import { useAuthenticatedFetch } from '@/hooks/useAuthenticatedFetch';
 
 interface Product {
   product_id: number;
@@ -60,6 +61,7 @@ export default function ProductsTable({ products: initialProducts, shop, storePl
     exclude_from_alerts: false,
   });
   const [isPending, startTransition] = useTransition();
+  const authenticatedFetch = useAuthenticatedFetch();
 
   // Pagination state
   const [isLoading, setIsLoading] = useState(false);
@@ -79,9 +81,9 @@ export default function ProductsTable({ products: initialProducts, shop, storePl
   const fetchProducts = useCallback(async (page: number, search: string, itemsPerPage: string) => {
     setIsLoading(true);
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `/api/products/list?shop=${shop}&page=${page}&pageSize=${itemsPerPage}&search=${encodeURIComponent(search)}`
-      );
+      ) as Response;
 
       if (!response.ok) throw new Error('Failed to fetch products');
 
@@ -93,7 +95,7 @@ export default function ProductsTable({ products: initialProducts, shop, storePl
     } finally {
       setIsLoading(false);
     }
-  }, [shop]);
+  }, [shop, authenticatedFetch]);
 
   // Debounce search
   useEffect(() => {
