@@ -57,14 +57,9 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Copy public assets
 COPY --from=builder /app/public ./public
 
-# Copy standalone output
+# Copy standalone output (includes compiled instrumentation automatically)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# Copy instrumentation and required lib files for heartbeat
-COPY --from=builder --chown=nextjs:nodejs /app/instrumentation.ts ./instrumentation.ts
-COPY --from=builder --chown=nextjs:nodejs /app/lib/heartbeat.ts ./lib/heartbeat.ts
-COPY --from=builder --chown=nextjs:nodejs /app/lib/supabase.ts ./lib/supabase.ts
 
 USER nextjs
 
