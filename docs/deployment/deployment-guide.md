@@ -75,7 +75,7 @@ EMAIL_USER=alerts@yourdomain.com
 EMAIL_PASS=your_email_password
 
 # Slack Configuration (Optional)
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/TXXXXX/BXXXXX/your-webhook-token
 
 # JWT Configuration
 JWT_SECRET=your_secure_jwt_secret
