@@ -16,7 +16,7 @@ async function performHeartbeat() {
     if (error) {
       console.error('[Heartbeat] Database query failed:', error.message);
     } else {
-      console.log(`[Heartbeat] Database connection alive. Store count: ${count}`);
+      console.info(`[Heartbeat] Database connection alive. Store count: ${count}`);
     }
   } catch (error) {
     console.error('[Heartbeat] Unexpected error:', error);
@@ -42,7 +42,7 @@ export async function startHeartbeat() {
   }catch(error){
     console.error('[Heartbeat] Failed to start heartbeat service:', error);
   }finally{
-    console.log('[Heartbeat] Service started');
+    console.info('[Heartbeat] Service started');
     scheduleNextHeartbeat();
   }
 }
@@ -54,6 +54,6 @@ export function stopHeartbeat() {
   if (heartbeatTimer) {
     clearTimeout(heartbeatTimer);
     heartbeatTimer = null;
-    console.log('[Heartbeat] Service stopped');
+    console.info('[Heartbeat] Service stopped');
   }
 }
