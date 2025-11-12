@@ -6,11 +6,13 @@ import ProductsTable from './products-table';
 interface ProductsContentProps {
   products: any[];
   searchParams: { shop?: string; host?: string };
+  storePlan: string;
 }
 
-export default function ProductsContent({ 
-  products, 
-  searchParams 
+export default function ProductsContent({
+  products,
+  searchParams,
+  storePlan
 }: ProductsContentProps) {
   return (
     <Page
@@ -23,7 +25,7 @@ export default function ProductsContent({
       <Layout>
         <Layout.Section>
           <Card>
-            <ProductsTable products={products} shop={searchParams.shop || ''} />
+            <ProductsTable products={products} shop={searchParams.shop || ''} storePlan={storePlan} />
           </Card>
         </Layout.Section>
       </Layout>

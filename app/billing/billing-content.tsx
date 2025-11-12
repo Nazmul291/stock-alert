@@ -105,7 +105,7 @@ export default function BillingContent({
             <div style={{ padding: '20px' }}>
               <h2 style={{ marginBottom: '10px' }}>Current Plan</h2>
               <Badge tone={store?.plan === 'pro' ? 'success' : 'info'}>
-                {store?.plan === 'pro' ? 'PRO' : 'FREE'}
+                {store?.plan === 'pro' ? 'Professional' : 'Basic'}
               </Badge>
             </div>
           </Card>
@@ -157,7 +157,6 @@ export default function BillingContent({
                   <List.Item>Slack notifications</List.Item>
                   <List.Item>Per-product thresholds</List.Item>
                   <List.Item>Auto-republish when restocked</List.Item>
-                  <List.Item>Advanced rules & collections</List.Item>
                   <List.Item>Multiple notification users</List.Item>
                   <List.Item>Priority support</List.Item>
                   <List.Item><strong>Monitor up to 10,000 products</strong></List.Item>
@@ -171,7 +170,7 @@ export default function BillingContent({
                       loading={upgrading}
                       fullWidth
                     >
-                      Upgrade to Pro
+                      Upgrade to Professional
                     </Button>
                   </div>
                 )}
@@ -190,7 +189,7 @@ export default function BillingContent({
           <Layout.Section>
             <Banner tone="info">
               <p>
-                <strong>Why upgrade to Pro?</strong> Get instant Slack notifications, set custom thresholds for each product, 
+                <strong>Why upgrade to Professional?</strong> Get instant Slack notifications, set custom thresholds for each product, 
                 and access advanced features to better manage your inventory. Start with a 7-day free trial!
               </p>
             </Banner>

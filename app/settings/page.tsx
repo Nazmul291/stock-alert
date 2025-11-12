@@ -15,7 +15,7 @@ export default async function SettingsPage({
   const authStore = await requireAuth(params.shop);
   const store = await getStore(params.shop!);
   const settings = await getStoreSettings(authStore.id);
-  
+
   // Fetch products (without settings for now)
   const { data: productsData, error: fetchError } = await supabaseAdmin
     .from('inventory_tracking')

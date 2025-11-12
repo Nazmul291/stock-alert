@@ -22,9 +22,10 @@ export default async function ProductsPage({
   const products = await getInitialProductsData(store.id);
 
   return (
-    <ProductsContent 
+    <ProductsContent
       products={products}
       searchParams={params}
+      storePlan={store.plan || 'free'}
     />
   );
 }

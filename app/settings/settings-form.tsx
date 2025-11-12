@@ -66,12 +66,20 @@ export default function SettingsForm({ settings: initialSettings, plan, shop }: 
   return (
     <form onSubmit={handleSubmit}>
       <FormLayout>
+        {plan !== 'pro' && (
+          <Banner tone="info">
+            <p>
+              Some advanced features are disabled on the free plan. <a href={`/billing?shop=${shop}`} style={{ color: '#0066CC', textDecoration: 'underline' }}>Upgrade to Professional</a> to unlock auto-republish, per-product settings, and more.
+            </p>
+          </Banner>
+        )}
+
         {success && (
           <Banner tone="success" onDismiss={() => setSuccess(false)}>
             Settings saved successfully!
           </Banner>
         )}
-        
+
         {error && (
           <Banner tone="critical" onDismiss={() => setError(null)}>
             {error}
@@ -84,13 +92,13 @@ export default function SettingsForm({ settings: initialSettings, plan, shop }: 
           onChange={(value) => setSettings({ ...settings, auto_hide_enabled: value })}
           helpText="Products with zero inventory will be automatically unpublished from your store"
         />
-        
+
         <Checkbox
           label="Automatically republish when restocked"
           checked={settings.auto_republish_enabled}
           onChange={(value) => setSettings({ ...settings, auto_republish_enabled: value })}
           helpText="Products will be automatically published again when inventory is added"
-          disabled={!settings.auto_hide_enabled}
+          disabled={!settings.auto_hide_enabled || plan !== 'pro'}
         />
 
         <Select

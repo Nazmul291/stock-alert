@@ -80,7 +80,7 @@ export default function SettingsContent({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <Text variant="bodyMd" fontWeight="semibold">Product Usage</Text>
                   <Text variant="bodySm" tone="subdued">
-                    {currentProducts}/{maxProducts} products ({plan.toUpperCase()} plan)
+                    {currentProducts}/{maxProducts} products
                   </Text>
                 </div>
                 <ProgressBar
