@@ -10,7 +10,7 @@ datasource db {
 
 model Session {
   id            String    @id
-  shop          String
+  shop          String    @unique
   state         String
   isOnline      Boolean   @default(false)
   scope         String?
@@ -19,15 +19,24 @@ model Session {
   userId        BigInt?
   firstName     String?
   lastName      String?
-  email         String?
+  email         String?   @db.VarChar(255)
   accountOwner  Boolean   @default(false)
   locale        String?
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
-}
+  plan          Plan      @default(free)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
+  storeSettings     StoreSettings?
+  inventoryTracking InventoryTracking[]
+  alertHistory      AlertHistory[]
+  setupProgress     SetupProgress?
+
+  @@index([plan])
+}
 
 enum Plan {
   free
@@ -48,33 +57,9 @@ enum InventoryStatus {
   deactivated
 }
 
-model Store {
-  id          String   @id @default(uuid()) @db.Uuid
-  shopDomain  String   @unique @map("shop_domain") @db.VarChar(255)
-  accessToken String   @map("access_token")
-  scope       String?
-  email       String?  @db.VarChar(255)
-  plan        Plan     @default(free)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  storeSettings         StoreSettings?
-  productSettings       ProductSettings[]
-  inventoryTracking     InventoryTracking[]
-  alertHistory          AlertHistory[]
-  setupProgress         SetupProgress?
-  webhooks              Webhook[]
-  webhookEvents         WebhookEvent[]
-  inventoryItemMappings InventoryItemMapping[]
-
-  @@index([shopDomain])
-  @@index([plan])
-  @@map("stores")
-}
-
 model StoreSettings {
   id                   String   @id @default(uuid()) @db.Uuid
-  storeId              String   @unique @map("store_id") @db.Uuid
+  shop                 String   @unique
   lowStockThreshold    Int      @default(5) @map("low_stock_threshold")
   autoHideEnabled      Boolean  @default(false) @map("auto_hide_enabled")
   emailNotifications   Boolean  @default(true) @map("email_notifications")
@@ -85,32 +70,15 @@ model StoreSettings {
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 
-  @@index([storeId])
+  @@index([shop])
   @@map("store_settings")
-}
-
-model ProductSettings {
-  id                  String   @id @default(uuid()) @db.Uuid
-  storeId             String   @map("store_id") @db.Uuid
-  productId           BigInt   @map("product_id")
-  customThreshold     Int?     @map("custom_threshold")
-  excludeFromAutoHide Boolean  @default(false) @map("exclude_from_auto_hide")
-  excludeFromAlerts   Boolean  @default(false) @map("exclude_from_alerts")
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@unique([storeId, productId])
-  @@index([storeId, productId])
-  @@map("product_settings")
 }
 
 model InventoryTracking {
   id               String          @id @default(uuid()) @db.Uuid
-  storeId          String          @map("store_id") @db.Uuid
+  shop             String
   productId        BigInt          @map("product_id")
   productTitle     String?         @map("product_title") @db.VarChar(500)
   variantTitle     String?         @map("variant_title") @db.VarChar(500)
@@ -124,22 +92,22 @@ model InventoryTracking {
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 
-  @@unique([storeId, productId])
-  @@index([storeId])
-  @@index([storeId, productId])
-  @@index([storeId, currentQuantity])
-  @@index([storeId, isHidden])
+  @@unique([shop, productId])
+  @@index([shop])
+  @@index([shop, productId])
+  @@index([shop, currentQuantity])
+  @@index([shop, isHidden])
   @@index([lastCheckedAt])
-  @@index([storeId, lastAlertSentAt])
-  @@index([storeId, inventoryStatus])
+  @@index([shop, lastAlertSentAt])
+  @@index([shop, inventoryStatus])
   @@map("inventory_tracking")
 }
 
 model AlertHistory {
   id                 String     @id @default(uuid()) @db.Uuid
-  storeId            String     @map("store_id") @db.Uuid
+  shop               String
   productId          BigInt?    @map("product_id")
   productTitle       String?    @map("product_title") @db.VarChar(500)
   alertType          AlertType? @map("alert_type")
@@ -150,17 +118,17 @@ model AlertHistory {
   sentAt             DateTime   @default(now()) @map("sent_at") @db.Timestamptz
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 
-  @@index([storeId])
+  @@index([shop])
   @@index([sentAt(sort: Desc)])
-  @@index([storeId, sentAt(sort: Desc)])
+  @@index([shop, sentAt(sort: Desc)])
   @@map("alert_history")
 }
 
 model SetupProgress {
   id                          String   @id @default(uuid()) @db.Uuid
-  storeId                     String   @unique @map("store_id") @db.Uuid
+  shop                        String   @unique
   appInstalled                Boolean  @default(true) @map("app_installed")
   globalSettingsConfigured    Boolean  @default(false) @map("global_settings_configured")
   notificationsConfigured     Boolean  @default(false) @map("notifications_configured")
@@ -169,71 +137,9 @@ model SetupProgress {
   createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt                   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 
-  @@index([storeId])
+  @@index([shop])
   @@map("setup_progress")
 }
 
-model Webhook {
-  id        String   @id @default(uuid()) @db.Uuid
-  storeId   String   @map("store_id") @db.Uuid
-  webhookId BigInt   @map("webhook_id")
-  topic     String   @db.VarChar(100)
-  address   String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@unique([storeId, topic])
-  @@index([storeId])
-  @@index([topic])
-  @@map("webhooks")
-}
-
-model AuthNonce {
-  id        String   @id @default(uuid()) @db.Uuid
-  nonce     String   @unique @db.VarChar(255)
-  shop      String   @db.VarChar(255)
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-  expiresAt DateTime @default(dbgenerated("(NOW() + INTERVAL '10 minutes')")) @map("expires_at") @db.Timestamptz
-
-  @@index([nonce])
-  @@index([expiresAt])
-  @@map("auth_nonces")
-}
-
-model WebhookEvent {
-  id           String    @id @default(uuid()) @db.Uuid
-  storeId      String    @map("store_id") @db.Uuid
-  topic        String    @db.VarChar(100)
-  payload      Json?
-  processed    Boolean   @default(false)
-  processedAt  DateTime? @map("processed_at") @db.Timestamptz
-  errorMessage String?   @map("error_message")
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@index([storeId, processed])
-  @@index([topic])
-  @@index([createdAt(sort: Desc)])
-  @@map("webhook_events")
-}
-
-model InventoryItemMapping {
-  inventoryItemId BigInt   @id @map("inventory_item_id")
-  productId       BigInt   @map("product_id")
-  variantId       BigInt?  @map("variant_id")
-  storeId         String   @map("store_id") @db.Uuid
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
-
-  @@index([storeId, inventoryItemId])
-  @@index([storeId, productId])
-  @@map("inventory_item_mapping")
-}
