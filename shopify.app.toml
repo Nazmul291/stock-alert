@@ -1,18 +1,56 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "a4c382e2cb454fd7c45b655248b2d1f7"
-name = "Stock Alert Dev"
-handle = "stock-alert-dev-1"
 application_url = "https://dev.nazmulcodes.org"
 embedded = true
-
-[build]
-automatically_update_urls_on_dev = true
-dev_store_url = "stock-alert-2.myshopify.com"
+name = "Stock Alert Dev"
+handle = "stock-alert-dev-1"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_products,read_inventory,write_inventory"
+scopes = "read_inventory,read_products,write_inventory,write_products"
+
+[product.metafields.app.demo_info]
+type = "single_line_text_field"
+name = "Demo Source Info"
+description = "Tracks products created by the Shopify app template for development"
+
+  [product.metafields.app.demo_info.access]
+  admin = "merchant_read_write"
+
+[metaobjects.app.example]
+name = "Example"
+description = "An example metaobject definition created by this template"
+
+  [metaobjects.app.example.access]
+  admin = "merchant_read_write"
+
+[metaobjects.app.example.fields.title]
+name = "Title"
+type = "single_line_text_field"
+required = true
+
+[metaobjects.app.example.fields.description]
+name = "Description"
+type = "multi_line_text_field"
+
+[webhooks]
+api_version = "2024-10"
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/inventory"
+  topics = [
+  "inventory_levels/update",
+  "products/delete",
+  "products/update"
+]
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/compliance"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+
+[pos]
+embedded = false
 
 [auth]
 redirect_urls = [
@@ -21,18 +59,6 @@ redirect_urls = [
   "https://dev.nazmulcodes.org/api/auth/callback"
 ]
 
-[webhooks]
-api_version = "2024-10"
-
-# Mandatory compliance webhooks
-[[webhooks.subscriptions]]
-compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
-uri = "/api/webhooks/compliance"
-
-# Inventory webhooks
-[[webhooks.subscriptions]]
-topics = ["inventory_levels/update", "products/update", "products/delete"]
-uri = "/api/webhooks/inventory"
-
-[pos]
-embedded = false
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true

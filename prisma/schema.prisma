@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+
+enum Plan {
+  free
+  pro
+  enterprise
+}
+
+enum AlertType {
+  low_stock
+  out_of_stock
+  restock
+}
+
+enum InventoryStatus {
+  in_stock
+  low_stock
+  out_of_stock
+  deactivated
+}
+
+model Store {
+  id          String   @id @default(uuid()) @db.Uuid
+  shopDomain  String   @unique @map("shop_domain") @db.VarChar(255)
+  accessToken String   @map("access_token")
+  scope       String?
+  email       String?  @db.VarChar(255)
+  plan        Plan     @default(free)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  storeSettings         StoreSettings?
+  productSettings       ProductSettings[]
+  inventoryTracking     InventoryTracking[]
+  alertHistory          AlertHistory[]
+  setupProgress         SetupProgress?
+  webhooks              Webhook[]
+  webhookEvents         WebhookEvent[]
+  inventoryItemMappings InventoryItemMapping[]
+
+  @@index([shopDomain])
+  @@index([plan])
+  @@map("stores")
+}
+
+model StoreSettings {
+  id                   String   @id @default(uuid()) @db.Uuid
+  storeId              String   @unique @map("store_id") @db.Uuid
+  lowStockThreshold    Int      @default(5) @map("low_stock_threshold")
+  autoHideEnabled      Boolean  @default(false) @map("auto_hide_enabled")
+  emailNotifications   Boolean  @default(true) @map("email_notifications")
+  slackNotifications   Boolean  @default(false) @map("slack_notifications")
+  notificationEmail    String?  @map("notification_email") @db.VarChar(255)
+  slackWebhookUrl      String?  @map("slack_webhook_url")
+  autoRepublishEnabled Boolean  @default(false) @map("auto_republish_enabled")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("store_settings")
+}
+
+model ProductSettings {
+  id                  String   @id @default(uuid()) @db.Uuid
+  storeId             String   @map("store_id") @db.Uuid
+  productId           BigInt   @map("product_id")
+  customThreshold     Int?     @map("custom_threshold")
+  excludeFromAutoHide Boolean  @default(false) @map("exclude_from_auto_hide")
+  excludeFromAlerts   Boolean  @default(false) @map("exclude_from_alerts")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, productId])
+  @@index([storeId, productId])
+  @@map("product_settings")
+}
+
+model InventoryTracking {
+  id               String          @id @default(uuid()) @db.Uuid
+  storeId          String          @map("store_id") @db.Uuid
+  productId        BigInt          @map("product_id")
+  productTitle     String?         @map("product_title") @db.VarChar(500)
+  variantTitle     String?         @map("variant_title") @db.VarChar(500)
+  sku              String?         @db.VarChar(255)
+  currentQuantity  Int             @default(0) @map("current_quantity")
+  previousQuantity Int?            @map("previous_quantity")
+  lastCheckedAt    DateTime        @default(now()) @map("last_checked_at") @db.Timestamptz
+  lastAlertSentAt  DateTime?       @map("last_alert_sent_at") @db.Timestamptz
+  isHidden         Boolean         @default(false) @map("is_hidden")
+  inventoryStatus  InventoryStatus @default(in_stock) @map("inventory_status")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, productId])
+  @@index([storeId])
+  @@index([storeId, productId])
+  @@index([storeId, currentQuantity])
+  @@index([storeId, isHidden])
+  @@index([lastCheckedAt])
+  @@index([storeId, lastAlertSentAt])
+  @@index([storeId, inventoryStatus])
+  @@map("inventory_tracking")
+}
+
+model AlertHistory {
+  id                 String     @id @default(uuid()) @db.Uuid
+  storeId            String     @map("store_id") @db.Uuid
+  productId          BigInt?    @map("product_id")
+  productTitle       String?    @map("product_title") @db.VarChar(500)
+  alertType          AlertType? @map("alert_type")
+  quantityAtAlert    Int?       @map("quantity_at_alert")
+  thresholdTriggered Int?       @map("threshold_triggered")
+  sentToEmail        String?    @map("sent_to_email") @db.VarChar(255)
+  sentToSlack        Boolean    @default(false) @map("sent_to_slack")
+  sentAt             DateTime   @default(now()) @map("sent_at") @db.Timestamptz
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([sentAt(sort: Desc)])
+  @@index([storeId, sentAt(sort: Desc)])
+  @@map("alert_history")
+}
+
+model SetupProgress {
+  id                          String   @id @default(uuid()) @db.Uuid
+  storeId                     String   @unique @map("store_id") @db.Uuid
+  appInstalled                Boolean  @default(true) @map("app_installed")
+  globalSettingsConfigured    Boolean  @default(false) @map("global_settings_configured")
+  notificationsConfigured     Boolean  @default(false) @map("notifications_configured")
+  productThresholdsConfigured Boolean  @default(false) @map("product_thresholds_configured")
+  firstProductTracked         Boolean  @default(false) @map("first_product_tracked")
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("setup_progress")
+}
+
+model Webhook {
+  id        String   @id @default(uuid()) @db.Uuid
+  storeId   String   @map("store_id") @db.Uuid
+  webhookId BigInt   @map("webhook_id")
+  topic     String   @db.VarChar(100)
+  address   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, topic])
+  @@index([storeId])
+  @@index([topic])
+  @@map("webhooks")
+}
+
+model AuthNonce {
+  id        String   @id @default(uuid()) @db.Uuid
+  nonce     String   @unique @db.VarChar(255)
+  shop      String   @db.VarChar(255)
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt DateTime @default(dbgenerated("(NOW() + INTERVAL '10 minutes')")) @map("expires_at") @db.Timestamptz
+
+  @@index([nonce])
+  @@index([expiresAt])
+  @@map("auth_nonces")
+}
+
+model WebhookEvent {
+  id           String    @id @default(uuid()) @db.Uuid
+  storeId      String    @map("store_id") @db.Uuid
+  topic        String    @db.VarChar(100)
+  payload      Json?
+  processed    Boolean   @default(false)
+  processedAt  DateTime? @map("processed_at") @db.Timestamptz
+  errorMessage String?   @map("error_message")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, processed])
+  @@index([topic])
+  @@index([createdAt(sort: Desc)])
+  @@map("webhook_events")
+}
+
+model InventoryItemMapping {
+  inventoryItemId BigInt   @id @map("inventory_item_id")
+  productId       BigInt   @map("product_id")
+  variantId       BigInt?  @map("variant_id")
+  storeId         String   @map("store_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, inventoryItemId])
+  @@index([storeId, productId])
+  @@map("inventory_item_mapping")
+}
