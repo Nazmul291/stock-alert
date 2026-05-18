@@ -6,7 +6,7 @@ import prisma from "../db.server";
 import { format } from "date-fns";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
   const [tracking, settings, setupProgress, recentAlerts] = await Promise.all([
@@ -17,14 +17,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const threshold = settings?.lowStockThreshold ?? 5;
+  const tracked = tracking.length;
   const stats = {
-    totalProducts: tracking.length,
+    totalProducts: tracked,
     outOfStock: tracking.filter((p) => p.currentQuantity === 0).length,
     lowStock: tracking.filter((p) => p.currentQuantity > 0 && p.currentQuantity <= threshold).length,
     inStock: tracking.filter((p) => p.currentQuantity > threshold).length,
     hidden: tracking.filter((p) => p.isHidden).length,
     deactivated: tracking.filter((p) => p.inventoryStatus === "deactivated").length,
+    notTracked: 0,
   };
+
+  try {
+    const res = await admin.graphql(`query { productsCount { count } }`);
+    const json: any = await res.json();
+    const shopifyTotal: number = json.data?.productsCount?.count ?? tracked;
+    stats.notTracked = Math.max(0, shopifyTotal - tracked);
+  } catch {
+    // Non-fatal — leave notTracked as 0
+  }
 
   const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
 
@@ -95,6 +106,7 @@ export default function Dashboard() {
             { label: "Out of Stock", value: stats.outOfStock, color: "#dc2626" },
             { label: "Hidden", value: stats.hidden, color: "#6b7280" },
             { label: "Deactivated", value: stats.deactivated, color: "#9ca3af" },
+            { label: "Not Tracked", value: stats.notTracked, color: "#7c3aed" },
           ].map((s) => (
             <div key={s.label} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, textAlign: "center" }}>
               <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>

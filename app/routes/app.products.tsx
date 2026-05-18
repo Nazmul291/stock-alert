@@ -4,17 +4,41 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getMaxProducts } from "../lib/plan-limits";
-import { format } from "date-fns";
 
 const PRODUCTS_GRAPHQL = `
+  query getProducts($first: Int!, $after: String, $query: String) {
+    products(first: $first, after: $after, query: $query) {
+      edges {
+        node {
+          id title status
+          featuredImage { url altText }
+          variants(first: 100) {
+            edges {
+              node {
+                sku inventoryQuantity
+                inventoryItem { tracked }
+              }
+            }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+const SYNC_PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String) {
     products(first: $first, after: $after) {
       edges {
         node {
-          id title handle status
+          id title status
           variants(first: 100) {
             edges {
-              node { id title sku inventoryQuantity }
+              node {
+                id title sku inventoryQuantity
+                inventoryItem { tracked }
+              }
             }
           }
         }
@@ -25,42 +49,130 @@ const PRODUCTS_GRAPHQL = `
 `;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
   const url = new URL(request.url);
   const search = url.searchParams.get("search") ?? "";
-  const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1"));
+  const after = url.searchParams.get("after") ?? null;
+  const filter = url.searchParams.get("filter") ?? "all";
   const pageSize = 50;
 
-  const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
-  const plan = storeSession?.plan ?? "basic";
-  const maxProducts = getMaxProducts(plan);
-
-  const settings = await prisma.storeSettings.findUnique({ where: { shop } });
-  const threshold = settings?.lowStockThreshold ?? 5;
-
-  const where = {
-    shop,
-    ...(search ? {
-      OR: [
-        { productTitle: { contains: search, mode: "insensitive" as const } },
-        { sku: { contains: search, mode: "insensitive" as const } },
-      ],
-    } : {}),
-  };
-
-  const [items, total] = await Promise.all([
-    prisma.inventoryTracking.findMany({
-      where,
-      orderBy: { productTitle: "asc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.inventoryTracking.count({ where }),
+  const [storeSession, settings] = await Promise.all([
+    prisma.session.findFirst({ where: { shop, isOnline: false } }),
+    prisma.storeSettings.findUnique({ where: { shop } }),
   ]);
 
-  const trackedCount = await prisma.inventoryTracking.count({ where: { shop } });
+  const plan = storeSession?.plan ?? "basic";
+  const maxProducts = getMaxProducts(plan);
+  const threshold = settings?.lowStockThreshold ?? 5;
+
+  // Fetch products from Shopify as the primary source
+  let shopifyEdges: any[] = [];
+  let pageInfo = { hasNextPage: false, endCursor: null as string | null };
+
+  try {
+    const shopifyQuery = search ? `title:*${search}*` : null;
+    const gqlResponse = await admin.graphql(PRODUCTS_GRAPHQL, {
+      variables: { first: pageSize, after, ...(shopifyQuery ? { query: shopifyQuery } : {}) },
+    });
+    const gqlJson: any = await gqlResponse.json();
+    const productsData = gqlJson.data?.products;
+    if (productsData) {
+      shopifyEdges = productsData.edges;
+      pageInfo = {
+        hasNextPage: productsData.pageInfo.hasNextPage,
+        endCursor: productsData.pageInfo.endCursor,
+      };
+    }
+  } catch {
+    // Fall back to DB-only view if Shopify API unavailable
+  }
+
+  // Cross-reference with InventoryTracking
+  const productIds = shopifyEdges.map((e: any) => BigInt(e.node.id.split("/").pop()));
+
+  const [trackingRecords, trackedCount] = await Promise.all([
+    productIds.length > 0
+      ? prisma.inventoryTracking.findMany({ where: { shop, productId: { in: productIds } } })
+      : Promise.resolve([]),
+    prisma.inventoryTracking.count({ where: { shop } }),
+  ]);
+
+  const trackingMap = new Map(trackingRecords.map((t) => [t.productId.toString(), t]));
+
+  const allProducts = shopifyEdges.map((e: any) => {
+    const p = e.node;
+    const productId = p.id.split("/").pop() as string;
+    const tracking = trackingMap.get(productId);
+
+    let totalQty = 0;
+    const skus: string[] = [];
+    let allVariantsUntracked = true;
+    for (const ve of p.variants.edges) {
+      const v = ve.node;
+      if (v.inventoryItem?.tracked !== false) allVariantsUntracked = false;
+      totalQty += v.inventoryQuantity ?? 0;
+      if (v.sku) skus.push(v.sku);
+    }
+
+    const imageUrl: string | null = p.featuredImage?.url ?? null;
+    const imageAlt: string = p.featuredImage?.altText ?? (p.title as string);
+
+    // Product whose inventory is not tracked by Shopify at all
+    if (allVariantsUntracked) {
+      return {
+        id: tracking?.id ?? productId,
+        productId,
+        productTitle: tracking?.productTitle ?? (p.title as string),
+        sku: tracking?.sku ?? (skus.join(", ") || null),
+        currentQuantity: 0,
+        inventoryStatus: "not_tracked" as string,
+        isHidden: false,
+        lastCheckedAt: null as string | null,
+        isTracked: false,
+        imageUrl,
+        imageAlt,
+      };
+    }
+
+    if (tracking) {
+      return {
+        id: tracking.id,
+        productId,
+        productTitle: tracking.productTitle ?? p.title,
+        sku: tracking.sku,
+        currentQuantity: tracking.currentQuantity,
+        inventoryStatus: tracking.inventoryStatus as string,
+        isHidden: tracking.isHidden,
+        lastCheckedAt: tracking.lastCheckedAt.toISOString(),
+        isTracked: true,
+        imageUrl,
+        imageAlt,
+      };
+    }
+
+    return {
+      id: productId,
+      productId,
+      productTitle: p.title as string,
+      sku: skus.join(", ") || null,
+      currentQuantity: totalQty,
+      inventoryStatus: "not_tracked" as string,
+      isHidden: false,
+      lastCheckedAt: null as string | null,
+      isTracked: false,
+      imageUrl,
+      imageAlt,
+    };
+  });
+
+  const products =
+    filter === "tracked"
+      ? allProducts.filter((p) => p.isTracked)
+      : filter === "not_tracked"
+      ? allProducts.filter((p) => !p.isTracked)
+      : allProducts;
 
   return {
     shop,
@@ -68,23 +180,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     maxProducts,
     trackedCount,
     threshold,
-    products: items.map((p) => ({
-      id: p.id,
-      productId: p.productId.toString(),
-      productTitle: p.productTitle,
-      sku: p.sku,
-      currentQuantity: p.currentQuantity,
-      inventoryStatus: p.inventoryStatus,
-      isHidden: p.isHidden,
-      lastCheckedAt: p.lastCheckedAt.toISOString(),
-    })),
-    pagination: {
-      page,
-      pageSize,
-      total,
-      totalPages: Math.ceil(total / pageSize),
-    },
+    products,
+    pageInfo,
     search,
+    filter,
+    after,
   };
 };
 
@@ -102,7 +202,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const settings = await prisma.storeSettings.findUnique({ where: { shop } });
     const threshold = settings?.lowStockThreshold ?? 5;
 
-    // Fetch all products from Shopify with pagination
     let allProducts: any[] = [];
     let cursor: string | null = null;
     let hasNextPage = true;
@@ -110,7 +209,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       while (hasNextPage && allProducts.length < maxProducts) {
         const batchSize = Math.min(250, maxProducts - allProducts.length);
-        const gqlResponse = await admin.graphql(PRODUCTS_GRAPHQL, {
+        const gqlResponse = await admin.graphql(SYNC_PRODUCTS_GRAPHQL, {
           variables: { first: batchSize, after: cursor },
         });
         const gqlJson: any = await gqlResponse.json();
@@ -122,15 +221,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           const productId = p.id.split("/").pop();
           let totalQty = 0;
           const skus: string[] = [];
+          let allUntracked = true;
 
           for (const ve of p.variants.edges) {
             const v = ve.node;
+            if (v.inventoryItem?.tracked !== false) allUntracked = false;
             totalQty += v.inventoryQuantity ?? 0;
             if (v.sku) skus.push(v.sku);
           }
 
+          // Skip products Shopify doesn't track inventory for
+          if (allUntracked) continue;
+
           const status: "in_stock" | "low_stock" | "out_of_stock" =
-            totalQty === 0 ? "out_of_stock" : totalQty <= threshold ? "low_stock" : "in_stock";
+            totalQty <= 0 ? "out_of_stock" : totalQty <= threshold ? "low_stock" : "in_stock";
 
           allProducts.push({ productId: BigInt(productId), productTitle: p.title, sku: skus.join(", ") || null, currentQuantity: totalQty, inventoryStatus: status });
         }
@@ -150,7 +254,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
-    // Update setup progress
     await prisma.setupProgress.upsert({
       where: { shop },
       update: { firstProductTracked: true, productThresholdsConfigured: true },
@@ -158,14 +261,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     return { success: true, message: `Synced ${allProducts.length} products.` };
-  }
-
-  if (intent === "reset") {
-    await prisma.$transaction([
-      prisma.inventoryTracking.deleteMany({ where: { shop } }),
-      prisma.alertHistory.deleteMany({ where: { shop } }),
-    ]);
-    return { success: true, message: "All product data has been reset." };
   }
 
   return { error: "Unknown action." };
@@ -176,15 +271,32 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   low_stock: { bg: "#fef3c7", color: "#92400e", label: "Low Stock" },
   out_of_stock: { bg: "#fee2e2", color: "#991b1b", label: "Out of Stock" },
   deactivated: { bg: "#f3f4f6", color: "#374151", label: "Deactivated" },
+  not_tracked: { bg: "#ede9fe", color: "#5b21b6", label: "Not Tracked" },
 };
 
+const FILTER_TABS = [
+  { key: "all", label: "All Products" },
+  { key: "tracked", label: "Tracked" },
+  { key: "not_tracked", label: "Not Tracked" },
+];
+
 export default function ProductsPage() {
-  const { plan, maxProducts, trackedCount, products, pagination, search } = useLoaderData<typeof loader>();
+  const { plan, maxProducts, trackedCount, products, pageInfo, search, filter, after } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
   const submit = useSubmit();
   const busy = nav.state === "submitting";
-  const intent = nav.formData?.get("intent");
+  const intent = nav.formData?.get("intent") as string | null;
+
+  const buildUrl = (params: Record<string, string | null>) => {
+    const p = new URLSearchParams();
+    if (search) p.set("search", search);
+    if (filter !== "all") p.set("filter", filter);
+    Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); else p.delete(k); });
+    const qs = p.toString();
+    return `/app/products${qs ? `?${qs}` : ""}`;
+  };
 
   return (
     <s-page heading="Products" sub-heading={`${trackedCount} of ${maxProducts} products tracked · ${plan === "pro" ? "Professional" : "Basic"} plan`}>
@@ -210,50 +322,104 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Search */}
       <s-section heading="">
+        {/* Search */}
         <Form method="get" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input name="search" defaultValue={search} placeholder="Search by title or SKU…"
+          <input type="hidden" name="filter" value={filter} />
+          <input
+            name="search"
+            defaultValue={search}
+            placeholder="Search by title…"
             style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            aria-label="Search products" />
+            aria-label="Search products"
+          />
           <button type="submit" style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontSize: 14 }}>
             Search
           </button>
-          {search && <a href="/app/products" style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", textDecoration: "none", fontSize: 14, color: "#374151", lineHeight: "1.5" }}>Clear</a>}
+          {search && (
+            <a href={`/app/products${filter !== "all" ? `?filter=${filter}` : ""}`}
+              style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", textDecoration: "none", fontSize: 14, color: "#374151", lineHeight: "1.5" }}>
+              Clear
+            </a>
+          )}
         </Form>
+
+        {/* Filter tabs */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e5e7eb", paddingBottom: 0 }}>
+          {FILTER_TABS.map((tab) => (
+            <a
+              key={tab.key}
+              href={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null })}
+              style={{
+                padding: "6px 14px",
+                fontSize: 13,
+                fontWeight: filter === tab.key || (tab.key === "all" && !filter) ? 600 : 400,
+                color: filter === tab.key || (tab.key === "all" && !filter) ? "#111827" : "#6b7280",
+                borderBottom: filter === tab.key || (tab.key === "all" && !filter) ? "2px solid #111827" : "2px solid transparent",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {tab.label}
+            </a>
+          ))}
+        </div>
 
         {products.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>
             <p style={{ fontSize: 16, marginBottom: 8 }}>No products found.</p>
-            <p style={{ fontSize: 14 }}>Click <strong>Sync Products</strong> to import your Shopify inventory.</p>
+            <p style={{ fontSize: 14 }}>
+              {filter === "not_tracked"
+                ? "All products have been synced and are tracked."
+                : "Click Sync Products to import your Shopify inventory."}
+            </p>
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
-                  {["Product", "SKU", "Quantity", "Status", "Visibility", "Last Checked"].map((h) => (
+                  {["Product", "SKU", "Quantity", "Status", "Visibility"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {products.map((p) => {
-                  const s = STATUS_STYLE[p.inventoryStatus ?? "in_stock"] ?? STATUS_STYLE.in_stock;
+                  const s = STATUS_STYLE[p.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
+                  const isNotTracked = p.inventoryStatus === "not_tracked";
                   return (
-                    <tr key={p.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <td style={{ padding: "10px 12px", fontWeight: 500 }}>
-                        <a href={`https://${p.productId}`} style={{ color: "#1d4ed8", textDecoration: "none" }}>{p.productTitle ?? "—"}</a>
+                    <tr key={p.id} style={{ borderBottom: "1px solid #f3f4f6", opacity: isNotTracked ? 0.8 : 1 }}>
+                      <td style={{ padding: "10px 12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          {p.imageUrl ? (
+                            <img
+                              src={p.imageUrl}
+                              alt={p.imageAlt}
+                              width={40}
+                              height={40}
+                              style={{ borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }}
+                            />
+                          ) : (
+                            <div style={{ width: 40, height: 40, borderRadius: 6, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 18 }}>
+                              ▢
+                            </div>
+                          )}
+                          <span style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
+                        </div>
                       </td>
                       <td style={{ padding: "10px 12px", color: "#6b7280" }}>{p.sku ?? "—"}</td>
-                      <td style={{ padding: "10px 12px", fontWeight: 600, color: p.currentQuantity === 0 ? "#dc2626" : p.currentQuantity <= 5 ? "#d97706" : "#059669" }}>
-                        {p.currentQuantity}
+                      <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.currentQuantity <= 0 ? "#dc2626" : p.currentQuantity <= 5 ? "#d97706" : "#059669" }}>
+                        {isNotTracked ? "—" : p.currentQuantity}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500 }}>{s.label}</span>
+                        <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500 }}>
+                          {s.label}
+                        </span>
                       </td>
-                      <td style={{ padding: "10px 12px", color: "#6b7280" }}>{p.isHidden ? "Hidden" : "Visible"}</td>
-                      <td style={{ padding: "10px 12px", color: "#9ca3af", fontSize: 12 }}>{format(new Date(p.lastCheckedAt), "MMM d, h:mm a")}</td>
+                      <td style={{ padding: "10px 12px", color: "#6b7280" }}>
+                        {isNotTracked ? "—" : p.isHidden ? "Hidden" : "Visible"}
+                      </td>
                     </tr>
                   );
                 })}
@@ -263,29 +429,27 @@ export default function ProductsPage() {
         )}
 
         {/* Pagination */}
-        {pagination.totalPages > 1 && (
-          <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16, alignItems: "center" }}>
-            {pagination.page > 1 && (
-              <a href={`/app/products?page=${pagination.page - 1}&search=${search}`} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>← Prev</a>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
+          <span style={{ fontSize: 13, color: "#6b7280" }}>
+            {after ? "Showing next page" : "Showing first page"}
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            {after && (
+              <a href={buildUrl({ after: null })}
+                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
+                ← First Page
+              </a>
             )}
-            <span style={{ fontSize: 13, color: "#6b7280" }}>Page {pagination.page} of {pagination.totalPages} ({pagination.total} products)</span>
-            {pagination.page < pagination.totalPages && (
-              <a href={`/app/products?page=${pagination.page + 1}&search=${search}`} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>Next →</a>
+            {pageInfo.hasNextPage && pageInfo.endCursor && (
+              <a href={buildUrl({ after: pageInfo.endCursor })}
+                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
+                Next →
+              </a>
             )}
           </div>
-        )}
+        </div>
       </s-section>
 
-      {/* Danger zone */}
-      <s-section heading="Data Management" slot="aside">
-        <s-paragraph>Reset all synced product data. This cannot be undone.</s-paragraph>
-        <Form method="post" onSubmit={(e) => { if (!confirm("Reset all product data? This cannot be undone.")) e.preventDefault(); }}>
-          <input type="hidden" name="intent" value="reset" />
-          <button type="submit" disabled={busy} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fee2e2", color: "#991b1b", cursor: "pointer", fontSize: 13, width: "100%" }}>
-            {busy && intent === "reset" ? "Resetting…" : "Reset Product Data"}
-          </button>
-        </Form>
-      </s-section>
     </s-page>
   );
 }
