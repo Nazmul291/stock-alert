@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useFetcher } from "react-router";
+import { useFetcher, useNavigate } from "react-router";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -42,6 +42,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function BillingConfirmPage() {
   const fetcher = useFetcher<typeof action>();
+  const navigate = useNavigate();
 
   // Auto-submit on mount to verify the subscription
   useEffect(() => {
@@ -54,12 +55,12 @@ export default function BillingConfirmPage() {
   useEffect(() => {
     if (fetcher.data?.status === "success") {
       const timer = setTimeout(() => {
-        window.location.href = "/app";
+        navigate("/app");
       }, 2000);
       return () => clearTimeout(timer);
     }
     if (fetcher.data?.status === "declined") {
-      window.location.href = "/app/billing?declined=1";
+      navigate("/app/billing?declined=1");
     }
   }, [fetcher.data]);
 
