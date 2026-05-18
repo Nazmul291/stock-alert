@@ -26,7 +26,7 @@ model Session {
   emailVerified Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
-  plan          Plan      @default(free)
+  plan          Plan      @default(basic)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -39,7 +39,7 @@ model Session {
 }
 
 enum Plan {
-  free
+  basic
   pro
   enterprise
 }

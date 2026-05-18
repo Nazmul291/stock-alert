@@ -34,7 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const pageSize = 50;
 
   const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
-  const plan = storeSession?.plan ?? "free";
+  const plan = storeSession?.plan ?? "basic";
   const maxProducts = getMaxProducts(plan);
 
   const settings = await prisma.storeSettings.findUnique({ where: { shop } });
@@ -96,7 +96,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "sync") {
     const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
-    const plan = storeSession?.plan ?? "free";
+    const plan = storeSession?.plan ?? "basic";
     const maxProducts = getMaxProducts(plan);
 
     const settings = await prisma.storeSettings.findUnique({ where: { shop } });
@@ -187,7 +187,7 @@ export default function ProductsPage() {
   const intent = nav.formData?.get("intent");
 
   return (
-    <s-page heading="Products" sub-heading={`${trackedCount} of ${maxProducts} products tracked · ${plan === "pro" ? "Professional" : "Free"} plan`}>
+    <s-page heading="Products" sub-heading={`${trackedCount} of ${maxProducts} products tracked · ${plan === "pro" ? "Professional" : "Basic"} plan`}>
       <s-button slot="primary-action" onClick={() => submit({ intent: "sync" }, { method: "post" })} loading={busy && intent === "sync" ? true : undefined}>
         Sync Products
       </s-button>
@@ -205,7 +205,7 @@ export default function ProductsPage() {
 
       {plan !== "pro" && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
-          Free plan: monitoring up to {maxProducts} products.{" "}
+          Basic plan: monitoring up to {maxProducts} products.{" "}
           <a href="/app/billing" style={{ color: "#1d4ed8", fontWeight: 600 }}>Upgrade to Pro →</a>
         </div>
       )}

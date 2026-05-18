@@ -27,7 +27,7 @@ export async function canAddProduct(shop: string): Promise<{ canAdd: boolean; re
   const session = await prisma.session.findFirst({ where: { shop, isOnline: false } });
   if (!session) return { canAdd: false, reason: 'Store not found' };
 
-  const maxProducts = getMaxProducts(session.plan ?? 'free');
+  const maxProducts = getMaxProducts(session.plan ?? 'basic');
   const activeCount = await prisma.inventoryTracking.count({
     where: { shop, inventoryStatus: { not: 'deactivated' } },
   });

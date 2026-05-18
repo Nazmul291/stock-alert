@@ -37,7 +37,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     shop,
-    plan: storeSession?.plan ?? "free",
+    plan: storeSession?.plan ?? "basic",
     stats,
     setupProgress,
     progressPct,
@@ -139,7 +139,7 @@ export default function Dashboard() {
         <s-paragraph>
           <strong>Plan:</strong>{" "}
           <span style={{ background: plan === "pro" ? "#d1fae5" : "#dbeafe", color: plan === "pro" ? "#065f46" : "#1e40af", padding: "1px 8px", borderRadius: 12, fontSize: 12 }}>
-            {plan === "pro" ? "Professional" : "Free"}
+            {plan === "pro" ? "Professional" : "Basic"}
           </span>
         </s-paragraph>
         {notificationEmail && <s-paragraph><strong>Alert Email:</strong> {notificationEmail}</s-paragraph>}

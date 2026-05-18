@@ -15,7 +15,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     shop,
-    plan: storeSession?.plan ?? "free",
+    plan: storeSession?.plan ?? "basic",
     settings: settings
       ? {
           autoHideEnabled: settings.autoHideEnabled,

@@ -116,7 +116,7 @@ async function processInventoryUpdate(shop: string, inventoryItemId: string, dat
     });
   }
 
-  const storeCtx = { shop, plan: storeSession?.plan ?? "free", email: storeSession?.email ?? null };
+  const storeCtx = { shop, plan: storeSession?.plan ?? "basic", email: storeSession?.email ?? null };
   const settingsCtx = {
     emailNotifications: settings.emailNotifications,
     slackNotifications: settings.slackNotifications,
