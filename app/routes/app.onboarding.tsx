@@ -48,7 +48,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await billing.request({
       plan,
       isTest: process.env.TEST_PAYMENT === "true",
-      returnUrl: `https://${session.shop}/admin/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`,
+      returnUrl: `https://admin.shopify.com/store/${session.shop.replace(".myshopify.com", "")}/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`,
     });
   }
 

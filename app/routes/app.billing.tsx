@@ -37,7 +37,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { billing, session } = await authenticate.admin(request);
   const form = await request.formData();
   const targetPlan = form.get("plan") as string;
-  const returnUrl = `https://${session.shop}/admin/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`;
+  const storeSlug = session.shop.replace(".myshopify.com", "");
+  const returnUrl = `https://admin.shopify.com/store/${storeSlug}/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`;
 
   if (targetPlan === "basic") {
     await billing.request({
