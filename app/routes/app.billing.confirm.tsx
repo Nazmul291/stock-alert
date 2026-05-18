@@ -26,7 +26,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       : null;
 
     if (!activePlan) {
-      return { status: "declined" };
+      return { status: "declined", message: "No active subscription found. The payment may have been declined." };
     }
 
     await prisma.session.updateMany({
@@ -35,8 +35,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     return { status: "success", plan: activePlan };
-  } catch {
-    return { status: "error" };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[BillingConfirm] billing.check failed:", message);
+    return { status: "error", message };
   }
 };
 
@@ -54,22 +56,17 @@ export default function BillingConfirmPage() {
   // Redirect on success
   useEffect(() => {
     if (fetcher.data?.status === "success") {
-      const timer = setTimeout(() => {
-        navigate("/app");
-      }, 2000);
+      const timer = setTimeout(() => navigate("/app"), 2000);
       return () => clearTimeout(timer);
     }
-    if (fetcher.data?.status === "declined") {
-      navigate("/app/billing?declined=1");
-    }
-  }, [fetcher.data]);
+  }, [fetcher.data, navigate]);
 
-  const isSuccess = fetcher.data?.status === "success";
+  const status = fetcher.data?.status;
   const isLoading = !fetcher.data || fetcher.state !== "idle";
 
   return (
     <div style={{ minHeight: "100vh", background: "#f6f6f7", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center", padding: 40 }}>
+      <div style={{ textAlign: "center", padding: 40, maxWidth: 420 }}>
         {isLoading && (
           <>
             <div style={{
@@ -83,7 +80,7 @@ export default function BillingConfirmPage() {
           </>
         )}
 
-        {isSuccess && (
+        {status === "success" && (
           <>
             <div style={{
               width: 56, height: 56, borderRadius: "50%", background: "#008060",
@@ -94,6 +91,39 @@ export default function BillingConfirmPage() {
             </div>
             <p style={{ fontSize: 18, fontWeight: 700, color: "#111827", margin: "0 0 6px" }}>You're all set!</p>
             <p style={{ fontSize: 14, color: "#6b7280", margin: 0 }}>Redirecting you to the dashboard…</p>
+          </>
+        )}
+
+        {(status === "declined" || status === "error") && (
+          <>
+            <div style={{
+              width: 56, height: 56, borderRadius: "50%", background: "#fee2e2",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 20px", fontSize: 28, color: "#dc2626",
+            }}>
+              ✕
+            </div>
+            <p style={{ fontSize: 18, fontWeight: 700, color: "#111827", margin: "0 0 8px" }}>
+              {status === "declined" ? "Payment not confirmed" : "Something went wrong"}
+            </p>
+            <p style={{ fontSize: 14, color: "#6b7280", margin: "0 0 6px" }}>
+              {fetcher.data?.message ?? "We couldn't verify your subscription."}
+            </p>
+            {status === "error" && (
+              <p style={{ fontSize: 12, color: "#9ca3af", margin: "0 0 20px", fontFamily: "monospace", background: "#f3f4f6", padding: "8px 12px", borderRadius: 6, textAlign: "left" }}>
+                {fetcher.data?.message}
+              </p>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
+              <button onClick={() => fetcher.submit({}, { method: "post" })}
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: "#008060", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                Try again
+              </button>
+              <button onClick={() => navigate("/app/billing")}
+                style={{ padding: "8px 18px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontSize: 14 }}>
+                Back to billing
+              </button>
+            </div>
           </>
         )}
       </div>
