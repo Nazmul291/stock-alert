@@ -1,14 +1,29 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, useLoaderData, useRouteError } from "react-router";
+import { Outlet, redirect, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
-
-import { authenticate } from "../shopify.server";
+import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { billing } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const pathname = url.pathname;
 
-  // eslint-disable-next-line no-undef
+  const isPublicRoute = pathname.startsWith("/app/billing") || pathname.startsWith("/app/onboarding");
+
+  if (!isPublicRoute) {
+    try {
+      const { hasActivePayment } = await billing.check({
+        plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
+        isTest: process.env.TEST_PAYMENT === "true",
+      });
+      if (!hasActivePayment) throw redirect("/app/onboarding");
+    } catch (err) {
+      if (err instanceof Response) throw err;
+      // Billing check failed — allow access rather than lock merchant out
+    }
+  }
+
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
@@ -28,11 +43,8 @@ export default function App() {
   );
 }
 
-// Shopify needs React Router to catch some thrown responses, so that their headers are included in the response.
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }
 
-export const headers: HeadersFunction = (headersArgs) => {
-  return boundary.headers(headersArgs);
-};
+export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
