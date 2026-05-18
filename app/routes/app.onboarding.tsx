@@ -34,7 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing } = await authenticate.admin(request);
+  const { billing, session } = await authenticate.admin(request);
   const form = await request.formData();
   const intent = form.get("intent") as string;
 
@@ -48,7 +48,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await billing.request({
       plan,
       isTest: process.env.TEST_PAYMENT === "true",
-      returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing/confirm`,
+      returnUrl: `https://${session.shop}/admin/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`,
     });
   }
 

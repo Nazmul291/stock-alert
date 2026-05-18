@@ -34,15 +34,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing } = await authenticate.admin(request);
+  const { billing, session } = await authenticate.admin(request);
   const form = await request.formData();
   const targetPlan = form.get("plan") as string;
+  const returnUrl = `https://${session.shop}/admin/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`;
 
   if (targetPlan === "basic") {
     await billing.request({
       plan: BILLING_PLAN_BASIC,
       isTest: process.env.TEST_PAYMENT === "true",
-      returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing/confirm`,
+      returnUrl,
     });
   }
 
@@ -50,7 +51,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await billing.request({
       plan: BILLING_PLAN_PRO,
       isTest: process.env.TEST_PAYMENT === "true",
-      returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing/confirm`,
+      returnUrl,
     });
   }
 
