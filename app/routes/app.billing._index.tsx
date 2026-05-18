@@ -40,23 +40,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const storeSlug = session.shop.replace(".myshopify.com", "");
   const returnUrl = `https://admin.shopify.com/store/${storeSlug}/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`;
 
-  if (targetPlan === "basic") {
-    await billing.request({
-      plan: BILLING_PLAN_BASIC,
-      isTest: process.env.TEST_PAYMENT === "true",
-      returnUrl,
-    });
+  if (targetPlan !== "basic" && targetPlan !== "pro") {
+    return { error: "Invalid plan selected." };
   }
 
-  if (targetPlan === "pro") {
-    await billing.request({
-      plan: BILLING_PLAN_PRO,
-      isTest: process.env.TEST_PAYMENT === "true",
-      returnUrl,
-    });
+  const plan = targetPlan === "pro" ? BILLING_PLAN_PRO : BILLING_PLAN_BASIC;
+
+  try {
+    await billing.request({ plan, isTest: process.env.TEST_PAYMENT === "true", returnUrl });
+  } catch (err) {
+    // billing.request throws a Response redirect on success — let it through
+    if (err instanceof Response) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[Billing] billing.request failed:", message);
+    return { error: `Could not connect to Shopify billing. Please check your internet connection and try again.\n\nDetails: ${message}` };
   }
 
-  return { error: "Invalid plan." };
+  return { error: "Billing redirect did not occur." };
 };
 
 const BASIC_FEATURES = [
@@ -88,8 +88,9 @@ export default function BillingPage() {
       <s-button slot="primary-action" href="/app">Back to Dashboard</s-button>
 
       {actionData && "error" in actionData && (
-        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 16, color: "#991b1b" }}>
-          {actionData.error}
+        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "12px 16px", marginBottom: 16, color: "#991b1b" }}>
+          <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Billing error</p>
+          <p style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{actionData.error}</p>
         </div>
       )}
 
