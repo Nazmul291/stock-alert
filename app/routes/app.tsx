@@ -61,7 +61,42 @@ export default function App() {
 }
 
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  const error = useRouteError();
+  const isNetworkError =
+    error instanceof Error &&
+    (error.message.includes("fetch failed") ||
+      error.message.includes("no response available") ||
+      error.message.includes("NetworkError") ||
+      error.message.includes("Failed to fetch") ||
+      error.message.includes("ECONNREFUSED") ||
+      error.message.includes("ENOTFOUND"));
+  if (isNetworkError) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 32, background: "#f9fafb" }}>
+        <div style={{ maxWidth: 480, width: "100%", background: "#fff", borderRadius: 12, boxShadow: "0 4px 24px rgba(0,0,0,0.08)", padding: "40px 32px", textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h2 style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700, color: "#111827" }}>Connection Error</h2>
+          <p style={{ margin: "0 0 24px", fontSize: 14, color: "#6b7280" }}>
+            Unable to reach Shopify. This is usually a temporary network issue.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#008060", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+          >
+            Retry
+          </button>
+          <details style={{ marginTop: 20, textAlign: "left" }}>
+            <summary style={{ fontSize: 12, color: "#9ca3af", cursor: "pointer" }}>Error details</summary>
+            <pre style={{ fontSize: 11, color: "#6b7280", marginTop: 8, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+              {error.message}
+            </pre>
+          </details>
+        </div>
+      </div>
+    );
+  }
+  return boundary.error(error);
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

@@ -107,10 +107,12 @@ export default function Dashboard() {
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
   const { revalidate } = useRevalidator();
   const [syncPct, setSyncPct] = useState<number | null>(null);
+  const [syncStreamError, setSyncStreamError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   const openSseStream = () => {
     if (esRef.current) return;
+    setSyncStreamError(null);
     const es = new EventSource(`/api/sync-stream?shop=${encodeURIComponent(shop)}`);
     esRef.current = es;
     es.onmessage = (e) => {
@@ -121,11 +123,18 @@ export default function Dashboard() {
         es.close(); esRef.current = null;
         setTimeout(() => { setSyncPct(null); revalidate(); }, 1000);
       }
-      if (data.type === "idle" || data.type === "error" || data.type === "auth_error") {
+      if (data.type === "idle") {
+        es.close(); esRef.current = null; setSyncPct(null);
+      }
+      if (data.type === "error" || data.type === "auth_error") {
+        setSyncStreamError(data.message ?? "Sync failed — network error.");
         es.close(); esRef.current = null; setSyncPct(null);
       }
     };
-    es.onerror = () => { es.close(); esRef.current = null; setSyncPct(null); };
+    es.onerror = () => {
+      setSyncStreamError("Sync connection lost. Please retry.");
+      es.close(); esRef.current = null; setSyncPct(null);
+    };
   };
 
   useEffect(() => {
@@ -138,7 +147,8 @@ export default function Dashboard() {
 
   useEffect(() => () => { esRef.current?.close(); }, []);
 
-  const syncError = syncPct === null && syncFetcher.state === "idle" && syncFetcher.data?.error;
+  const syncActionError = syncPct === null && syncFetcher.state === "idle" ? (syncFetcher.data?.error ?? null) : null;
+  const syncError = syncStreamError ?? syncActionError;
 
   return (
     <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
@@ -240,7 +250,19 @@ export default function Dashboard() {
             onClick={() => { if (syncPct === null && syncFetcher.state === "idle") syncFetcher.submit({ intent: "sync" }, { method: "post", action: "/app/products" }); }}
           />
           {syncError && (
-            <p style={{ fontSize: 12, color: "#dc2626", margin: 0 }}>{syncError}</p>
+            <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 12px" }}>
+              <p style={{ fontSize: 12, color: "#991b1b", margin: "0 0 8px" }}>{syncError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSyncStreamError(null);
+                  if (syncFetcher.state === "idle") syncFetcher.submit({ intent: "sync" }, { method: "post", action: "/app/products" });
+                }}
+                style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fff", color: "#991b1b", cursor: "pointer", fontWeight: 600 }}
+              >
+                Retry
+              </button>
+            </div>
           )}
           <s-button href="/app/settings">Configure Settings</s-button>
           {plan !== "pro" && <s-button href="/app/billing">Upgrade to Pro</s-button>}

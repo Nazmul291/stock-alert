@@ -636,10 +636,12 @@ export default function ProductsPage() {
   const { revalidate } = useRevalidator();
 
   const [syncPct, setSyncPct] = useState<number | null>(null);
+  const [syncStreamError, setSyncStreamError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   const openSseStream = () => {
-    if (esRef.current) return; // already open
+    if (esRef.current) return;
+    setSyncStreamError(null);
     const es = new EventSource(`/api/sync-stream?shop=${encodeURIComponent(shop)}`);
     esRef.current = es;
     es.onmessage = (e) => {
@@ -651,13 +653,24 @@ export default function ProductsPage() {
         esRef.current = null;
         setTimeout(() => { setSyncPct(null); revalidate(); }, 1000);
       }
-      if (data.type === "idle" || data.type === "error" || data.type === "auth_error") {
+      if (data.type === "idle") {
+        es.close();
+        esRef.current = null;
+        setSyncPct(null);
+      }
+      if (data.type === "error" || data.type === "auth_error") {
+        setSyncStreamError(data.message ?? "Sync failed — network error.");
         es.close();
         esRef.current = null;
         setSyncPct(null);
       }
     };
-    es.onerror = () => { es.close(); esRef.current = null; setSyncPct(null); };
+    es.onerror = () => {
+      setSyncStreamError("Sync connection lost. Please retry.");
+      es.close();
+      esRef.current = null;
+      setSyncPct(null);
+    };
   };
 
   // Open SSE when action returns "started"
@@ -755,7 +768,7 @@ export default function ProductsPage() {
       <SyncButton
         slot="primary-action"
         pct={syncPct}
-        onClick={() => { if (syncPct === null && !busy) submit({ intent: "sync" }, { method: "post" }); }}
+        onClick={() => { if (syncPct === null && !busy) { setSyncStreamError(null); submit({ intent: "sync" }, { method: "post" }); } }}
       />
 
       {actionData && "error" in actionData && (
@@ -766,6 +779,21 @@ export default function ProductsPage() {
       {actionData && "message" in actionData && (
         <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#065f46" }}>
           {actionData.message}
+        </div>
+      )}
+      {syncStreamError && (
+        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ color: "#991b1b", fontSize: 13 }}>{syncStreamError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setSyncStreamError(null);
+              if (syncPct === null && !busy) submit({ intent: "sync" }, { method: "post" });
+            }}
+            style={{ flexShrink: 0, padding: "5px 14px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fff", color: "#991b1b", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+          >
+            Retry
+          </button>
         </div>
       )}
 
