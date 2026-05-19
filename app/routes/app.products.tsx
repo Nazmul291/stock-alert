@@ -51,6 +51,15 @@ const SYNC_PRODUCTS_GRAPHQL = `
   }
 `;
 
+const INVENTORY_ITEM_UPDATE_MUTATION = `
+  mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
+    inventoryItemUpdate(id: $id, input: $input) {
+      inventoryItem { id tracked }
+      userErrors { field message }
+    }
+  }
+`;
+
 const PRODUCT_UPDATE_MUTATION = `
   mutation productUpdate($input: ProductInput!) {
     productUpdate(input: $input) {
@@ -144,6 +153,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           locations,
         };
       });
+
       return { inventoryData: { variants } };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -366,6 +376,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const shopifyStatus = form.get("shopifyStatus") as string;
     const tracked = form.get("tracked") === "true";
     const productTitle = form.get("productTitle") as string;
+    const shopifyInventoryItemId = (form.get("shopifyInventoryItemId") as string) || null;
 
     // Parse inventory updates: [{ inventoryItemId, locationId, quantity }]
     let inventoryUpdates: Array<{ inventoryItemId: string; locationId: string; quantity: number }> = [];
@@ -376,7 +387,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const errors: string[] = [];
 
-    // 1. Update Shopify product status
+    // 1. If enabling tracking, first enable Shopify-side inventory tracking on the item
+    if (tracked && shopifyInventoryItemId) {
+      try {
+        const res = await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
+          variables: { id: shopifyInventoryItemId, input: { tracked: true } },
+        });
+        const json: any = await res.json();
+        const errs = json.data?.inventoryItemUpdate?.userErrors ?? [];
+        if (errs.length > 0) errors.push(errs.map((e: any) => e.message).join(", "));
+      } catch (err) {
+        errors.push(`Inventory tracking enable failed: ${err instanceof Error ? err.message : "Unknown"}`);
+      }
+    }
+
+    // 2. Update Shopify product status
     try {
       const res = await admin.graphql(PRODUCT_UPDATE_MUTATION, {
         variables: { input: { id: `gid://shopify/Product/${productId}`, status: shopifyStatus } },
@@ -437,6 +462,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (errors.length > 0) return { error: errors.join(" | "), updatedProductId: productId };
     return { success: true, message: "Product updated successfully.", updatedProductId: productId };
+  }
+
+  if (intent === "enable_and_fetch_inventory") {
+    const productId = form.get("productId") as string;
+    try {
+      // Step 1: fetch inventory to get inventoryItemIds
+      const invRes = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
+        variables: { id: `gid://shopify/Product/${productId}` },
+      });
+      const invJson: any = await invRes.json();
+      const edges = invJson.data?.product?.variants?.edges ?? [];
+
+      // Step 2: enable Shopify tracking on every untracked variant
+      for (const edge of edges) {
+        const itemId = edge.node.inventoryItem?.id;
+        if (itemId && !edge.node.inventoryItem.tracked) {
+          await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
+            variables: { id: itemId, input: { tracked: true } },
+          });
+        }
+      }
+
+      // Step 3: return inventory data (mark all as tracked now)
+      const variants: VariantInventory[] = edges.map((e: any) => {
+        const v = e.node;
+        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le: any) => {
+          const available = (le.node.quantities ?? []).find((q: any) => q.name === "available");
+          return { locationId: le.node.location.id, locationName: le.node.location.name, quantity: available?.quantity ?? 0 };
+        });
+        return { id: v.id, title: v.title, sku: v.sku || null, inventoryItemId: v.inventoryItem?.id ?? null, tracked: true, locations };
+      });
+
+      return { enabledInventory: { variants } };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Unknown error" };
+    }
   }
 
   if (intent === "sync") {
@@ -528,7 +589,7 @@ function InventorySection({
     );
   }
 
-  const trackedVariants = variants.filter((v) => v.tracked && v.inventoryItemId);
+  const trackedVariants = variants.filter((v) => v.inventoryItemId);
 
   if (trackedVariants.length === 0) {
     return (
@@ -686,6 +747,8 @@ export default function ProductsPage() {
 
   useEffect(() => () => { esRef.current?.close(); }, []);
 
+  const enableTrackingFetcher = useFetcher<{ status?: string; error?: string }>();
+
   const [editProduct, setEditProduct] = useState<ProductRow | null>(null);
   const [editStatus, setEditStatus] = useState("");
   const [editTracked, setEditTracked] = useState(false);
@@ -700,29 +763,23 @@ export default function ProductsPage() {
     }
   }, [saveFetcher.state, saveFetcher.data]);
 
-  // Load inventory only when tracking is enabled and Shopify manages this product
-  useEffect(() => {
-    if (!editProduct) { prevEditProductId.current = null; return; }
-    if (!editTracked || (editProduct.inventoryItemId === null && !editProduct.isTracked)) return;
-    if (editProduct.productId === prevEditProductId.current) return;
-    prevEditProductId.current = editProduct.productId;
-    inventoryFetcher.load(`/app/products?intent=get_product_inventory&productId=${editProduct.productId}`);
-    setExpandedVariants(new Set());
-    setInventoryEdits({});
-  }, [editProduct?.productId, editTracked]);
+  // Initialise edits when inventory data arrives (from either enable or plain fetch)
+  const latestInventoryVariants =
+    enableTrackingFetcher.data && "enabledInventory" in enableTrackingFetcher.data
+      ? (enableTrackingFetcher.data as any).enabledInventory.variants
+      : inventoryFetcher.data?.inventoryData?.variants ?? [];
 
-  // Initialise edits with current quantities once inventory data arrives
   useEffect(() => {
-    if (!inventoryFetcher.data?.inventoryData) return;
+    if (!latestInventoryVariants.length) return;
     const initial: Record<string, string> = {};
-    for (const v of inventoryFetcher.data.inventoryData.variants) {
-      if (!v.tracked || !v.inventoryItemId) continue;
+    for (const v of latestInventoryVariants) {
+      if (!v.inventoryItemId) continue;
       for (const loc of v.locations) {
         initial[`${v.inventoryItemId}__${loc.locationId}`] = String(loc.quantity);
       }
     }
     setInventoryEdits(initial);
-  }, [inventoryFetcher.data]);
+  }, [latestInventoryVariants]);
 
   const openEdit = (p: ProductRow) => {
     setEditProduct(p);
@@ -748,7 +805,7 @@ export default function ProductsPage() {
   };
 
   const saving = saveFetcher.state === "submitting";
-  const loadingInventory = inventoryFetcher.state === "loading";
+  const loadingInventory = enableTrackingFetcher.state === "submitting";
 
   // Build inventory updates array for form submission
   const inventoryUpdates = Object.entries(inventoryEdits)
@@ -761,7 +818,7 @@ export default function ProductsPage() {
     })
     .filter(Boolean) as Array<{ inventoryItemId: string; locationId: string; quantity: number }>;
 
-  const inventoryVariants = inventoryFetcher.data?.inventoryData?.variants ?? [];
+  const inventoryVariants = latestInventoryVariants;
 
   return (
     <s-page heading="Products" sub-heading={`${trackedCount} of ${maxProducts} products tracked · ${plan === "pro" ? "Professional" : "Basic"} plan`}>
@@ -975,6 +1032,7 @@ export default function ProductsPage() {
                 <input type="hidden" name="productId" value={editProduct.productId} />
                 <input type="hidden" name="productTitle" value={editProduct.productTitle ?? ""} />
                 <input type="hidden" name="inventoryUpdates" value={JSON.stringify(inventoryUpdates)} />
+                <input type="hidden" name="shopifyInventoryItemId" value={inventoryVariants[0]?.inventoryItemId ?? ""} />
 
                 {/* Shopify status */}
                 <div style={{ marginBottom: 20 }}>
@@ -1001,39 +1059,45 @@ export default function ProductsPage() {
                   <input type="hidden" name="shopifyStatus" value={editStatus} />
                 </div>
 
-                {/* Track inventory toggle — hidden if Shopify doesn't manage this product */}
-                {editProduct.inventoryItemId !== null || editProduct.isTracked && (
-                  <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                      <div>
-                        <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Track inventory in Stock Alert</p>
-                        <p style={{ margin: "2px 0 0", fontSize: 12, color: editTracked ? "#059669" : "#9ca3af" }}>
-                          {editTracked ? "Monitoring active — alerts will fire for this product." : "Not monitored — no alerts will be sent."}
-                        </p>
-                      </div>
-                      <div
-                        onClick={() => setEditTracked(!editTracked)}
-                        style={{
-                          width: 44, height: 24, borderRadius: 12, background: editTracked ? "#008060" : "#d1d5db",
-                          position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer",
-                        }}
-                      >
-                        <div style={{
-                          position: "absolute", top: 2, left: editTracked ? 22 : 2,
-                          width: 20, height: 20, borderRadius: "50%", background: "#fff",
-                          transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                        }} />
-                      </div>
-                    </label>
-                    <input type="hidden" name="tracked" value={String(editTracked)} />
-                  </div>
-                )}
-                {editProduct.inventoryStatus === "not_tracked" && (
-                  <input type="hidden" name="tracked" value="false" />
-                )}
+                {/* Track inventory toggle — always visible */}
+                <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Track inventory in Stock Alert</p>
+                      <p style={{ margin: "2px 0 0", fontSize: 12, color: editTracked ? "#059669" : "#9ca3af" }}>
+                        {editTracked ? "Monitoring active — alerts will fire for this product." : "Not monitored — no alerts will be sent."}
+                      </p>
+                    </div>
+                    <div
+                      onClick={() => {
+                        const next = !editTracked;
+                        setEditTracked(next);
+                        if (next && editProduct) {
+                          setExpandedVariants(new Set());
+                          setInventoryEdits({});
+                          enableTrackingFetcher.submit(
+                            { intent: "enable_and_fetch_inventory", productId: editProduct.productId },
+                            { method: "post" }
+                          );
+                        }
+                      }}
+                      style={{
+                        width: 44, height: 24, borderRadius: 12, background: editTracked ? "#008060" : "#d1d5db",
+                        position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer",
+                      }}
+                    >
+                      <div style={{
+                        position: "absolute", top: 2, left: editTracked ? 22 : 2,
+                        width: 20, height: 20, borderRadius: "50%", background: "#fff",
+                        transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                      }} />
+                    </div>
+                  </label>
+                  <input type="hidden" name="tracked" value={String(editTracked)} />
+                </div>
 
                 {/* Inventory section — only shown when tracking is enabled */}
-                {editTracked && editProduct.inventoryItemId !== null || editProduct.isTracked && (
+                {editTracked && (
                   <div style={{ marginBottom: 20 }}>
                     <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 8 }}>
                       Inventory
@@ -1047,7 +1111,7 @@ export default function ProductsPage() {
                       onEdit={(key, val) => setInventoryEdits((prev) => ({ ...prev, [key]: val }))}
                       onToggleExpand={toggleVariant}
                     />
-                    {!loadingInventory && inventoryVariants.some((v) => v.tracked) && (
+                    {!loadingInventory && inventoryVariants.some((v: VariantInventory) => v.tracked) && (
                       <p style={{ margin: "6px 0 0", fontSize: 12, color: "#9ca3af" }}>
                         Updates available quantity at each Shopify location.
                       </p>
