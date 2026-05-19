@@ -703,7 +703,7 @@ export default function ProductsPage() {
   // Load inventory only when tracking is enabled and Shopify manages this product
   useEffect(() => {
     if (!editProduct) { prevEditProductId.current = null; return; }
-    if (!editTracked || editProduct.inventoryStatus === "not_tracked") return;
+    if (!editTracked || (editProduct.inventoryItemId === null && !editProduct.isTracked)) return;
     if (editProduct.productId === prevEditProductId.current) return;
     prevEditProductId.current = editProduct.productId;
     inventoryFetcher.load(`/app/products?intent=get_product_inventory&productId=${editProduct.productId}`);
@@ -1002,7 +1002,7 @@ export default function ProductsPage() {
                 </div>
 
                 {/* Track inventory toggle — hidden if Shopify doesn't manage this product */}
-                {editProduct.inventoryStatus !== "not_tracked" && (
+                {editProduct.inventoryItemId !== null || editProduct.isTracked && (
                   <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
                     <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
                       <div>
@@ -1033,7 +1033,7 @@ export default function ProductsPage() {
                 )}
 
                 {/* Inventory section — only shown when tracking is enabled */}
-                {editTracked && editProduct.inventoryStatus !== "not_tracked" && (
+                {editTracked && editProduct.inventoryItemId !== null || editProduct.isTracked && (
                   <div style={{ marginBottom: 20 }}>
                     <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 8 }}>
                       Inventory
