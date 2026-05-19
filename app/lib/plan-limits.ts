@@ -6,13 +6,14 @@ export const PLAN_LIMITS = {
     features: [
       'Auto-hide sold out products',
       'Email notifications',
+      'Slack notifications',
       'Global threshold settings',
       'Basic inventory tracking',
       'Up to 1,000 products',
       '30-day free trial',
     ],
     restrictions: {
-      slackNotifications: false,
+      slackNotifications: true,
       perProductThresholds: false,
       autoRepublish: false,
       advancedRules: false,

@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useActionData, Form, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -96,20 +97,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
 
 export default function SettingsPage() {
-  const { shop, plan, settings } = useLoaderData<typeof loader>();
+  const { plan, settings } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
   const saving = nav.state === "submitting";
+  const [emailEnabled, setEmailEnabled] = useState(settings.emailNotifications);
+  const [slackEnabled, setSlackEnabled] = useState(settings.slackNotifications);
+  const [isDirty, setIsDirty] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (actionData?.success) setIsDirty(false);
+  }, [actionData]);
 
   return (
     <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
+      <s-button
+        slot="primary-action"
+        disabled={!isDirty || saving}
+        onClick={() => formRef.current?.requestSubmit()}
+      >
+        {saving ? "Saving…" : "Save Settings"}
+      </s-button>
+
       {actionData?.success && (
         <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "10px 14px", marginBottom: 16, color: "#065f46" }}>
           {actionData.message}
         </div>
       )}
 
-      <Form method="post">
+      <Form method="post" ref={formRef} onChange={() => setIsDirty(true)}>
         <s-section heading="Inventory Settings">
           {plan !== "pro" && (
             <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
@@ -146,14 +163,15 @@ export default function SettingsPage() {
           </div>
         </s-section>
 
-        <s-section heading="Notifications">
+        <div style={{ marginTop: 24 }}><s-section heading="Notifications">
           <ToggleField
             label="Email notifications"
             name="emailNotifications"
-            checked={settings.emailNotifications}
+            checked={emailEnabled}
+            onChange={setEmailEnabled}
           />
 
-          {settings.emailNotifications && (
+          {emailEnabled && (
             <div style={{ marginTop: 8 }}>
               <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Notification email</label>
               <input type="email" name="notificationEmail" defaultValue={settings.notificationEmail} placeholder="alerts@example.com"
@@ -165,38 +183,52 @@ export default function SettingsPage() {
           <ToggleField
             label="Slack notifications"
             name="slackNotifications"
-            checked={settings.slackNotifications}
-            helpText={plan !== "pro" ? "Requires Professional plan." : undefined}
+            checked={slackEnabled}
+            onChange={setSlackEnabled}
           />
 
-          {settings.slackNotifications && (
+          {slackEnabled && (
             <div style={{ marginTop: 8 }}>
-              {plan !== "pro" && (
-                <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", fontSize: 13, color: "#92400e", marginBottom: 8 }}>
-                  Slack notifications require the Professional plan.
-                </div>
-              )}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
+                <p style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 10 }}>How to create a Slack webhook</p>
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: "1.8" }}>
+                  <li>
+                    Go to{" "}
+                    <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>api.slack.com/apps</a>
+                    {" "}and click <strong>Create New App</strong> → <strong>From scratch</strong>.
+                  </li>
+                  <li>
+                    Name your app (e.g. <em>Stock Alert</em>), select your workspace, then click <strong>Create App</strong>.
+                  </li>
+                  <li>
+                    Under <strong>Add features and functionality</strong>, click <strong>Incoming Webhooks</strong>.
+                  </li>
+                  <li>
+                    Toggle <strong>Activate Incoming Webhooks</strong> to <strong>On</strong>.
+                  </li>
+                  <li>
+                    Scroll down and click <strong>Add New Webhook to Workspace</strong>, then choose the channel to post alerts to.
+                  </li>
+                  <li>
+                    Click <strong>Allow</strong> — Slack will generate a webhook URL starting with{" "}
+                    <code style={{ background: "#e5e7eb", borderRadius: 3, padding: "1px 4px", fontSize: 12 }}>https://hooks.slack.com/services/…</code>
+                  </li>
+                  <li>Copy that URL and paste it into the field below.</li>
+                </ol>
+              </div>
+
               <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Slack webhook URL</label>
               <input type="url" name="slackWebhookUrl" defaultValue={settings.slackWebhookUrl} placeholder="https://hooks.slack.com/services/..."
-                disabled={plan !== "pro"}
-                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14, opacity: plan !== "pro" ? 0.5 : 1 }} />
+                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }} />
               <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                Create a Slack webhook at{" "}
-                <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>api.slack.com/messaging/webhooks</a>
+                Paste the webhook URL generated from your Slack app.
               </p>
             </div>
           )}
-        </s-section>
-
-        <s-section heading="">
-          <button type="submit" disabled={saving} style={{ padding: "8px 20px", borderRadius: 6, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
-            {saving ? "Saving…" : "Save Settings"}
-          </button>
-        </s-section>
+        </s-section></div>
       </Form>
 
-      {/* Danger zone */}
-      <s-section heading="Danger Zone">
+      <div style={{ marginTop: 24 }}><s-section heading="Danger Zone">
         <s-paragraph>
           Reset all synced product data, settings, and alert history for this store. This cannot be undone.
         </s-paragraph>
@@ -206,17 +238,20 @@ export default function SettingsPage() {
             {saving ? "Resetting…" : "Reset All Product Data"}
           </button>
         </Form>
-      </s-section>
+      </s-section></div>
     </s-page>
   );
 }
 
-function ToggleField({ label, name, checked, disabled, helpText }: { label: string; name: string; checked: boolean; disabled?: boolean; helpText?: string }) {
+function ToggleField({ label, name, checked, disabled, helpText, onChange }: { label: string; name: string; checked: boolean; disabled?: boolean; helpText?: string; onChange?: (val: boolean) => void }) {
   return (
     <div style={{ marginBottom: 12 }}>
       <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}>
         <input type="hidden" name={name} value="false" />
-        <input type="checkbox" name={name} value="true" defaultChecked={checked} disabled={disabled}
+        <input type="checkbox" name={name} value="true" disabled={disabled}
+          {...(onChange
+            ? { checked, onChange: (e) => onChange(e.target.checked) }
+            : { defaultChecked: checked })}
           style={{ width: 16, height: 16 }} />
         <span style={{ fontWeight: 600, fontSize: 14 }}>{label}</span>
       </label>

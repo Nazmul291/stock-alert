@@ -93,7 +93,7 @@ export async function sendLowStockAlert(
     }
   }
 
-  if (settings.slackNotifications && store.plan === 'pro' && settings.slackWebhookUrl) {
+  if (settings.slackNotifications && settings.slackWebhookUrl) {
     try {
       const webhook = new IncomingWebhook(settings.slackWebhookUrl);
       await webhook.send({
@@ -156,7 +156,7 @@ export async function sendOutOfStockAlert(
     }
   }
 
-  if (settings.slackNotifications && store.plan === 'pro' && settings.slackWebhookUrl) {
+  if (settings.slackNotifications && settings.slackWebhookUrl) {
     try {
       const webhook = new IncomingWebhook(settings.slackWebhookUrl);
       await webhook.send({
@@ -220,7 +220,7 @@ export async function sendRestockAlert(
     }
   }
 
-  if (settings.slackNotifications && store.plan === 'pro' && settings.slackWebhookUrl) {
+  if (settings.slackNotifications && settings.slackWebhookUrl) {
     try {
       const webhook = new IncomingWebhook(settings.slackWebhookUrl);
       await webhook.send({
