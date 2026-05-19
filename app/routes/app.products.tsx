@@ -811,7 +811,7 @@ export default function ProductsPage() {
   };
 
   const saving = saveFetcher.state === "submitting";
-  const loadingInventory = enableTrackingFetcher.state === "submitting";
+  const loadingInventory = enableTrackingFetcher.state === "submitting" || inventoryFetcher.state === "loading";
 
   // Build inventory updates array for form submission
   const inventoryUpdates = Object.entries(inventoryEdits)
