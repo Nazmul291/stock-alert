@@ -700,15 +700,16 @@ export default function ProductsPage() {
     }
   }, [saveFetcher.state, saveFetcher.data]);
 
-  // Load inventory when a different product modal opens
+  // Load inventory only when tracking is enabled and Shopify manages this product
   useEffect(() => {
     if (!editProduct) { prevEditProductId.current = null; return; }
+    if (!editTracked || editProduct.inventoryStatus === "not_tracked") return;
     if (editProduct.productId === prevEditProductId.current) return;
     prevEditProductId.current = editProduct.productId;
     inventoryFetcher.load(`/app/products?intent=get_product_inventory&productId=${editProduct.productId}`);
     setExpandedVariants(new Set());
     setInventoryEdits({});
-  }, [editProduct?.productId]);
+  }, [editProduct?.productId, editTracked]);
 
   // Initialise edits with current quantities once inventory data arrives
   useEffect(() => {
@@ -761,7 +762,6 @@ export default function ProductsPage() {
     .filter(Boolean) as Array<{ inventoryItemId: string; locationId: string; quantity: number }>;
 
   const inventoryVariants = inventoryFetcher.data?.inventoryData?.variants ?? [];
-  const shopifyTracked = inventoryVariants.some((v) => v.tracked);
 
   return (
     <s-page heading="Products" sub-heading={`${trackedCount} of ${maxProducts} products tracked · ${plan === "pro" ? "Professional" : "Basic"} plan`}>
@@ -1001,30 +1001,9 @@ export default function ProductsPage() {
                   <input type="hidden" name="shopifyStatus" value={editStatus} />
                 </div>
 
-                {/* Inventory section */}
-                <div style={{ marginBottom: 20 }}>
-                  <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 8 }}>
-                    Inventory
-                  </label>
-                  <InventorySection
-                    variants={inventoryVariants}
-                    loading={loadingInventory}
-                    error={inventoryFetcher.data?.inventoryError}
-                    edits={inventoryEdits}
-                    expanded={expandedVariants}
-                    onEdit={(key, val) => setInventoryEdits((prev) => ({ ...prev, [key]: val }))}
-                    onToggleExpand={toggleVariant}
-                  />
-                  {!loadingInventory && inventoryVariants.some((v) => v.tracked) && (
-                    <p style={{ margin: "6px 0 0", fontSize: 12, color: "#9ca3af" }}>
-                      Updates available quantity at each Shopify location.
-                    </p>
-                  )}
-                </div>
-
                 {/* Track inventory toggle — hidden if Shopify doesn't manage this product */}
-                {(shopifyTracked || editProduct.isTracked) && (
-                  <div style={{ marginBottom: 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                {editProduct.inventoryStatus !== "not_tracked" && (
+                  <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
                     <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
                       <div>
                         <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Track inventory in Stock Alert</p>
@@ -1049,8 +1028,31 @@ export default function ProductsPage() {
                     <input type="hidden" name="tracked" value={String(editTracked)} />
                   </div>
                 )}
-                {!shopifyTracked && !editProduct.isTracked && (
+                {editProduct.inventoryStatus === "not_tracked" && (
                   <input type="hidden" name="tracked" value="false" />
+                )}
+
+                {/* Inventory section — only shown when tracking is enabled */}
+                {editTracked && editProduct.inventoryStatus !== "not_tracked" && (
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 8 }}>
+                      Inventory
+                    </label>
+                    <InventorySection
+                      variants={inventoryVariants}
+                      loading={loadingInventory}
+                      error={inventoryFetcher.data?.inventoryError}
+                      edits={inventoryEdits}
+                      expanded={expandedVariants}
+                      onEdit={(key, val) => setInventoryEdits((prev) => ({ ...prev, [key]: val }))}
+                      onToggleExpand={toggleVariant}
+                    />
+                    {!loadingInventory && inventoryVariants.some((v) => v.tracked) && (
+                      <p style={{ margin: "6px 0 0", fontSize: 12, color: "#9ca3af" }}>
+                        Updates available quantity at each Shopify location.
+                      </p>
+                    )}
+                  </div>
                 )}
 
                 {/* Footer buttons */}
