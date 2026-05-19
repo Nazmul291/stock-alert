@@ -1085,6 +1085,7 @@ export default function ProductsPage() {
                       onClick={() => {
                         const next = !editTracked;
                         setEditTracked(next);
+                        if (!next) setEditMonitoring(false);
                         if (next && editProduct) {
                           setExpandedVariants(new Set());
                           setInventoryEdits({});
@@ -1109,30 +1110,30 @@ export default function ProductsPage() {
                   <input type="hidden" name="tracked" value={String(editTracked)} />
                 </div>
 
-                {/* Monitoring toggle */}
-                <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                {/* Monitoring toggle — only active when Shopify Tracking is on */}
+                <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb", opacity: editTracked ? 1 : 0.45 }}>
+                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: editTracked ? "pointer" : "not-allowed" }}>
                     <div>
                       <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Monitoring</p>
-                      <p style={{ margin: "2px 0 0", fontSize: 12, color: editMonitoring ? "#059669" : "#9ca3af" }}>
-                        {editMonitoring ? "Active — Stock Alert will send alerts for this product." : "Inactive — no alerts will be sent."}
+                      <p style={{ margin: "2px 0 0", fontSize: 12, color: editMonitoring && editTracked ? "#059669" : "#9ca3af" }}>
+                        {!editTracked ? "Enable Shopify Tracking first." : editMonitoring ? "Active — Stock Alert will send alerts for this product." : "Inactive — no alerts will be sent."}
                       </p>
                     </div>
                     <div
-                      onClick={() => setEditMonitoring(!editMonitoring)}
+                      onClick={() => { if (editTracked) setEditMonitoring(!editMonitoring); }}
                       style={{
-                        width: 44, height: 24, borderRadius: 12, background: editMonitoring ? "#008060" : "#d1d5db",
-                        position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer",
+                        width: 44, height: 24, borderRadius: 12, background: editMonitoring && editTracked ? "#008060" : "#d1d5db",
+                        position: "relative", flexShrink: 0, transition: "background .2s", cursor: editTracked ? "pointer" : "not-allowed",
                       }}
                     >
                       <div style={{
-                        position: "absolute", top: 2, left: editMonitoring ? 22 : 2,
+                        position: "absolute", top: 2, left: editMonitoring && editTracked ? 22 : 2,
                         width: 20, height: 20, borderRadius: "50%", background: "#fff",
                         transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
                       }} />
                     </div>
                   </label>
-                  <input type="hidden" name="monitoringEnabled" value={String(editMonitoring)} />
+                  <input type="hidden" name="monitoringEnabled" value={String(editMonitoring && editTracked)} />
                 </div>
 
                 {/* Inventory section — only shown when tracking is enabled */}
