@@ -87,8 +87,9 @@ model InventoryTracking {
   previousQuantity Int?            @map("previous_quantity")
   lastCheckedAt    DateTime        @default(now()) @map("last_checked_at") @db.Timestamptz
   lastAlertSentAt  DateTime?       @map("last_alert_sent_at") @db.Timestamptz
-  isHidden         Boolean         @default(false) @map("is_hidden")
-  inventoryStatus  InventoryStatus @default(in_stock) @map("inventory_status")
+  isHidden           Boolean         @default(false) @map("is_hidden")
+  monitoringEnabled  Boolean         @default(true) @map("monitoring_enabled")
+  inventoryStatus    InventoryStatus @default(in_stock) @map("inventory_status")
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 

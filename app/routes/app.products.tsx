@@ -239,6 +239,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         inventoryStatus: "not_tracked" as string,
         isHidden: false,
         isTracked: false,
+        monitoringEnabled: false,
         imageUrl,
         imageAlt,
         shopifyStatus,
@@ -256,6 +257,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         inventoryStatus: tracking.inventoryStatus as string,
         isHidden: tracking.isHidden,
         isTracked: true,
+        monitoringEnabled: tracking.monitoringEnabled,
         imageUrl,
         imageAlt,
         shopifyStatus,
@@ -272,6 +274,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       inventoryStatus: "not_tracked" as string,
       isHidden: false,
       isTracked: false,
+      monitoringEnabled: false,
       imageUrl,
       imageAlt,
       shopifyStatus,
@@ -375,6 +378,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const productId = form.get("productId") as string;
     const shopifyStatus = form.get("shopifyStatus") as string;
     const tracked = form.get("tracked") === "true";
+    const monitoringEnabled = form.get("monitoringEnabled") === "true";
     const productTitle = form.get("productTitle") as string;
     const shopifyInventoryItemId = (form.get("shopifyInventoryItemId") as string) || null;
 
@@ -449,11 +453,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (existing) {
         await prisma.inventoryTracking.update({
           where: { id: existing.id },
-          data: { ...(inventoryUpdates.length > 0 ? { currentQuantity: qty, inventoryStatus: invStatus } : {}), lastCheckedAt: new Date() },
+          data: { ...(inventoryUpdates.length > 0 ? { currentQuantity: qty, inventoryStatus: invStatus } : {}), monitoringEnabled, lastCheckedAt: new Date() },
         });
       } else {
         await prisma.inventoryTracking.create({
-          data: { shop, productId: BigInt(productId), productTitle, currentQuantity: qty, previousQuantity: 0, inventoryStatus: invStatus },
+          data: { shop, productId: BigInt(productId), productTitle, currentQuantity: qty, previousQuantity: 0, inventoryStatus: invStatus, monitoringEnabled },
         });
       }
     } else if (existing) {
@@ -552,6 +556,7 @@ type ProductRow = {
   inventoryStatus: string;
   isHidden: boolean;
   isTracked: boolean;
+  monitoringEnabled: boolean;
   imageUrl: string | null;
   imageAlt: string;
   shopifyStatus: string;
@@ -751,6 +756,7 @@ export default function ProductsPage() {
   const [editProduct, setEditProduct] = useState<ProductRow | null>(null);
   const [editStatus, setEditStatus] = useState("");
   const [editTracked, setEditTracked] = useState(false);
+  const [editMonitoring, setEditMonitoring] = useState(false);
   const [expandedVariants, setExpandedVariants] = useState<Set<string>>(new Set());
   const [inventoryEdits, setInventoryEdits] = useState<Record<string, string>>({});
 
@@ -791,6 +797,7 @@ export default function ProductsPage() {
     setEditProduct(p);
     setEditStatus(p.shopifyStatus ?? "ACTIVE");
     setEditTracked(p.isTracked);
+    setEditMonitoring(p.monitoringEnabled);
   };
 
   const buildUrl = (params: Record<string, string | null>) => {
@@ -1065,13 +1072,13 @@ export default function ProductsPage() {
                   <input type="hidden" name="shopifyStatus" value={editStatus} />
                 </div>
 
-                {/* Track inventory toggle — always visible */}
-                <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                {/* Shopify Tracking toggle */}
+                <div style={{ marginBottom: 12, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
                   <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
                     <div>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Track inventory in Stock Alert</p>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Shopify Tracking</p>
                       <p style={{ margin: "2px 0 0", fontSize: 12, color: editTracked ? "#059669" : "#9ca3af" }}>
-                        {editTracked ? "Monitoring active — alerts will fire for this product." : "Not monitored — no alerts will be sent."}
+                        {editTracked ? "Shopify is tracking inventory for this product." : "Shopify is not tracking inventory."}
                       </p>
                     </div>
                     <div
@@ -1100,6 +1107,32 @@ export default function ProductsPage() {
                     </div>
                   </label>
                   <input type="hidden" name="tracked" value={String(editTracked)} />
+                </div>
+
+                {/* Monitoring toggle */}
+                <div style={{ marginBottom: editTracked ? 16 : 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Monitoring</p>
+                      <p style={{ margin: "2px 0 0", fontSize: 12, color: editMonitoring ? "#059669" : "#9ca3af" }}>
+                        {editMonitoring ? "Active — Stock Alert will send alerts for this product." : "Inactive — no alerts will be sent."}
+                      </p>
+                    </div>
+                    <div
+                      onClick={() => setEditMonitoring(!editMonitoring)}
+                      style={{
+                        width: 44, height: 24, borderRadius: 12, background: editMonitoring ? "#008060" : "#d1d5db",
+                        position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer",
+                      }}
+                    >
+                      <div style={{
+                        position: "absolute", top: 2, left: editMonitoring ? 22 : 2,
+                        width: 20, height: 20, borderRadius: "50%", background: "#fff",
+                        transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                      }} />
+                    </div>
+                  </label>
+                  <input type="hidden" name="monitoringEnabled" value={String(editMonitoring)} />
                 </div>
 
                 {/* Inventory section — only shown when tracking is enabled */}
