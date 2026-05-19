@@ -8,12 +8,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, session } = await authenticate.admin(request);
   const shop = session.shop;
 
+  let activePlan: "basic" | "pro" | null = null;
   try {
     const { appSubscriptions } = await billing.check({
       plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
       isTest: process.env.TEST_PAYMENT === "true",
     });
-    const activePlan = appSubscriptions.some((s: any) => s.name === BILLING_PLAN_PRO)
+    activePlan = appSubscriptions.some((s: any) => s.name === BILLING_PLAN_PRO)
       ? "pro"
       : appSubscriptions.some((s: any) => s.name === BILLING_PLAN_BASIC)
       ? "basic"
@@ -26,11 +27,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
   } catch {
-    // Non-fatal
+    // Non-fatal — activePlan stays null
   }
 
-  const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
-  return { shop, plan: storeSession?.plan ?? "basic" };
+  return { shop, activePlan };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -78,10 +78,11 @@ const PRO_FEATURES = [
 ];
 
 export default function BillingPage() {
-  const { plan } = useLoaderData<typeof loader>();
+  const { activePlan } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
   const loading = nav.state === "submitting";
+  const submittingPlan = loading ? (nav.formData?.get("plan") as string | null) : null;
 
   return (
     <s-page heading="Billing &amp; Plans" sub-heading="All plans include a 30-day free trial">
@@ -97,8 +98,8 @@ export default function BillingPage() {
       <s-section heading="Plans">
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
           {/* Basic plan */}
-          <div style={{ border: plan === "basic" ? "2px solid #3b82f6" : "1px solid #e5e7eb", borderRadius: 10, padding: 24, position: "relative" }}>
-            {plan === "basic" && (
+          <div style={{ border: activePlan === "basic" ? "2px solid #3b82f6" : "1px solid #e5e7eb", borderRadius: 10, padding: 24, position: "relative", display: "flex", flexDirection: "column" }}>
+            {activePlan === "basic" && (
               <span style={{ position: "absolute", top: 12, right: 12, background: "#dbeafe", color: "#1e40af", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12 }}>
                 Current Plan
               </span>
@@ -106,40 +107,40 @@ export default function BillingPage() {
             <h2 style={{ margin: "0 0 4px", fontSize: 20 }}>Basic</h2>
             <p style={{ fontSize: 28, fontWeight: 700, margin: "0 0 4px" }}>$3.99<span style={{ fontSize: 14, fontWeight: 400, color: "#6b7280" }}>/month</span></p>
             <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 16px" }}>30-day free trial</p>
-            <ul style={{ paddingLeft: 18, margin: "0 0 20px", lineHeight: 1.8 }}>
+            <ul style={{ paddingLeft: 18, margin: "0 0 20px", lineHeight: 1.8, flex: 1 }}>
               {BASIC_FEATURES.map((f) => <li key={f} style={{ fontSize: 14 }}>{f}</li>)}
             </ul>
-            {plan !== "basic" && (
+            {activePlan !== "basic" && (
               <Form method="post">
                 <input type="hidden" name="plan" value="basic" />
-                <button type="submit" disabled={loading} style={{ width: "100%", padding: "8px 16px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontSize: 14 }}>
-                  {loading ? "Processing…" : "Switch to Basic"}
+                <button type="submit" disabled={loading} style={{ width: "100%", padding: "8px 16px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: loading ? "not-allowed" : "pointer", fontSize: 14 }}>
+                  {submittingPlan === "basic" ? "Processing…" : activePlan === "pro" ? "Switch to Basic" : "Start free trial"}
                 </button>
               </Form>
             )}
           </div>
 
           {/* Pro plan */}
-          <div style={{ border: plan === "pro" ? "2px solid #059669" : "1px solid #e5e7eb", borderRadius: 10, padding: 24, position: "relative" }}>
-            {plan === "pro" && (
+          <div style={{ border: activePlan === "pro" ? "2px solid #059669" : "1px solid #e5e7eb", borderRadius: 10, padding: 24, position: "relative", display: "flex", flexDirection: "column" }}>
+            {activePlan === "pro" && (
               <span style={{ position: "absolute", top: 12, right: 12, background: "#d1fae5", color: "#065f46", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12 }}>
                 Current Plan
               </span>
             )}
-            <span style={{ position: "absolute", top: plan === "pro" ? 38 : 12, right: 12, background: "#fef3c7", color: "#92400e", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 12 }}>
+            <span style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: "#008060", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 12px", borderRadius: 12, whiteSpace: "nowrap" }}>
               Most Popular
             </span>
             <h2 style={{ margin: "0 0 4px", fontSize: 20 }}>Professional</h2>
             <p style={{ fontSize: 28, fontWeight: 700, margin: "0 0 4px" }}>$9.99<span style={{ fontSize: 14, fontWeight: 400, color: "#6b7280" }}>/month</span></p>
             <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 16px" }}>30-day free trial</p>
-            <ul style={{ paddingLeft: 18, margin: "0 0 20px", lineHeight: 1.8 }}>
+            <ul style={{ paddingLeft: 18, margin: "0 0 20px", lineHeight: 1.8, flex: 1 }}>
               {PRO_FEATURES.map((f) => <li key={f} style={{ fontSize: 14 }}>{f}</li>)}
             </ul>
-            {plan !== "pro" && (
+            {activePlan !== "pro" && (
               <Form method="post">
                 <input type="hidden" name="plan" value="pro" />
-                <button type="submit" disabled={loading} style={{ width: "100%", padding: "8px 16px", borderRadius: 6, border: "none", background: "#059669", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
-                  {loading ? "Processing…" : "Upgrade to Professional"}
+                <button type="submit" disabled={loading} style={{ width: "100%", padding: "8px 16px", borderRadius: 6, border: "none", background: "#059669", color: "#fff", cursor: loading ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 600 }}>
+                  {submittingPlan === "pro" ? "Processing…" : activePlan === "basic" ? "Upgrade to Professional" : "Start free trial"}
                 </button>
               </Form>
             )}

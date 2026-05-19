@@ -11,8 +11,8 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 
-export const BILLING_PLAN_BASIC = "Basic";
-export const BILLING_PLAN_PRO = "Professional";
+import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "./lib/billing-plans";
+export { BILLING_PLAN_BASIC, BILLING_PLAN_PRO };
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,

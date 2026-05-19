@@ -1,41 +1,78 @@
+import { useEffect, useRef, useState } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useFetcher, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { format } from "date-fns";
+import { syncState } from "../lib/sync-state.server";
+
+const PRODUCTS_TRACKING_QUERY = `
+  query ($first: Int!, $after: String) {
+    products(first: $first, after: $after) {
+      edges {
+        node {
+          legacyResourceId
+          variants(first: 100) {
+            edges { node { inventoryItem { tracked } } }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
   const [tracking, settings, setupProgress, recentAlerts] = await Promise.all([
-    prisma.inventoryTracking.findMany({ where: { shop }, select: { currentQuantity: true, isHidden: true, inventoryStatus: true } }),
+    prisma.inventoryTracking.findMany({ where: { shop }, select: { productId: true, currentQuantity: true, isHidden: true, inventoryStatus: true } }),
     prisma.storeSettings.findUnique({ where: { shop } }),
     prisma.setupProgress.findUnique({ where: { shop } }),
     prisma.alertHistory.findMany({ where: { shop }, orderBy: { sentAt: "desc" }, take: 10 }),
   ]);
 
   const threshold = settings?.lowStockThreshold ?? 5;
-  const tracked = tracking.length;
+
+  // Fetch Shopify products to identify which have Shopify inventory tracking disabled
+  const untrackedShopifyIds = new Set<string>();
+  let shopifyTotal = tracking.length;
+  try {
+    let after: string | null = null;
+    let more = true;
+    let count = 0;
+    while (more) {
+      const r = await admin.graphql(PRODUCTS_TRACKING_QUERY, { variables: { first: 250, after } });
+      const j: any = await r.json();
+      for (const { node } of j.data?.products?.edges ?? []) {
+        count++;
+        const variants: any[] = node.variants.edges;
+        if (variants.length > 0 && variants.every((v) => !v.node.inventoryItem?.tracked)) {
+          untrackedShopifyIds.add(node.legacyResourceId);
+        }
+      }
+      more = j.data?.products?.pageInfo?.hasNextPage ?? false;
+      after = j.data?.products?.pageInfo?.endCursor ?? null;
+    }
+    shopifyTotal = count;
+  } catch {
+    // Non-fatal — fall back to DB-only counts
+  }
+
+  // Exclude Shopify-untracked products from inventory status counts
+  const trackedRows = tracking.filter((t) => !untrackedShopifyIds.has(t.productId.toString()));
+
   const stats = {
-    totalProducts: tracked,
-    outOfStock: tracking.filter((p) => p.currentQuantity === 0).length,
-    lowStock: tracking.filter((p) => p.currentQuantity > 0 && p.currentQuantity <= threshold).length,
-    inStock: tracking.filter((p) => p.currentQuantity > threshold).length,
+    totalProducts: shopifyTotal,
+    outOfStock: trackedRows.filter((p) => p.currentQuantity <= 0).length,
+    lowStock: trackedRows.filter((p) => p.currentQuantity > 0 && p.currentQuantity <= threshold).length,
+    inStock: trackedRows.filter((p) => p.currentQuantity > threshold).length,
     hidden: tracking.filter((p) => p.isHidden).length,
     deactivated: tracking.filter((p) => p.inventoryStatus === "deactivated").length,
-    notTracked: 0,
+    notTracked: untrackedShopifyIds.size,
   };
-
-  try {
-    const res = await admin.graphql(`query { productsCount { count } }`);
-    const json: any = await res.json();
-    const shopifyTotal: number = json.data?.productsCount?.count ?? tracked;
-    stats.notTracked = Math.max(0, shopifyTotal - tracked);
-  } catch {
-    // Non-fatal — leave notTracked as 0
-  }
 
   const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
 
@@ -52,6 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     stats,
     setupProgress,
     progressPct,
+    syncRunning: syncState.get(shop)?.running ?? false,
     recentAlerts: recentAlerts.map((a) => ({
       id: a.id,
       productTitle: a.productTitle,
@@ -63,8 +101,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function Dashboard() {
-  const { shop, plan, stats, setupProgress, progressPct, recentAlerts, notificationEmail } =
+  const { shop, plan, stats, setupProgress, progressPct, syncRunning, recentAlerts, notificationEmail } =
     useLoaderData<typeof loader>();
+
+  const syncFetcher = useFetcher<{ status?: string; error?: string }>();
+  const { revalidate } = useRevalidator();
+  const [syncPct, setSyncPct] = useState<number | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+
+  const openSseStream = () => {
+    if (esRef.current) return;
+    const es = new EventSource(`/api/sync-stream?shop=${encodeURIComponent(shop)}`);
+    esRef.current = es;
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.type === "progress") setSyncPct(data.pct);
+      if (data.type === "done") {
+        setSyncPct(100);
+        es.close(); esRef.current = null;
+        setTimeout(() => { setSyncPct(null); revalidate(); }, 1000);
+      }
+      if (data.type === "idle" || data.type === "error" || data.type === "auth_error") {
+        es.close(); esRef.current = null; setSyncPct(null);
+      }
+    };
+    es.onerror = () => { es.close(); esRef.current = null; setSyncPct(null); };
+  };
+
+  useEffect(() => {
+    if (syncFetcher.data?.status === "started") openSseStream();
+  }, [syncFetcher.data]);
+
+  useEffect(() => {
+    if (syncRunning && !esRef.current) openSseStream();
+  }, [syncRunning]);
+
+  useEffect(() => () => { esRef.current?.close(); }, []);
+
+  const syncError = syncPct === null && syncFetcher.state === "idle" && syncFetcher.data?.error;
 
   return (
     <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
@@ -160,12 +234,34 @@ export default function Dashboard() {
       {/* Quick actions */}
       <s-section heading="Quick Actions" slot="aside">
         <s-stack direction="block" gap="base">
-          <s-button href="/app/products" variant="primary">Sync Products</s-button>
+          <DashboardSyncButton
+            pct={syncPct}
+            submitting={syncFetcher.state !== "idle"}
+            onClick={() => { if (syncPct === null && syncFetcher.state === "idle") syncFetcher.submit({ intent: "sync" }, { method: "post", action: "/app/products" }); }}
+          />
+          {syncError && (
+            <p style={{ fontSize: 12, color: "#dc2626", margin: 0 }}>{syncError}</p>
+          )}
           <s-button href="/app/settings">Configure Settings</s-button>
-          {plan !== "pro" && <s-button href="/app/billing" variant="primary">Upgrade to Pro</s-button>}
+          {plan !== "pro" && <s-button href="/app/billing">Upgrade to Pro</s-button>}
         </s-stack>
       </s-section>
     </s-page>
+  );
+}
+
+function DashboardSyncButton({ pct, submitting, onClick }: { pct: number | null; submitting: boolean; onClick: () => void }) {
+  const busy = submitting || pct !== null;
+  const displayPct = Math.round(pct ?? 0);
+  const label = pct !== null ? `Syncing ${displayPct}%` : submitting ? "Starting…" : "Sync Products";
+  return (
+    <s-button
+      variant="primary"
+      disabled={busy ? true : undefined}
+      onClick={!busy ? onClick : undefined}
+    >
+      {label}
+    </s-button>
   );
 }
 

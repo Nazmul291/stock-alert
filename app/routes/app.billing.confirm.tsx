@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useFetcher, useNavigate } from "react-router";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -130,3 +131,5 @@ export default function BillingConfirmPage() {
     </div>
   );
 }
+
+export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

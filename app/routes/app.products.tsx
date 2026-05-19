@@ -1,10 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, Form, useNavigation, useSubmit, useFetcher } from "react-router";
+import { useLoaderData, useActionData, Form, useNavigation, useSubmit, useFetcher, useRevalidator } from "react-router";
+import type { ReactNode } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getMaxProducts } from "../lib/plan-limits";
+import { syncState } from "../lib/sync-state.server";
 
 const PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String, $query: String) {
@@ -66,13 +68,90 @@ const INVENTORY_SET_MUTATION = `
   }
 `;
 
-const LOCATIONS_QUERY = `{ locations(first: 1) { edges { node { id } } } }`;
+const PRODUCT_INVENTORY_QUERY = `
+  query getProductInventory($id: ID!) {
+    product(id: $id) {
+      variants(first: 100) {
+        edges {
+          node {
+            id title sku
+            inventoryItem {
+              id tracked
+              inventoryLevels(first: 50) {
+                edges {
+                  node {
+                    location { id name }
+                    quantities(names: ["available"]) { name quantity }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+type LocationInventory = { locationId: string; locationName: string; quantity: number };
+type VariantInventory = {
+  id: string;
+  title: string;
+  sku: string | null;
+  inventoryItemId: string | null;
+  tracked: boolean;
+  locations: LocationInventory[];
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
-
   const url = new URL(request.url);
+
+  // Early return for per-product inventory fetch (used by edit modal)
+  if (url.searchParams.get("intent") === "get_product_inventory") {
+    const productId = url.searchParams.get("productId") as string;
+    try {
+      const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
+        variables: { id: `gid://shopify/Product/${productId}` },
+      });
+      const json: any = await res.json();
+
+      // Surface GraphQL-level errors to the frontend for debugging
+      if (json.errors?.length) {
+        const msg = json.errors.map((e: any) => e.message).join("; ");
+        console.error("[get_product_inventory] GraphQL errors:", msg);
+        return { inventoryData: null, inventoryError: `GraphQL error: ${msg}` };
+      }
+
+      const variants: VariantInventory[] = (json.data?.product?.variants?.edges ?? []).map((e: any) => {
+        const v = e.node;
+        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le: any) => {
+          const quantities: any[] = le.node.quantities ?? [];
+          const available = quantities.find((q: any) => q.name === "available");
+          return {
+            locationId: le.node.location.id,
+            locationName: le.node.location.name,
+            quantity: available?.quantity ?? 0,
+          };
+        });
+        return {
+          id: v.id,
+          title: v.title,
+          sku: v.sku || null,
+          inventoryItemId: v.inventoryItem?.id ?? null,
+          tracked: v.inventoryItem?.tracked ?? false,
+          locations,
+        };
+      });
+      return { inventoryData: { variants } };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[get_product_inventory] Exception:", msg);
+      return { inventoryData: null, inventoryError: `Error: ${msg}` };
+    }
+  }
+
   const search = url.searchParams.get("search") ?? "";
   const after = url.searchParams.get("after") ?? null;
   const filter = url.searchParams.get("filter") ?? "all";
@@ -138,7 +217,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const imageUrl: string | null = p.featuredImage?.url ?? null;
     const imageAlt: string = p.featuredImage?.altText ?? (p.title as string);
-    const shopifyStatus: string = p.status; // ACTIVE | DRAFT | ARCHIVED
+    const shopifyStatus: string = p.status;
 
     if (allVariantsUntracked) {
       return {
@@ -197,8 +276,84 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? allProducts.filter((p) => !p.isTracked)
       : allProducts;
 
-  return { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after };
+  return { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, syncRunning: syncState.get(shop)?.running ?? false };
 };
+
+async function runProductSync({ admin, shop, maxProducts, threshold }: {
+  admin: any; shop: string; maxProducts: number; threshold: number;
+}) {
+  let allProducts: any[] = [];
+  let cursor: string | null = null;
+  let hasNextPage = true;
+
+  try {
+    // Phase 1: Fetch products from Shopify (5% → 80%)
+    while (hasNextPage && allProducts.length < maxProducts) {
+      const batchSize = Math.min(250, maxProducts - allProducts.length);
+      const gqlResponse = await admin.graphql(SYNC_PRODUCTS_GRAPHQL, {
+        variables: { first: batchSize, after: cursor },
+      });
+      const gqlJson: any = await gqlResponse.json();
+      const page = gqlJson.data?.products;
+      if (!page) break;
+
+      for (const edge of page.edges) {
+        const p = edge.node;
+        const productId = p.id.split("/").pop();
+        let totalQty = 0;
+        const skus: string[] = [];
+        let allUntracked = true;
+
+        for (const ve of p.variants.edges) {
+          const v = ve.node;
+          if (v.inventoryItem?.tracked !== false) allUntracked = false;
+          totalQty += v.inventoryQuantity ?? 0;
+          if (v.sku) skus.push(v.sku);
+        }
+
+        if (allUntracked) continue;
+
+        const status: "in_stock" | "low_stock" | "out_of_stock" =
+          totalQty <= 0 ? "out_of_stock" : totalQty <= threshold ? "low_stock" : "in_stock";
+
+        allProducts.push({ productId: BigInt(productId), productTitle: p.title, sku: skus.join(", ") || null, currentQuantity: totalQty, inventoryStatus: status });
+      }
+
+      hasNextPage = page.pageInfo.hasNextPage;
+      cursor = page.pageInfo.endCursor;
+
+      // Report fetch progress: 5% base + up to 75% based on fetched vs maxProducts
+      const fetchPct = Math.min(80, 5 + Math.round((allProducts.length / maxProducts) * 75));
+      syncState.progress(shop, fetchPct);
+    }
+
+    // Phase 2: Write to database (80% → 98%)
+    syncState.progress(shop, 82);
+    for (let i = 0; i < allProducts.length; i++) {
+      const p = allProducts[i];
+      await prisma.inventoryTracking.upsert({
+        where: { shop_productId: { shop, productId: p.productId } },
+        update: { productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, lastCheckedAt: new Date() },
+        create: { shop, productId: p.productId, productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, previousQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus },
+      });
+      // Report DB write progress every 10 products
+      if (i % 10 === 0) {
+        const dbPct = 82 + Math.round((i / allProducts.length) * 16);
+        syncState.progress(shop, dbPct);
+      }
+    }
+
+    await prisma.setupProgress.upsert({
+      where: { shop },
+      update: { firstProductTracked: true, productThresholdsConfigured: true },
+      create: { shop, appInstalled: true, firstProductTracked: true, productThresholdsConfigured: true, globalSettingsConfigured: false, notificationsConfigured: false },
+    });
+
+    syncState.done(shop, allProducts.length);
+  } catch (err) {
+    syncState.fail(shop, err instanceof Error ? err.message : "Unknown error");
+  }
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -209,11 +364,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "update_product") {
     const productId = form.get("productId") as string;
     const shopifyStatus = form.get("shopifyStatus") as string;
-    const quantityRaw = form.get("quantity") as string;
-    const quantity = quantityRaw !== "" ? parseInt(quantityRaw) : null;
     const tracked = form.get("tracked") === "true";
-    const inventoryItemId = form.get("inventoryItemId") as string | null;
     const productTitle = form.get("productTitle") as string;
+
+    // Parse inventory updates: [{ inventoryItemId, locationId, quantity }]
+    let inventoryUpdates: Array<{ inventoryItemId: string; locationId: string; quantity: number }> = [];
+    try {
+      const raw = form.get("inventoryUpdates") as string;
+      if (raw) inventoryUpdates = JSON.parse(raw);
+    } catch { /* ignore parse errors */ }
+
     const errors: string[] = [];
 
     // 1. Update Shopify product status
@@ -228,27 +388,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       errors.push(`Status update failed: ${err instanceof Error ? err.message : "Unknown"}`);
     }
 
-    // 2. Update inventory quantity in Shopify
-    if (quantity !== null && inventoryItemId) {
+    // 2. Batch-update inventory quantities across all locations
+    if (inventoryUpdates.length > 0) {
       try {
-        const locRes = await admin.graphql(LOCATIONS_QUERY);
-        const locJson: any = await locRes.json();
-        const locationId: string | undefined = locJson.data?.locations?.edges?.[0]?.node?.id;
-        if (locationId) {
-          const invRes = await admin.graphql(INVENTORY_SET_MUTATION, {
-            variables: {
-              input: {
-                name: "available",
-                reason: "correction",
-                ignoreCompareQuantity: true,
-                quantities: [{ inventoryItemId, locationId, quantity }],
-              },
+        const invRes = await admin.graphql(INVENTORY_SET_MUTATION, {
+          variables: {
+            input: {
+              name: "available",
+              reason: "correction",
+              ignoreCompareQuantity: true,
+              quantities: inventoryUpdates,
             },
-          });
-          const invJson: any = await invRes.json();
-          const invErrs = invJson.data?.inventorySetQuantities?.userErrors ?? [];
-          if (invErrs.length > 0) errors.push(invErrs.map((e: any) => e.message).join(", "));
-        }
+          },
+        });
+        const invJson: any = await invRes.json();
+        const invErrs = invJson.data?.inventorySetQuantities?.userErrors ?? [];
+        if (invErrs.length > 0) errors.push(invErrs.map((e: any) => e.message).join(", "));
       } catch (err) {
         errors.push(`Quantity update failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -262,20 +417,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (tracked) {
-      const qty = quantity ?? existing?.currentQuantity ?? 0;
+      const totalQty = inventoryUpdates.reduce((sum, u) => sum + u.quantity, 0);
+      const qty = inventoryUpdates.length > 0 ? totalQty : (existing?.currentQuantity ?? 0);
       const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
         qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
       if (existing) {
         await prisma.inventoryTracking.update({
           where: { id: existing.id },
-          data: { ...(quantity !== null ? { currentQuantity: qty, inventoryStatus: invStatus } : {}), lastCheckedAt: new Date() },
+          data: { ...(inventoryUpdates.length > 0 ? { currentQuantity: qty, inventoryStatus: invStatus } : {}), lastCheckedAt: new Date() },
         });
       } else {
-        const qty2 = quantity ?? 0;
-        const invStatus2: "in_stock" | "low_stock" | "out_of_stock" =
-          qty2 <= 0 ? "out_of_stock" : qty2 <= threshold ? "low_stock" : "in_stock";
         await prisma.inventoryTracking.create({
-          data: { shop, productId: BigInt(productId), productTitle, currentQuantity: qty2, previousQuantity: 0, inventoryStatus: invStatus2 },
+          data: { shop, productId: BigInt(productId), productTitle, currentQuantity: qty, previousQuantity: 0, inventoryStatus: invStatus },
         });
       }
     } else if (existing) {
@@ -287,70 +440,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "sync") {
+    // Skip if already running
+    if (syncState.get(shop)?.running) {
+      return { status: "already_running" };
+    }
+
     const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
     const plan = storeSession?.plan ?? "basic";
     const maxProducts = getMaxProducts(plan);
     const settings = await prisma.storeSettings.findUnique({ where: { shop } });
     const threshold = settings?.lowStockThreshold ?? 5;
 
-    let allProducts: any[] = [];
-    let cursor: string | null = null;
-    let hasNextPage = true;
+    syncState.start(shop);
 
-    try {
-      while (hasNextPage && allProducts.length < maxProducts) {
-        const batchSize = Math.min(250, maxProducts - allProducts.length);
-        const gqlResponse = await admin.graphql(SYNC_PRODUCTS_GRAPHQL, {
-          variables: { first: batchSize, after: cursor },
-        });
-        const gqlJson: any = await gqlResponse.json();
-        const page = gqlJson.data?.products;
-        if (!page) break;
+    // Fire and forget — do not await
+    runProductSync({ admin, shop, maxProducts, threshold }).catch(() => {});
 
-        for (const edge of page.edges) {
-          const p = edge.node;
-          const productId = p.id.split("/").pop();
-          let totalQty = 0;
-          const skus: string[] = [];
-          let allUntracked = true;
-
-          for (const ve of p.variants.edges) {
-            const v = ve.node;
-            if (v.inventoryItem?.tracked !== false) allUntracked = false;
-            totalQty += v.inventoryQuantity ?? 0;
-            if (v.sku) skus.push(v.sku);
-          }
-
-          if (allUntracked) continue;
-
-          const status: "in_stock" | "low_stock" | "out_of_stock" =
-            totalQty <= 0 ? "out_of_stock" : totalQty <= threshold ? "low_stock" : "in_stock";
-
-          allProducts.push({ productId: BigInt(productId), productTitle: p.title, sku: skus.join(", ") || null, currentQuantity: totalQty, inventoryStatus: status });
-        }
-
-        hasNextPage = page.pageInfo.hasNextPage;
-        cursor = page.pageInfo.endCursor;
-      }
-    } catch (err) {
-      return { error: `Failed to fetch products from Shopify: ${err instanceof Error ? err.message : "Unknown error"}` };
-    }
-
-    for (const p of allProducts) {
-      await prisma.inventoryTracking.upsert({
-        where: { shop_productId: { shop, productId: p.productId } },
-        update: { productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, lastCheckedAt: new Date() },
-        create: { shop, productId: p.productId, productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, previousQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus },
-      });
-    }
-
-    await prisma.setupProgress.upsert({
-      where: { shop },
-      update: { firstProductTracked: true, productThresholdsConfigured: true },
-      create: { shop, appInstalled: true, firstProductTracked: true, productThresholdsConfigured: true, globalSettingsConfigured: false, notificationsConfigured: false },
-    });
-
-    return { success: true, message: `Synced ${allProducts.length} products.` };
+    return { status: "started" };
   }
 
   return { error: "Unknown action." };
@@ -373,37 +479,240 @@ const FILTER_TABS = [
 const SHOPIFY_STATUSES = [
   { value: "ACTIVE", label: "Active" },
   { value: "DRAFT", label: "Draft" },
-  { value: "ARCHIVED", label: "Unlisted (Archived)" },
+  { value: "ARCHIVED", label: "Unlisted" },
 ];
 
-type ProductRow = ReturnType<typeof useLoaderData<typeof loader>>["products"][number];
+type ProductRow = {
+  id: string | number;
+  productId: string;
+  productTitle: string;
+  sku: string | null;
+  currentQuantity: number;
+  inventoryStatus: string;
+  isHidden: boolean;
+  isTracked: boolean;
+  imageUrl: string | null;
+  imageAlt: string;
+  shopifyStatus: string;
+  inventoryItemId: string | null;
+};
+
+function InventorySection({
+  variants,
+  loading,
+  error,
+  edits,
+  expanded,
+  onEdit,
+  onToggleExpand,
+}: {
+  variants: VariantInventory[];
+  loading: boolean;
+  error?: string;
+  edits: Record<string, string>;
+  expanded: Set<string>;
+  onEdit: (key: string, val: string) => void;
+  onToggleExpand: (id: string) => void;
+}) {
+  if (loading) {
+    return (
+      <div style={{ padding: "20px 0", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>
+        Loading inventory…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: "10px 0", color: "#991b1b", fontSize: 13 }}>{error}</div>
+    );
+  }
+
+  const trackedVariants = variants.filter((v) => v.tracked && v.inventoryItemId);
+
+  if (trackedVariants.length === 0) {
+    return (
+      <div style={{ padding: "10px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 13, color: "#6b7280" }}>
+        Inventory not managed by Shopify — quantities cannot be updated.
+      </div>
+    );
+  }
+
+  const isSimple = trackedVariants.length === 1 && (trackedVariants[0].title === "Default Title" || variants.length === 1);
+
+  if (isSimple) {
+    const variant = trackedVariants[0];
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {variant.locations.length === 0 && (
+          <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>No locations found.</p>
+        )}
+        {variant.locations.map((loc) => {
+          const key = `${variant.inventoryItemId}__${loc.locationId}`;
+          return (
+            <div key={loc.locationId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+              <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{loc.locationName}</span>
+              <input
+                type="number"
+                value={edits[key] ?? ""}
+                onChange={(e) => onEdit(key, e.target.value)}
+                style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 8px", fontSize: 13, textAlign: "right" }}
+                aria-label={`Quantity at ${loc.locationName}`}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Multi-variant: collapsible
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {trackedVariants.map((variant) => {
+        const isOpen = expanded.has(variant.id);
+        return (
+          <div key={variant.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
+            <button
+              type="button"
+              onClick={() => onToggleExpand(variant.id)}
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", background: isOpen ? "#f3f4f6" : "#f9fafb", border: "none", cursor: "pointer", textAlign: "left" }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{variant.title}</span>
+                {variant.sku && (
+                  <span style={{ fontSize: 11, color: "#9ca3af", background: "#e5e7eb", borderRadius: 4, padding: "1px 6px" }}>
+                    {variant.sku}
+                  </span>
+                )}
+              </div>
+              <svg
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2"
+                style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .2s", flexShrink: 0 }}
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {isOpen && (
+              <div style={{ padding: "8px 12px 10px", display: "flex", flexDirection: "column", gap: 6, background: "#fff" }}>
+                {variant.locations.length === 0 && (
+                  <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>No locations found.</p>
+                )}
+                {variant.locations.map((loc) => {
+                  const key = `${variant.inventoryItemId}__${loc.locationId}`;
+                  return (
+                    <div key={loc.locationId} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{loc.locationName}</span>
+                      <input
+                        type="number"
+                        value={edits[key] ?? ""}
+                        onChange={(e) => onEdit(key, e.target.value)}
+                        style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 8px", fontSize: 13, textAlign: "right" }}
+                        aria-label={`Quantity at ${loc.locationName}`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function ProductsPage() {
-  const { plan, maxProducts, trackedCount, products, pageInfo, search, filter, after } =
-    useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
+  const loaderData = useLoaderData<typeof loader>() as any;
+  const { shop, plan, maxProducts, trackedCount, products, pageInfo, search, filter, after, syncRunning } = loaderData;
+
   const nav = useNavigation();
   const submit = useSubmit();
-  const fetcher = useFetcher<typeof action>();
+  const saveFetcher = useFetcher<typeof action>();
+  const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
+
   const busy = nav.state === "submitting";
   const intent = nav.formData?.get("intent") as string | null;
+  const { revalidate } = useRevalidator();
+
+  const [syncPct, setSyncPct] = useState<number | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+
+  const openSseStream = () => {
+    if (esRef.current) return; // already open
+    const es = new EventSource(`/api/sync-stream?shop=${encodeURIComponent(shop)}`);
+    esRef.current = es;
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.type === "progress") setSyncPct(data.pct);
+      if (data.type === "done") {
+        setSyncPct(100);
+        es.close();
+        esRef.current = null;
+        setTimeout(() => { setSyncPct(null); revalidate(); }, 1000);
+      }
+      if (data.type === "idle" || data.type === "error" || data.type === "auth_error") {
+        es.close();
+        esRef.current = null;
+        setSyncPct(null);
+      }
+    };
+    es.onerror = () => { es.close(); esRef.current = null; setSyncPct(null); };
+  };
+
+  // Open SSE when action returns "started"
+  const actionData = useActionData<typeof action>();
+  useEffect(() => {
+    if ((actionData as any)?.status === "started") openSseStream();
+  }, [actionData]);
+
+  // Also open SSE if page loads with sync already running
+  useEffect(() => {
+    if (syncRunning && !esRef.current) openSseStream();
+  }, [syncRunning]);
+
+  useEffect(() => () => { esRef.current?.close(); }, []);
 
   const [editProduct, setEditProduct] = useState<ProductRow | null>(null);
   const [editStatus, setEditStatus] = useState("");
-  const [editQty, setEditQty] = useState("");
   const [editTracked, setEditTracked] = useState(false);
+  const [expandedVariants, setExpandedVariants] = useState<Set<string>>(new Set());
+  const [inventoryEdits, setInventoryEdits] = useState<Record<string, string>>({});
+  const prevEditProductId = useRef<string | null>(null);
 
-  // Close modal on successful update
+  // Close modal on successful save
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && "success" in fetcher.data) {
+    if (saveFetcher.state === "idle" && saveFetcher.data && "success" in saveFetcher.data) {
       setEditProduct(null);
     }
-  }, [fetcher.state, fetcher.data]);
+  }, [saveFetcher.state, saveFetcher.data]);
+
+  // Load inventory when a different product modal opens
+  useEffect(() => {
+    if (!editProduct) { prevEditProductId.current = null; return; }
+    if (editProduct.productId === prevEditProductId.current) return;
+    prevEditProductId.current = editProduct.productId;
+    inventoryFetcher.load(`/app/products?intent=get_product_inventory&productId=${editProduct.productId}`);
+    setExpandedVariants(new Set());
+    setInventoryEdits({});
+  }, [editProduct?.productId]);
+
+  // Initialise edits with current quantities once inventory data arrives
+  useEffect(() => {
+    if (!inventoryFetcher.data?.inventoryData) return;
+    const initial: Record<string, string> = {};
+    for (const v of inventoryFetcher.data.inventoryData.variants) {
+      if (!v.tracked || !v.inventoryItemId) continue;
+      for (const loc of v.locations) {
+        initial[`${v.inventoryItemId}__${loc.locationId}`] = String(loc.quantity);
+      }
+    }
+    setInventoryEdits(initial);
+  }, [inventoryFetcher.data]);
 
   const openEdit = (p: ProductRow) => {
     setEditProduct(p);
     setEditStatus(p.shopifyStatus ?? "ACTIVE");
-    setEditQty(p.inventoryStatus === "not_tracked" ? "" : String(p.currentQuantity));
     setEditTracked(p.isTracked);
   };
 
@@ -416,13 +725,38 @@ export default function ProductsPage() {
     return `/app/products${qs ? `?${qs}` : ""}`;
   };
 
-  const saving = fetcher.state === "submitting";
+  const toggleVariant = (id: string) => {
+    setExpandedVariants((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const saving = saveFetcher.state === "submitting";
+  const loadingInventory = inventoryFetcher.state === "loading";
+
+  // Build inventory updates array for form submission
+  const inventoryUpdates = Object.entries(inventoryEdits)
+    .map(([key, val]) => {
+      const parts = key.split("__");
+      if (parts.length !== 2) return null;
+      const quantity = parseInt(val);
+      if (isNaN(quantity)) return null;
+      return { inventoryItemId: parts[0], locationId: parts[1], quantity };
+    })
+    .filter(Boolean) as Array<{ inventoryItemId: string; locationId: string; quantity: number }>;
+
+  const inventoryVariants = inventoryFetcher.data?.inventoryData?.variants ?? [];
+  const shopifyTracked = inventoryVariants.some((v) => v.tracked);
 
   return (
     <s-page heading="Products" sub-heading={`${trackedCount} of ${maxProducts} products tracked · ${plan === "pro" ? "Professional" : "Basic"} plan`}>
-      <s-button slot="primary-action" onClick={() => submit({ intent: "sync" }, { method: "post" })} loading={busy && intent === "sync" ? true : undefined}>
-        Sync Products
-      </s-button>
+      <SyncButton
+        slot="primary-action"
+        pct={syncPct}
+        onClick={() => { if (syncPct === null && !busy) submit({ intent: "sync" }, { method: "post" }); }}
+      />
 
       {actionData && "error" in actionData && (
         <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#991b1b" }}>
@@ -502,7 +836,7 @@ export default function ProductsPage() {
                 </tr>
               </thead>
               <tbody>
-                {products.map((p) => {
+                {products.map((p: ProductRow) => {
                   const s = STATUS_STYLE[p.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
                   const isNotTracked = p.inventoryStatus === "not_tracked";
                   return (
@@ -576,9 +910,10 @@ export default function ProductsPage() {
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={(e) => { if (e.target === e.currentTarget) setEditProduct(null); }}
         >
-          <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 480, boxShadow: "0 20px 60px rgba(0,0,0,0.2)", overflow: "hidden" }}>
+          <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 520, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", overflow: "hidden" }}>
+
             {/* Modal header */}
-            <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
               {editProduct.imageUrl ? (
                 <img src={editProduct.imageUrl} alt={editProduct.imageAlt} width={52} height={52}
                   style={{ borderRadius: 8, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
@@ -598,107 +933,130 @@ export default function ProductsPage() {
               </button>
             </div>
 
-            {/* Fetcher error */}
-            {fetcher.data && "error" in fetcher.data && (
-              <div style={{ margin: "12px 24px 0", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "8px 12px", color: "#991b1b", fontSize: 13 }}>
-                {fetcher.data.error}
-              </div>
-            )}
-
-            {/* Modal form */}
-            <fetcher.Form method="post" style={{ padding: "20px 24px 24px" }}>
-              <input type="hidden" name="intent" value="update_product" />
-              <input type="hidden" name="productId" value={editProduct.productId} />
-              <input type="hidden" name="productTitle" value={editProduct.productTitle ?? ""} />
-              <input type="hidden" name="inventoryItemId" value={editProduct.inventoryItemId ?? ""} />
-
-              {/* Shopify status */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
-                  Product Status
-                </label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {SHOPIFY_STATUSES.map((s) => (
-                    <button
-                      key={s.value}
-                      type="button"
-                      onClick={() => setEditStatus(s.value)}
-                      style={{
-                        flex: 1, padding: "8px 4px", borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: "pointer",
-                        border: editStatus === s.value ? "2px solid #111827" : "1px solid #e5e7eb",
-                        background: editStatus === s.value ? "#111827" : "#fff",
-                        color: editStatus === s.value ? "#fff" : "#374151",
-                      }}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
+            {/* Scrollable body */}
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {/* Fetcher error */}
+              {saveFetcher.data && "error" in saveFetcher.data && (
+                <div style={{ margin: "12px 24px 0", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "8px 12px", color: "#991b1b", fontSize: 13 }}>
+                  {saveFetcher.data.error}
                 </div>
-                <input type="hidden" name="shopifyStatus" value={editStatus} />
-              </div>
+              )}
 
-              {/* Available quantity */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
-                  Available Quantity
-                  {!editProduct.inventoryItemId && (
-                    <span style={{ fontWeight: 400, color: "#9ca3af", marginLeft: 6 }}>(read-only — no tracked variants)</span>
-                  )}
-                </label>
-                <input
-                  type="number"
-                  name="quantity"
-                  value={editQty}
-                  onChange={(e) => setEditQty(e.target.value)}
-                  disabled={!editProduct.inventoryItemId}
-                  placeholder="e.g. 25"
-                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 12px", fontSize: 14, boxSizing: "border-box", opacity: !editProduct.inventoryItemId ? 0.5 : 1 }}
-                />
-                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>Updates inventory at your primary Shopify location.</p>
-              </div>
+              <saveFetcher.Form method="post" style={{ padding: "20px 24px 24px" }}>
+                <input type="hidden" name="intent" value="update_product" />
+                <input type="hidden" name="productId" value={editProduct.productId} />
+                <input type="hidden" name="productTitle" value={editProduct.productTitle ?? ""} />
+                <input type="hidden" name="inventoryUpdates" value={JSON.stringify(inventoryUpdates)} />
 
-              {/* Inventory tracked toggle */}
-              <div style={{ marginBottom: 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                  <div>
-                    <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Track inventory in Stock Alert</p>
-                    <p style={{ margin: "2px 0 0", fontSize: 12, color: "#9ca3af" }}>
-                      {editTracked ? "Monitoring active — alerts will fire for this product." : "Not monitored — no alerts will be sent."}
+                {/* Shopify status */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 8 }}>
+                    Product Status
+                  </label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {SHOPIFY_STATUSES.map((s) => (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => setEditStatus(s.value)}
+                        style={{
+                          flex: 1, padding: "8px 4px", borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: "pointer",
+                          border: editStatus === s.value ? "2px solid #111827" : "1px solid #e5e7eb",
+                          background: editStatus === s.value ? "#111827" : "#fff",
+                          color: editStatus === s.value ? "#fff" : "#374151",
+                        }}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  <input type="hidden" name="shopifyStatus" value={editStatus} />
+                </div>
+
+                {/* Inventory section */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 8 }}>
+                    Inventory
+                  </label>
+                  <InventorySection
+                    variants={inventoryVariants}
+                    loading={loadingInventory}
+                    error={inventoryFetcher.data?.inventoryError}
+                    edits={inventoryEdits}
+                    expanded={expandedVariants}
+                    onEdit={(key, val) => setInventoryEdits((prev) => ({ ...prev, [key]: val }))}
+                    onToggleExpand={toggleVariant}
+                  />
+                  {!loadingInventory && inventoryVariants.some((v) => v.tracked) && (
+                    <p style={{ margin: "6px 0 0", fontSize: 12, color: "#9ca3af" }}>
+                      Updates available quantity at each Shopify location.
                     </p>
-                  </div>
-                  <div
-                    onClick={() => setEditTracked(!editTracked)}
-                    style={{
-                      width: 44, height: 24, borderRadius: 12, background: editTracked ? "#008060" : "#d1d5db",
-                      position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer",
-                    }}
-                  >
-                    <div style={{
-                      position: "absolute", top: 2, left: editTracked ? 22 : 2,
-                      width: 20, height: 20, borderRadius: "50%", background: "#fff",
-                      transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                    }} />
-                  </div>
-                </label>
-                <input type="hidden" name="tracked" value={String(editTracked)} />
-              </div>
+                  )}
+                </div>
 
-              {/* Footer buttons */}
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button type="button" onClick={() => setEditProduct(null)} disabled={saving}
-                  style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 14, fontWeight: 500 }}>
-                  Cancel
-                </button>
-                <button type="submit" disabled={saving}
-                  style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: saving ? "#9ca3af" : "#111827", color: "#fff", cursor: saving ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 600 }}>
-                  {saving ? "Saving…" : "Save Changes"}
-                </button>
-              </div>
-            </fetcher.Form>
+                {/* Track inventory toggle — hidden if Shopify doesn't manage this product */}
+                {(shopifyTracked || editProduct.isTracked) && (
+                  <div style={{ marginBottom: 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Track inventory in Stock Alert</p>
+                        <p style={{ margin: "2px 0 0", fontSize: 12, color: editTracked ? "#059669" : "#9ca3af" }}>
+                          {editTracked ? "Monitoring active — alerts will fire for this product." : "Not monitored — no alerts will be sent."}
+                        </p>
+                      </div>
+                      <div
+                        onClick={() => setEditTracked(!editTracked)}
+                        style={{
+                          width: 44, height: 24, borderRadius: 12, background: editTracked ? "#008060" : "#d1d5db",
+                          position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer",
+                        }}
+                      >
+                        <div style={{
+                          position: "absolute", top: 2, left: editTracked ? 22 : 2,
+                          width: 20, height: 20, borderRadius: "50%", background: "#fff",
+                          transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                        }} />
+                      </div>
+                    </label>
+                    <input type="hidden" name="tracked" value={String(editTracked)} />
+                  </div>
+                )}
+                {!shopifyTracked && !editProduct.isTracked && (
+                  <input type="hidden" name="tracked" value="false" />
+                )}
+
+                {/* Footer buttons */}
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button type="button" onClick={() => setEditProduct(null)} disabled={saving}
+                    style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 14, fontWeight: 500 }}>
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={saving}
+                    style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: saving ? "#9ca3af" : "#111827", color: "#fff", cursor: saving ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 600 }}>
+                    {saving ? "Saving…" : "Save Changes"}
+                  </button>
+                </div>
+              </saveFetcher.Form>
+            </div>
           </div>
         </div>
       )}
     </s-page>
+  );
+}
+
+function SyncButton({ pct, onClick, slot }: { pct: number | null; onClick: () => void; slot?: Lowercase<string> }) {
+  const syncing = pct !== null;
+  const displayPct = Math.round(pct ?? 0);
+  return (
+    <s-button
+      slot={slot}
+      variant="primary"
+      disabled={syncing ? true : undefined}
+      onClick={!syncing ? onClick : undefined}
+    >
+      {syncing ? `Syncing ${displayPct}%` : "Sync Products"}
+    </s-button>
   );
 }
 
