@@ -693,7 +693,6 @@ export default function ProductsPage() {
   const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
 
   const busy = nav.state === "submitting";
-  const intent = nav.formData?.get("intent") as string | null;
   const { revalidate } = useRevalidator();
 
   const [syncPct, setSyncPct] = useState<number | null>(null);
@@ -754,7 +753,14 @@ export default function ProductsPage() {
   const [editTracked, setEditTracked] = useState(false);
   const [expandedVariants, setExpandedVariants] = useState<Set<string>>(new Set());
   const [inventoryEdits, setInventoryEdits] = useState<Record<string, string>>({});
-  const prevEditProductId = useRef<string | null>(null);
+
+  // Initial inventory fetch when modal opens for an already-tracked product
+  useEffect(() => {
+    if (!editProduct || !editTracked) return;
+    inventoryFetcher.load(`/app/products?intent=get_product_inventory&productId=${editProduct.productId}`);
+    setExpandedVariants(new Set());
+    setInventoryEdits({});
+  }, [editProduct?.productId]);
 
   // Close modal on successful save
   useEffect(() => {
