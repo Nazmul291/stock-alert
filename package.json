@@ -1,5 +1,5 @@
 {
-  "name": "stock-alert-dev",
+  "name": "stock-alert",
   "private": true,
   "scripts": {
     "build": "react-router build",
@@ -24,7 +24,7 @@
     "node": ">=20.19 <22 || >=22.12"
   },
   "dependencies": {
-    "@nazmul-hawlader/shopify-admin-and-support-chat": "^1.1.5",
+    "@nazmulcodes/shopify-admin-and-support-chat": "^1.2.4",
     "@prisma/client": "^6.16.3",
     "@react-router/dev": "^7.12.0",
     "@react-router/fs-routes": "^7.12.0",

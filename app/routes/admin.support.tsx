@@ -2,7 +2,7 @@ import {
   AdminSupport,
   makeAdminSupportLoader,
   makeAdminSupportAction,
-} from "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/support";
+} from "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/support";
 import db from "~/db.server";
 
 const opts = { db: db as any, sessionSecret: process.env.SESSION_SECRET };

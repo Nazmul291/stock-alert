@@ -74,6 +74,9 @@ module.exports = {
         "plugin:import/recommended",
         "plugin:import/typescript",
       ],
+      rules: {
+        "import/no-unresolved": ["error", { ignore: ["@nazmulcodes/shopify-admin-and-support-chat", "^~/"] }],
+      },
     },
 
     // Node

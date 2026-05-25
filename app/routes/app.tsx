@@ -1,4 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
 import { Outlet, redirect, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
@@ -7,6 +8,7 @@ import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, session } = await authenticate.admin(request);
+  const shop = session.shop;
   const url = new URL(request.url);
   const pathname = url.pathname;
 
@@ -23,7 +25,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         // and escape it properly before any redirect to admin.shopify.com
         const params = new URLSearchParams();
         const host = url.searchParams.get("host");
-        const shop = url.searchParams.get("shop");
         const embedded = url.searchParams.get("embedded") ?? "1";
         if (host) params.set("host", host);
         if (shop) params.set("shop", shop);
@@ -41,11 +42,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", shop };
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  const { apiKey, shop } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
@@ -56,6 +57,7 @@ export default function App() {
         <s-link href="/app/billing">Billing</s-link>
       </s-app-nav>
       <Outlet />
+      <ChatWidget shop={shop} />
     </AppProvider>
   );
 }

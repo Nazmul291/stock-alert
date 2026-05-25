@@ -1,12 +1,12 @@
 import {
   makeChatApiLoader,
   makeChatApiAction,
-} from "@nazmul-hawlader/shopify-admin-and-support-chat/routes/api/chat";
+} from "@nazmulcodes/shopify-admin-and-support-chat/routes/api/chat";
 import db from "~/db.server";
 
 const opts = {
   db: db as any,
-  shopDb: db.shop,
+  shopDb: { findUnique: ({ where }: { where: { id: string } }) => db.session.findUnique({ where: { shop: where.id } }) },
   agentDb: db.adminUser,
   agentOnlineDb: db.adminUser,
   appUrl: process.env.SHOPIFY_APP_URL,

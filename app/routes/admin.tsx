@@ -1,4 +1,4 @@
-import { AdminLayout, makeAdminLayoutLoader } from "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/layout";
+import { AdminLayout, makeAdminLayoutLoader } from "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/layout";
 
 export const loader = makeAdminLayoutLoader({
   sessionSecret: process.env.SESSION_SECRET,

@@ -51,6 +51,7 @@ export default defineConfig({
   plugins: [
     {
       name: "server-modules-browser-stub",
+      enforce: "pre",
       resolveId(id, _, options) {
         if (!options.ssr && ["nodemailer", "bcryptjs"].includes(id)) {
           return "\0server-stub:" + id;
@@ -73,10 +74,10 @@ export default defineConfig({
     include: ["@shopify/app-bridge-react"],
     exclude: [
       "@prisma/client",
-      "@nazmul-hawlader/shopify-admin-and-support-chat",
-      "@nazmul-hawlader/shopify-admin-and-support-chat/server",
-      "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/layout",
-      "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/support",
+      "@nazmulcodes/shopify-admin-and-support-chat",
+      "@nazmulcodes/shopify-admin-and-support-chat/server",
+      "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/layout",
+      "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/support",
     ],
   },
 }) satisfies UserConfig;

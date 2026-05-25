@@ -1,7 +1,7 @@
 import {
   AdminDashboard,
   makeAdminDashboardLoader,
-} from "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/dashboard";
+} from "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/dashboard";
 import db from "~/db.server";
 
 export const loader = makeAdminDashboardLoader({

@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { autoSeedAdmin } from "@nazmul-hawlader/shopify-admin-and-support-chat/server";
+import { autoSeedAdmin } from "@nazmulcodes/shopify-admin-and-support-chat/server";
 
 declare global {
   // eslint-disable-next-line no-var

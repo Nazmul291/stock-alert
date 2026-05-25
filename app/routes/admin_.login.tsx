@@ -2,7 +2,7 @@ import {
   AdminLoginPage,
   makeLoginLoader,
   makeLoginAction,
-} from "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/login";
+} from "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/login";
 import db from "~/db.server";
 
 export const loader = makeLoginLoader({ sessionSecret: process.env.SESSION_SECRET });
