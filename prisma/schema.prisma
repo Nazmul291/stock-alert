@@ -144,3 +144,64 @@ model SetupProgress {
   @@map("setup_progress")
 }
 
+
+
+
+enum AdminRole {
+  ADMIN
+  SUPPORT_AGENT
+}
+
+enum ChatStatus {
+  OPEN
+  ENDED
+}
+
+enum ChatSender {
+  MERCHANT
+  ADMIN
+  BOT
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String
+  role         AdminRole @default(SUPPORT_AGENT)
+  isActive     Boolean   @default(true)
+  lastSeenAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  assignedChats ChatConversation[]
+
+  @@map("admin_users")
+}
+
+// NOTE: Add a relation to your Shop model if you want shop-level cascades:
+//   shop     Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+// Otherwise remove the `shop` field and use shopId as a plain string.
+
+model ChatConversation {
+  id            String        @id @default(cuid())
+  shopId        String
+  merchantEmail String?
+  status        ChatStatus    @default(OPEN)
+  startedAt     DateTime      @default(now())
+  endedAt       DateTime?
+  assignedToId  String?
+  assignedTo    AdminUser?    @relation(fields: [assignedToId], references: [id])
+  messages      ChatMessage[]
+
+  @@map("chat_conversations")
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         ChatSender
+  text           String
+  sentAt         DateTime         @default(now())
+
+  @@map("chat_messages")
+}

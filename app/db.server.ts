@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { autoSeedAdmin } from "@nazmul-hawlader/shopify-admin-and-support-chat/server";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -12,5 +13,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 const prisma = global.prismaGlobal ?? new PrismaClient();
+
+autoSeedAdmin(prisma.adminUser).catch(console.error);
 
 export default prisma;

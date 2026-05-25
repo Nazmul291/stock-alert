@@ -1,11 +1,20 @@
 -- CreateEnum
-CREATE TYPE "Plan" AS ENUM ('free', 'pro', 'enterprise');
+CREATE TYPE "Plan" AS ENUM ('basic', 'pro', 'enterprise');
 
 -- CreateEnum
 CREATE TYPE "AlertType" AS ENUM ('low_stock', 'out_of_stock', 'restock');
 
 -- CreateEnum
 CREATE TYPE "InventoryStatus" AS ENUM ('in_stock', 'low_stock', 'out_of_stock', 'deactivated');
+
+-- CreateEnum
+CREATE TYPE "AdminRole" AS ENUM ('ADMIN', 'SUPPORT_AGENT');
+
+-- CreateEnum
+CREATE TYPE "ChatStatus" AS ENUM ('OPEN', 'ENDED');
+
+-- CreateEnum
+CREATE TYPE "ChatSender" AS ENUM ('MERCHANT', 'ADMIN', 'BOT');
 
 -- CreateTable
 CREATE TABLE "Session" (
@@ -26,7 +35,7 @@ CREATE TABLE "Session" (
     "emailVerified" BOOLEAN DEFAULT false,
     "refreshToken" TEXT,
     "refreshTokenExpires" TIMESTAMP(3),
-    "plan" "Plan" NOT NULL DEFAULT 'free',
+    "plan" "Plan" NOT NULL DEFAULT 'basic',
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ NOT NULL,
 
@@ -51,20 +60,6 @@ CREATE TABLE "store_settings" (
 );
 
 -- CreateTable
-CREATE TABLE "product_settings" (
-    "id" UUID NOT NULL,
-    "shop" TEXT NOT NULL,
-    "product_id" BIGINT NOT NULL,
-    "custom_threshold" INTEGER,
-    "exclude_from_auto_hide" BOOLEAN NOT NULL DEFAULT false,
-    "exclude_from_alerts" BOOLEAN NOT NULL DEFAULT false,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ NOT NULL,
-
-    CONSTRAINT "product_settings_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "inventory_tracking" (
     "id" UUID NOT NULL,
     "shop" TEXT NOT NULL,
@@ -77,6 +72,7 @@ CREATE TABLE "inventory_tracking" (
     "last_checked_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "last_alert_sent_at" TIMESTAMPTZ,
     "is_hidden" BOOLEAN NOT NULL DEFAULT false,
+    "monitoring_enabled" BOOLEAN NOT NULL DEFAULT true,
     "inventory_status" "InventoryStatus" NOT NULL DEFAULT 'in_stock',
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ NOT NULL,
@@ -117,54 +113,40 @@ CREATE TABLE "setup_progress" (
 );
 
 -- CreateTable
-CREATE TABLE "webhooks" (
-    "id" UUID NOT NULL,
-    "shop" TEXT NOT NULL,
-    "webhook_id" BIGINT NOT NULL,
-    "topic" VARCHAR(100) NOT NULL,
-    "address" TEXT NOT NULL,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ NOT NULL,
+CREATE TABLE "admin_users" (
+    "id" TEXT NOT NULL,
+    "username" TEXT NOT NULL,
+    "passwordHash" TEXT NOT NULL,
+    "role" "AdminRole" NOT NULL DEFAULT 'SUPPORT_AGENT',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "lastSeenAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "webhooks_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "admin_users_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "auth_nonces" (
-    "id" UUID NOT NULL,
-    "nonce" VARCHAR(255) NOT NULL,
-    "shop" VARCHAR(255) NOT NULL,
-    "used" BOOLEAN NOT NULL DEFAULT false,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "expires_at" TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes'),
+CREATE TABLE "chat_conversations" (
+    "id" TEXT NOT NULL,
+    "shopId" TEXT NOT NULL,
+    "merchantEmail" TEXT,
+    "status" "ChatStatus" NOT NULL DEFAULT 'OPEN',
+    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "endedAt" TIMESTAMP(3),
+    "assignedToId" TEXT,
 
-    CONSTRAINT "auth_nonces_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "chat_conversations_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "webhook_events" (
-    "id" UUID NOT NULL,
-    "shop" TEXT NOT NULL,
-    "topic" VARCHAR(100) NOT NULL,
-    "payload" JSONB,
-    "processed" BOOLEAN NOT NULL DEFAULT false,
-    "processed_at" TIMESTAMPTZ,
-    "error_message" TEXT,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE "chat_messages" (
+    "id" TEXT NOT NULL,
+    "conversationId" TEXT NOT NULL,
+    "sender" "ChatSender" NOT NULL,
+    "text" TEXT NOT NULL,
+    "sentAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "webhook_events_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "inventory_item_mapping" (
-    "inventory_item_id" BIGINT NOT NULL,
-    "product_id" BIGINT NOT NULL,
-    "variant_id" BIGINT,
-    "shop" TEXT NOT NULL,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ NOT NULL,
-
-    CONSTRAINT "inventory_item_mapping_pkey" PRIMARY KEY ("inventory_item_id")
+    CONSTRAINT "chat_messages_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -178,12 +160,6 @@ CREATE UNIQUE INDEX "store_settings_shop_key" ON "store_settings"("shop");
 
 -- CreateIndex
 CREATE INDEX "store_settings_shop_idx" ON "store_settings"("shop");
-
--- CreateIndex
-CREATE INDEX "product_settings_shop_product_id_idx" ON "product_settings"("shop", "product_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "product_settings_shop_product_id_key" ON "product_settings"("shop", "product_id");
 
 -- CreateIndex
 CREATE INDEX "inventory_tracking_shop_idx" ON "inventory_tracking"("shop");
@@ -225,43 +201,10 @@ CREATE UNIQUE INDEX "setup_progress_shop_key" ON "setup_progress"("shop");
 CREATE INDEX "setup_progress_shop_idx" ON "setup_progress"("shop");
 
 -- CreateIndex
-CREATE INDEX "webhooks_shop_idx" ON "webhooks"("shop");
-
--- CreateIndex
-CREATE INDEX "webhooks_topic_idx" ON "webhooks"("topic");
-
--- CreateIndex
-CREATE UNIQUE INDEX "webhooks_shop_topic_key" ON "webhooks"("shop", "topic");
-
--- CreateIndex
-CREATE UNIQUE INDEX "auth_nonces_nonce_key" ON "auth_nonces"("nonce");
-
--- CreateIndex
-CREATE INDEX "auth_nonces_nonce_idx" ON "auth_nonces"("nonce");
-
--- CreateIndex
-CREATE INDEX "auth_nonces_expires_at_idx" ON "auth_nonces"("expires_at");
-
--- CreateIndex
-CREATE INDEX "webhook_events_shop_processed_idx" ON "webhook_events"("shop", "processed");
-
--- CreateIndex
-CREATE INDEX "webhook_events_topic_idx" ON "webhook_events"("topic");
-
--- CreateIndex
-CREATE INDEX "webhook_events_created_at_idx" ON "webhook_events"("created_at" DESC);
-
--- CreateIndex
-CREATE INDEX "inventory_item_mapping_shop_inventory_item_id_idx" ON "inventory_item_mapping"("shop", "inventory_item_id");
-
--- CreateIndex
-CREATE INDEX "inventory_item_mapping_shop_product_id_idx" ON "inventory_item_mapping"("shop", "product_id");
+CREATE UNIQUE INDEX "admin_users_username_key" ON "admin_users"("username");
 
 -- AddForeignKey
 ALTER TABLE "store_settings" ADD CONSTRAINT "store_settings_shop_fkey" FOREIGN KEY ("shop") REFERENCES "Session"("shop") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "product_settings" ADD CONSTRAINT "product_settings_shop_fkey" FOREIGN KEY ("shop") REFERENCES "Session"("shop") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "inventory_tracking" ADD CONSTRAINT "inventory_tracking_shop_fkey" FOREIGN KEY ("shop") REFERENCES "Session"("shop") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -273,10 +216,7 @@ ALTER TABLE "alert_history" ADD CONSTRAINT "alert_history_shop_fkey" FOREIGN KEY
 ALTER TABLE "setup_progress" ADD CONSTRAINT "setup_progress_shop_fkey" FOREIGN KEY ("shop") REFERENCES "Session"("shop") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_shop_fkey" FOREIGN KEY ("shop") REFERENCES "Session"("shop") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "chat_conversations" ADD CONSTRAINT "chat_conversations_assignedToId_fkey" FOREIGN KEY ("assignedToId") REFERENCES "admin_users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "webhook_events" ADD CONSTRAINT "webhook_events_shop_fkey" FOREIGN KEY ("shop") REFERENCES "Session"("shop") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "inventory_item_mapping" ADD CONSTRAINT "inventory_item_mapping_shop_fkey" FOREIGN KEY ("shop") REFERENCES "Session"("shop") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "chat_conversations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
