@@ -3,5 +3,4 @@ import db from "~/db.server";
 
 export const loader = makeChatStreamLoader({
   adminUserDb: db.adminUser,
-  shopDb: db.shop,
 });

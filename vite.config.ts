@@ -49,6 +49,17 @@ export default defineConfig({
     },
   },
   plugins: [
+    {
+      name: "server-modules-browser-stub",
+      resolveId(id, _, options) {
+        if (!options.ssr && ["nodemailer", "bcryptjs"].includes(id)) {
+          return "\0server-stub:" + id;
+        }
+      },
+      load(id) {
+        if (id.startsWith("\0server-stub:")) return "export default null";
+      },
+    },
     reactRouter(),
     tsconfigPaths(),
   ],
@@ -60,5 +71,12 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ["@shopify/app-bridge-react"],
+    exclude: [
+      "@prisma/client",
+      "@nazmul-hawlader/shopify-admin-and-support-chat",
+      "@nazmul-hawlader/shopify-admin-and-support-chat/server",
+      "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/layout",
+      "@nazmul-hawlader/shopify-admin-and-support-chat/routes/admin/support",
+    ],
   },
 }) satisfies UserConfig;
