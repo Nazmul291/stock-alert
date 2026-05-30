@@ -9,8 +9,8 @@ import {
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
-  port: parseInt(process.env.EMAIL_PORT || '587'),
-  secure: false,
+  port: parseInt(process.env.EMAIL_PORT || '465'),
+  secure: process.env.EMAIL_SECURE === 'true',
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
 });
 
@@ -57,7 +57,7 @@ async function logAlert(
 
 export async function sendLowStockAlert(
   store: StoreContext,
-  product: { id: string; title: string; sku?: string | null },
+  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null },
   currentQuantity: number,
   threshold: number,
   settings: SettingsContext,
@@ -74,11 +74,13 @@ export async function sendLowStockAlert(
     currentQuantity,
     threshold,
     variantTitle,
+    imageUrl: product.imageUrl,
   });
 
   if (settings.emailNotifications) {
     const toEmail = settings.notificationEmail || store.email;
     if (toEmail) {
+      console.log(`[Notifications] Sending low stock email to ${toEmail} for product ${product.title}`);
       try {
         await transporter.sendMail({
           from: { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
@@ -86,11 +88,16 @@ export async function sendLowStockAlert(
           subject: template.subject,
           html: template.html,
         });
+        console.log(`[Notifications] Low stock email sent OK to ${toEmail}`);
         await logAlert(store.shop, productId, product.title, 'low_stock', currentQuantity, threshold, toEmail, false);
       } catch (err) {
         console.error('[Notifications] Low stock email failed:', err);
       }
+    } else {
+      console.warn(`[Notifications] Low stock alert skipped — no recipient email set for ${store.shop}. Set a notification email in Settings.`);
     }
+  } else {
+    console.log(`[Notifications] Email notifications disabled for ${store.shop} — skipping low stock email`);
   }
 
   if (settings.slackNotifications && settings.slackWebhookUrl) {
@@ -124,7 +131,7 @@ export async function sendLowStockAlert(
 
 export async function sendOutOfStockAlert(
   store: StoreContext,
-  product: { id: string; title: string; sku?: string | null },
+  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null },
   settings: SettingsContext,
   variantTitle?: string | null,
 ) {
@@ -137,6 +144,7 @@ export async function sendOutOfStockAlert(
     productId,
     sku: product.sku,
     variantTitle,
+    imageUrl: product.imageUrl,
   });
 
   if (settings.emailNotifications) {
@@ -186,7 +194,7 @@ export async function sendOutOfStockAlert(
 
 export async function sendRestockAlert(
   store: StoreContext,
-  product: { id: string; title: string; sku?: string | null },
+  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null },
   currentQuantity: number,
   settings: SettingsContext,
   variantTitle?: string | null,
@@ -201,6 +209,7 @@ export async function sendRestockAlert(
     sku: product.sku,
     currentQuantity,
     variantTitle,
+    imageUrl: product.imageUrl,
   });
 
   if (settings.emailNotifications) {

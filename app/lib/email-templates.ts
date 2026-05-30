@@ -7,6 +7,7 @@ export interface EmailTemplateData {
   currentQuantity?: number;
   threshold?: number;
   variantTitle?: string | null;
+  imageUrl?: string | null;
 }
 
 const baseTemplate = (content: string, previewText: string) => `
@@ -56,14 +57,23 @@ export function getLowStockEmailTemplate(data: EmailTemplateData): { subject: st
     <div class="hdr">⚠️ Stock Alert — Low Stock</div>
     <div class="body">
       <p>One of your products is running low on inventory.</p>
-      <div class="card warn">
-        <div class="title">${data.productTitle}</div>
-        ${data.variantTitle ? `<div class="row"><span class="lbl">Variant:</span><span class="val">${data.variantTitle}</span></div>` : ''}
-        ${data.sku ? `<div class="row"><span class="lbl">SKU:</span><span class="val">${data.sku}</span></div>` : ''}
-        <div class="row"><span class="lbl">Current Stock:</span><span class="val" style="color:#ffc107;font-weight:600;">${data.currentQuantity} units</span></div>
-        <div class="row"><span class="lbl">Threshold:</span><span class="val">${data.threshold} units</span></div>
-        <div class="row"><span class="lbl">Store:</span><span class="val">${data.storeName}</span></div>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#fff3cd;border-radius:8px;border-left:4px solid #ffc107;overflow:hidden;">
+        <tr>
+          ${data.imageUrl ? `<td width="100" valign="top" style="padding:20px 0 20px 20px;">
+            <img src="${data.imageUrl}" alt="${data.productTitle}" width="80" height="80" style="border-radius:6px;object-fit:cover;border:1px solid #dee2e6;display:block;" />
+          </td>` : ''}
+          <td valign="top" style="padding:20px;">
+            <div style="font-size:18px;font-weight:700;margin-bottom:12px;color:#212529;">${data.productTitle}</div>
+            ${data.variantTitle ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">Variant:</span> <span style="color:#212529;">${data.variantTitle}</span></div>` : ''}
+            ${data.sku ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">SKU:</span> <span style="color:#212529;">${data.sku}</span></div>` : ''}
+            <table cellpadding="0" cellspacing="0">
+              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;white-space:nowrap;">Current Stock:</td><td style="color:#e67e00;font-weight:700;">${data.currentQuantity} units</td></tr>
+              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Threshold:</td><td style="color:#212529;">${data.threshold} units</td></tr>
+              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Store:</td><td style="color:#212529;">${data.storeName}</td></tr>
+            </table>
+          </td>
+        </tr>
+      </table>
       <div style="text-align:center;">
         <a href="https://${data.shopDomain}/admin/products/${data.productId}" class="btn">📝 Manage Inventory</a>
       </div>
@@ -80,13 +90,22 @@ export function getOutOfStockEmailTemplate(data: EmailTemplateData): { subject: 
     <div class="hdr">❌ Stock Alert — Out of Stock</div>
     <div class="body">
       <p>One of your products has sold out.</p>
-      <div class="card danger">
-        <div class="title">${data.productTitle}</div>
-        ${data.variantTitle ? `<div class="row"><span class="lbl">Variant:</span><span class="val">${data.variantTitle}</span></div>` : ''}
-        ${data.sku ? `<div class="row"><span class="lbl">SKU:</span><span class="val">${data.sku}</span></div>` : ''}
-        <div class="row"><span class="lbl">Current Stock:</span><span class="val" style="color:#dc3545;font-weight:600;">0 units</span></div>
-        <div class="row"><span class="lbl">Store:</span><span class="val">${data.storeName}</span></div>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#f8d7da;border-radius:8px;border-left:4px solid #dc3545;overflow:hidden;">
+        <tr>
+          ${data.imageUrl ? `<td width="100" valign="top" style="padding:20px 0 20px 20px;">
+            <img src="${data.imageUrl}" alt="${data.productTitle}" width="80" height="80" style="border-radius:6px;object-fit:cover;border:1px solid #dee2e6;display:block;" />
+          </td>` : ''}
+          <td valign="top" style="padding:20px;">
+            <div style="font-size:18px;font-weight:700;margin-bottom:12px;color:#212529;">${data.productTitle}</div>
+            ${data.variantTitle ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">Variant:</span> <span style="color:#212529;">${data.variantTitle}</span></div>` : ''}
+            ${data.sku ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">SKU:</span> <span style="color:#212529;">${data.sku}</span></div>` : ''}
+            <table cellpadding="0" cellspacing="0">
+              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;white-space:nowrap;">Current Stock:</td><td style="color:#dc3545;font-weight:700;">0 units</td></tr>
+              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Store:</td><td style="color:#212529;">${data.storeName}</td></tr>
+            </table>
+          </td>
+        </tr>
+      </table>
       <div style="text-align:center;">
         <a href="https://${data.shopDomain}/admin/products/${data.productId}" class="btn">🔄 Restock Product</a>
       </div>
@@ -103,13 +122,22 @@ export function getRestockEmailTemplate(data: EmailTemplateData): { subject: str
     <div class="hdr">🎉 Stock Alert — Back in Stock</div>
     <div class="body">
       <p>Great news! Your product is available again.</p>
-      <div class="card ok">
-        <div class="title">${data.productTitle}</div>
-        ${data.variantTitle ? `<div class="row"><span class="lbl">Variant:</span><span class="val">${data.variantTitle}</span></div>` : ''}
-        ${data.sku ? `<div class="row"><span class="lbl">SKU:</span><span class="val">${data.sku}</span></div>` : ''}
-        <div class="row"><span class="lbl">Current Stock:</span><span class="val" style="color:#28a745;font-weight:600;">${data.currentQuantity} units</span></div>
-        <div class="row"><span class="lbl">Store:</span><span class="val">${data.storeName}</span></div>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#d4edda;border-radius:8px;border-left:4px solid #28a745;overflow:hidden;">
+        <tr>
+          ${data.imageUrl ? `<td width="100" valign="top" style="padding:20px 0 20px 20px;">
+            <img src="${data.imageUrl}" alt="${data.productTitle}" width="80" height="80" style="border-radius:6px;object-fit:cover;border:1px solid #dee2e6;display:block;" />
+          </td>` : ''}
+          <td valign="top" style="padding:20px;">
+            <div style="font-size:18px;font-weight:700;margin-bottom:12px;color:#212529;">${data.productTitle}</div>
+            ${data.variantTitle ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">Variant:</span> <span style="color:#212529;">${data.variantTitle}</span></div>` : ''}
+            ${data.sku ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">SKU:</span> <span style="color:#212529;">${data.sku}</span></div>` : ''}
+            <table cellpadding="0" cellspacing="0">
+              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;white-space:nowrap;">Current Stock:</td><td style="color:#28a745;font-weight:700;">${data.currentQuantity} units</td></tr>
+              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Store:</td><td style="color:#212529;">${data.storeName}</td></tr>
+            </table>
+          </td>
+        </tr>
+      </table>
       <div style="text-align:center;">
         <a href="https://${data.shopDomain}/admin/products/${data.productId}" class="btn">👀 View Product</a>
       </div>
