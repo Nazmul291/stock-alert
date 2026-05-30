@@ -3,7 +3,6 @@ import {
   ApiVersion,
   AppDistribution,
   BillingInterval,
-  DeliveryMethod,
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -45,41 +44,6 @@ const shopify = shopifyApp({
       ],
     },
   },
-  webhooks: {
-    APP_UNINSTALLED: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/app/uninstalled",
-    },
-    INVENTORY_LEVELS_UPDATE: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/inventory",
-    },
-    PRODUCTS_DELETE: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/products",
-    },
-    PRODUCTS_UPDATE: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/products",
-    },
-    CUSTOMERS_DATA_REQUEST: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/compliance",
-    },
-    CUSTOMERS_REDACT: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/compliance",
-    },
-    SHOP_REDACT: {
-      deliveryMethod: DeliveryMethod.Http,
-      callbackUrl: "/webhooks/compliance",
-    },
-  },
-  hooks: {
-    afterAuth: async ({ session }) => {
-      shopify.registerWebhooks({ session });
-    },
-  },
   future: {
     expiringOfflineAccessTokens: true,
   },
@@ -94,5 +58,4 @@ export const addDocumentResponseHeaders = shopify.addDocumentResponseHeaders;
 export const authenticate = shopify.authenticate;
 export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
-export const registerWebhooks = shopify.registerWebhooks;
 export const sessionStorage = shopify.sessionStorage;

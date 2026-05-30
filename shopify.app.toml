@@ -15,6 +15,14 @@ scopes = "read_inventory,read_products,write_inventory,write_products,read_locat
 api_version = "2025-10"
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/inventory"
   topics = [ "inventory_levels/update" ]
 

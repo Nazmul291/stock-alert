@@ -74,7 +74,12 @@ async function processInventoryUpdate(shop: string, inventoryItemId: string, dat
     prisma.session.findFirst({ where: { shop, isOnline: false } }),
   ]);
 
+  // Only process products that are actively tracked in our DB
+  if (!existingTracking) return;
   if (!settings) return;
+
+  // Respect the per-product monitoring toggle
+  if (!existingTracking.monitoringEnabled) return;
 
   // Fetch per-product overrides from Shopify metafields
   let productMeta = { customThreshold: null as number | null, excludeFromAlerts: false, excludeFromAutoHide: false };
@@ -109,12 +114,10 @@ async function processInventoryUpdate(shop: string, inventoryItemId: string, dat
 
   if (previousStatus === "deactivated") return;
 
-  if (existingTracking) {
-    await prisma.inventoryTracking.update({
-      where: { id: existingTracking.id },
-      data: { currentQuantity: newQty, previousQuantity: previousQty, inventoryStatus: newStatus, lastCheckedAt: new Date() },
-    });
-  }
+  await prisma.inventoryTracking.update({
+    where: { id: existingTracking.id },
+    data: { currentQuantity: newQty, previousQuantity: previousQty, inventoryStatus: newStatus, lastCheckedAt: new Date() },
+  });
 
   const storeCtx = { shop, plan: storeSession?.plan ?? "basic", email: storeSession?.email ?? null };
   const settingsCtx = {
@@ -135,11 +138,21 @@ async function processInventoryUpdate(shop: string, inventoryItemId: string, dat
     }
   }
 
-  if (newStatus === "out_of_stock" && settings.autoHideEnabled && !productMeta.excludeFromAutoHide && existingTracking && !existingTracking.isHidden) {
-    await prisma.inventoryTracking.update({ where: { id: existingTracking.id }, data: { isHidden: true } });
+  if (newStatus === "out_of_stock" && settings.autoHideEnabled && !productMeta.excludeFromAutoHide && !existingTracking.isHidden) {
+    await Promise.all([
+      admin.graphql(`mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`, {
+        variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } },
+      }),
+      prisma.inventoryTracking.update({ where: { id: existingTracking.id }, data: { isHidden: true } }),
+    ]);
   }
 
-  if (newStatus === "in_stock" && previousQty === 0 && settings.autoRepublishEnabled && storeSession?.plan === "pro" && !productMeta.excludeFromAutoHide && existingTracking?.isHidden) {
-    await prisma.inventoryTracking.update({ where: { id: existingTracking.id }, data: { isHidden: false } });
+  if (newStatus === "in_stock" && previousQty === 0 && settings.autoRepublishEnabled && storeSession?.plan === "pro" && !productMeta.excludeFromAutoHide && existingTracking.isHidden) {
+    await Promise.all([
+      admin.graphql(`mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`, {
+        variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } },
+      }),
+      prisma.inventoryTracking.update({ where: { id: existingTracking.id }, data: { isHidden: false } }),
+    ]);
   }
 }
