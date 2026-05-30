@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, Form, useNavigation, useSubmit, useFetcher, useRevalidator } from "react-router";
+import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher, useRevalidator } from "react-router";
 import type { ReactNode } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -889,19 +889,19 @@ export default function ProductsPage() {
             Search
           </button>
           {search && (
-            <a href={`/app/products${filter !== "all" ? `?filter=${filter}` : ""}`}
+            <Link to={`/app/products${filter !== "all" ? `?filter=${filter}` : ""}`}
               style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", textDecoration: "none", fontSize: 14, color: "#374151", lineHeight: "1.5" }}>
               Clear
-            </a>
+            </Link>
           )}
         </Form>
 
         {/* Filter tabs */}
         <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
           {FILTER_TABS.map((tab) => (
-            <a
+            <Link
               key={tab.key}
-              href={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null })}
+              to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null })}
               style={{
                 padding: "6px 14px", fontSize: 13, textDecoration: "none", whiteSpace: "nowrap",
                 fontWeight: filter === tab.key || (tab.key === "all" && filter === "all") ? 600 : 400,
@@ -910,7 +910,7 @@ export default function ProductsPage() {
               }}
             >
               {tab.label}
-            </a>
+            </Link>
           ))}
         </div>
 
@@ -928,7 +928,7 @@ export default function ProductsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
                 <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
-                  {["Product", "SKU", "Quantity", "Status", "Action"].map((h) => (
+                  {["Product", "SKU", "Quantity", "Status", "Monitor Alert", "Action"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -962,6 +962,15 @@ export default function ProductsPage() {
                         </span>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
+                        <span style={{
+                          background: p.monitoringEnabled ? "#d1fae5" : "#f3f4f6",
+                          color: p.monitoringEnabled ? "#065f46" : "#6b7280",
+                          padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500,
+                        }}>
+                          {p.monitoringEnabled ? "Active" : "Disabled"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
                         <button
                           onClick={() => openEdit(p)}
                           title="Edit product"
@@ -989,14 +998,14 @@ export default function ProductsPage() {
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             {after && (
-              <a href={buildUrl({ after: null })} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
+              <Link to={buildUrl({ after: null })} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
                 ← First Page
-              </a>
+              </Link>
             )}
             {pageInfo.hasNextPage && pageInfo.endCursor && (
-              <a href={buildUrl({ after: pageInfo.endCursor })} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
+              <Link to={buildUrl({ after: pageInfo.endCursor })} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
                 Next →
-              </a>
+              </Link>
             )}
           </div>
         </div>
