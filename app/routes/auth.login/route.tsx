@@ -8,16 +8,14 @@ import { loginErrorMessage } from "./error.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const errors = loginErrorMessage(await login(request));
-
-  return { errors };
+  const url = new URL(request.url);
+  const hasShopParam = url.searchParams.has("shop");
+  return { errors, hasShopParam };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const errors = loginErrorMessage(await login(request));
-
-  return {
-    errors,
-  };
+  return { errors, hasShopParam: false };
 };
 
 export default function Auth() {
@@ -25,23 +23,62 @@ export default function Auth() {
   const actionData = useActionData<typeof action>();
   const [shop, setShop] = useState("");
   const { errors } = actionData || loaderData;
+  const hasShopParam = loaderData.hasShopParam;
+
+  // When no shop param is present, merchants have reached this page outside of
+  // the normal App Store install flow. Guide them to install from the App Store.
+  if (!hasShopParam && !actionData) {
+    return (
+      <AppProvider embedded={false}>
+        <s-page heading="Stock Alert">
+          <s-section heading="Install from the Shopify App Store">
+            <p style={{ marginBottom: 16, color: "#374151" }}>
+              Stock Alert must be installed through the Shopify App Store. Click the button below to go to the listing, then click <strong>Install</strong>.
+            </p>
+            <s-button
+              variant="primary"
+              href="https://apps.shopify.com/stock-alert"
+              target="_blank"
+            >
+              Go to App Store listing
+            </s-button>
+            <p style={{ marginTop: 24, fontSize: 13, color: "#9ca3af" }}>
+              Already have a store and want to re-install? Enter your shop domain below.
+            </p>
+            <Form method="post" style={{ marginTop: 8 }}>
+              <s-text-field
+                name="shop"
+                label="Shop domain"
+                details="example.myshopify.com"
+                value={shop}
+                onChange={(e: any) => setShop(e.currentTarget.value)}
+                autocomplete="on"
+                error={errors.shop}
+              ></s-text-field>
+              <s-button type="submit">Log in</s-button>
+            </Form>
+          </s-section>
+        </s-page>
+      </AppProvider>
+    );
+  }
 
   return (
     <AppProvider embedded={false}>
       <s-page>
         <Form method="post">
-        <s-section heading="Log in">
-          <s-text-field
-            name="shop"
-            label="Shop domain"
-            details="example.myshopify.com"
-            value={shop}
-            onChange={(e) => setShop(e.currentTarget.value)}
-            autocomplete="on"
-            error={errors.shop}
-          ></s-text-field>
-          <s-button type="submit">Log in</s-button>
-        </s-section>
+          <s-section heading="Log in">
+            <s-text-field
+              name="shop"
+              label="Shop domain"
+              details="example.myshopify.com"
+              value={shop}
+              onChange={(e: any) => setShop(e.currentTarget.value)}
+              autocomplete="on"
+              error={errors.shop}
+            ></s-text-field>
+            <s-button type="submit">Log in</s-button>
+          </s-section>
         </Form>
       </s-page>
     </AppProvider>

@@ -27,7 +27,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       : null;
 
     if (!activePlan) {
-      return { status: "declined", message: "No active subscription found. The payment may have been declined." };
+      return { status: "declined", message: "No active subscription found. You may have declined the charge, or approval is still pending. Please return to the billing page and select a plan to continue." };
     }
 
     await prisma.session.updateMany({
@@ -116,14 +116,16 @@ export default function BillingConfirmPage() {
               </p>
             )}
             <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
-              <button onClick={() => fetcher.submit({}, { method: "post" })}
-                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: "#008060", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
-                Try again
-              </button>
               <button onClick={() => navigate("/app/billing")}
-                style={{ padding: "8px 18px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontSize: 14 }}>
-                Back to billing
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: "#008060", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                Choose a plan
               </button>
+              {status === "error" && (
+                <button onClick={() => fetcher.submit({}, { method: "post" })}
+                  style={{ padding: "8px 18px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontSize: 14 }}>
+                  Retry check
+                </button>
+              )}
             </div>
           </>
         )}

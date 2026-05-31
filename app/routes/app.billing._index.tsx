@@ -46,6 +46,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const plan = targetPlan === "pro" ? BILLING_PLAN_PRO : BILLING_PLAN_BASIC;
 
+  // Cancel any active subscription before requesting a new plan to prevent double-billing
+  try {
+    const { appSubscriptions } = await billing.check({
+      plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
+      isTest: process.env.TEST_PAYMENT === "true",
+    });
+    for (const sub of appSubscriptions) {
+      await billing.cancel({
+        subscriptionId: sub.id,
+        isTest: process.env.TEST_PAYMENT === "true",
+        prorate: false,
+      });
+    }
+  } catch {
+    // No active subscription to cancel — proceed normally
+  }
+
   try {
     await billing.request({ plan, isTest: process.env.TEST_PAYMENT === "true", returnUrl });
   } catch (err) {
