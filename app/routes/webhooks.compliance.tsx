@@ -12,8 +12,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       break;
 
     case "SHOP_REDACT":
-      // Delete all store data for the uninstalled shop
+      // Delete all store data. InventoryBuffer and ChatConversation have no
+      // FK to Session so must be deleted explicitly. ChatMessage cascades
+      // automatically when its parent ChatConversation is deleted.
       await prisma.$transaction([
+        prisma.inventoryBuffer.deleteMany({ where: { shop } }),
+        prisma.chatConversation.deleteMany({ where: { shopId: shop } }),
         prisma.alertHistory.deleteMany({ where: { shop } }),
         prisma.inventoryTracking.deleteMany({ where: { shop } }),
         prisma.storeSettings.deleteMany({ where: { shop } }),
