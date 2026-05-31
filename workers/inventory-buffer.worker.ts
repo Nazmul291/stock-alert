@@ -74,7 +74,19 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
     return;
   }
 
-  // ── 3. Fire the notification ──────────────────────────────────────────────
+  // ── 3. Atomically claim the buffer row ───────────────────────────────────
+  // Multiple concurrent workers may pass the stale-check simultaneously.
+  // Only the one that actually deletes the row (count > 0) fires the alert.
+  const { count } = await prisma.inventoryBuffer.deleteMany({
+    where: { eventKey, updatedAt: { lte: staleCutoff } },
+  });
+
+  if (count === 0) {
+    console.log(`[Worker] Buffer ${eventKey} already claimed by another worker — skipping.`);
+    return;
+  }
+
+  // ── 4. Fire the notification ──────────────────────────────────────────────
   const payload = buffer.payload as unknown as BufferPayload;
   console.log(`[Worker] Quiet window elapsed — firing ${payload.alertType} alert for ${eventKey}.`);
 
@@ -90,8 +102,6 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
     );
   }
 
-  // ── 4. Delete the buffer row ──────────────────────────────────────────────
-  await prisma.inventoryBuffer.deleteMany({ where: { eventKey } });
   console.log(`[Worker] Alert sent and buffer cleared for ${eventKey}.`);
 }
 
