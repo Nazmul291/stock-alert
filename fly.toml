@@ -25,6 +25,15 @@ primary_region = "iad"
   min_machines_running = 1
   processes            = ["web"]
 
+  # Grace period lets Node.js finish loading before Fly checks the port.
+  # Without this the smoke check fires instantly and warns "not listening".
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval     = "30s"
+    timeout      = "5s"
+    method       = "GET"
+    path         = "/api/health"
+
 # ── Machine sizes per process type ───────────────────────────────────────────
 [[vm]]
   size      = "shared-cpu-1x"
