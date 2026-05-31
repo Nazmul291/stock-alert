@@ -1,10 +1,9 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "a4c382e2cb454fd7c45b655248b2d1f7"
-application_url = "https://dev.nazmulcodes.org"
+client_id = "38a870cdc7f41175fd49a52689539f9d"
+application_url = "https://nco-stock-alert.fly.dev"
 embedded = true
-name = "Stock Alert Dev"
-handle = "stock-alert-dev-1"
+name = "Stock Alert"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
@@ -39,9 +38,9 @@ embedded = false
 
 [auth]
 redirect_urls = [
-  "https://dev.nazmulcodes.org/auth/callback",
-  "https://dev.nazmulcodes.org/auth/shopify/callback",
-  "https://dev.nazmulcodes.org/api/auth/callback"
+  "https://nco-stock-alert.fly.dev/auth/callback",
+  "https://nco-stock-alert.fly.dev/auth/shopify/callback",
+  "https://nco-stock-alert.fly.dev/api/auth/callback"
 ]
 
 [build]
