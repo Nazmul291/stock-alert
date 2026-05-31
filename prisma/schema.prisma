@@ -147,6 +147,23 @@ model SetupProgress {
 
 
 
+// Transient debounce buffer — rows are deleted after the alert fires.
+// No FK relation to Session so cascades don't interfere with rapid writes.
+model InventoryBuffer {
+  id        String   @id @default(cuid())
+  eventKey  String   @unique // "{productId}_{shop}_{alertType}"
+  shop      String
+  productId String
+  alertType String   // "low_stock" | "out_of_stock"
+  payload   Json     // Full notification context; overwritten on each upsert
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz // auto-reset on every upsert → stale-check pivot
+
+  @@index([shop])
+  @@index([updatedAt])
+  @@map("inventory_buffer")
+}
+
 enum AdminRole {
   ADMIN
   SUPPORT_AGENT
