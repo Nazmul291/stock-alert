@@ -1,6 +1,6 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Outlet, redirect, useLoaderData, useRouteError, useNavigation } from "react-router";
 import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
-import { Outlet, redirect, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
@@ -47,11 +47,53 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { apiKey: process.env.SHOPIFY_API_KEY || "", shop };
 };
 
+
+function GlobalStyles() {
+  return (
+    <style>{`
+      @keyframes nav-spin { to { transform: rotate(360deg); } }
+      @keyframes btn-spin { to { transform: rotate(360deg); } }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+    `}</style>
+  );
+}
+
+function NavigationLoadingOverlay() {
+  return (
+    <div style={{
+      position: "fixed",
+      top: 0, left: 0, right: 0, bottom: 0,
+      backgroundColor: "rgba(255, 255, 255, 0.75)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999,
+    }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{
+          width: "36px",
+          height: "36px",
+          border: "3px solid #e4e5e7",
+          borderTopColor: "#008060",
+          borderRadius: "50%",
+          animation: "nav-spin 0.8s linear infinite",
+        }} />
+        <div style={{ marginTop: "10px", fontSize: "13px", color: "#6d7175" }}>Loading…</div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { apiKey, shop } = useLoaderData<typeof loader>();
 
+  const navigation = useNavigation();
+  const isNavigating = navigation.state === "loading";
+
   return (
     <AppProvider embedded apiKey={apiKey}>
+      <GlobalStyles />
+      {isNavigating && <NavigationLoadingOverlay />}
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
         <s-link href="/app/products">Products</s-link>

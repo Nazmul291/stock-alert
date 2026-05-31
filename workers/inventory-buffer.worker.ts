@@ -95,9 +95,21 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
   console.log(`[Worker] Alert sent and buffer cleared for ${eventKey}.`);
 }
 
+// ── Supabase heartbeat ────────────────────────────────────────────────────────
+// Supabase free tier pauses after inactivity; a periodic query keeps it alive.
+const heartbeatInterval = setInterval(async () => {
+  try {
+    await prisma.$executeRaw`SELECT 1`;
+    console.log("[Worker] Heartbeat OK");
+  } catch (err) {
+    console.error("[Worker] Heartbeat failed:", (err as Error).message);
+  }
+}, 5 * 60 * 1000); // every 5 minutes
+
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 async function shutdown() {
   console.log("[Worker] Shutting down...");
+  clearInterval(heartbeatInterval);
   await boss.stop({ graceful: true });
   await prisma.$disconnect();
   process.exit(0);
