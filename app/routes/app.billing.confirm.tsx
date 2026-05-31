@@ -4,6 +4,7 @@ import { useFetcher, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
+import { getIsTestStore } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -11,13 +12,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, admin, session } = await authenticate.admin(request);
   const shop = session.shop;
+  const isTest = await getIsTestStore(admin);
 
   try {
     const { appSubscriptions } = await billing.check({
       plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-      isTest: process.env.TEST_PAYMENT === "true",
+      isTest,
     });
 
     const activePlan = appSubscriptions.some((s: any) => s.name === BILLING_PLAN_PRO)

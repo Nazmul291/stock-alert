@@ -4,16 +4,18 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../lib/billing-plans";
 import prisma from "../db.server";
+import { getIsTestStore } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
+  const isTest = await getIsTestStore(admin);
 
   // Already subscribed — skip onboarding
   try {
     const { hasActivePayment } = await billing.check({
       plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-      isTest: process.env.TEST_PAYMENT === "true",
+      isTest,
     });
     if (hasActivePayment) throw redirect("/app");
   } catch (err) {

@@ -5,9 +5,10 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
+import { getIsTestStore } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -16,9 +17,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!isPublicRoute) {
     try {
+      const isTest = await getIsTestStore(admin);
       const { hasActivePayment } = await billing.check({
         plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-        isTest: process.env.TEST_PAYMENT === "true",
+        isTest,
       });
       if (!hasActivePayment) {
         // Preserve embedded/host/shop so App Bridge can detect the iframe context
