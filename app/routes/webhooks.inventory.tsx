@@ -318,37 +318,40 @@ async function upsertBufferAndSchedule(
   payload: BufferPayload,
 ): Promise<void> {
   // eventKey uniquely identifies: which product, which shop, which alert type.
-  // A single row per key is maintained; each new webhook overwrites the payload
-  // and Prisma's @updatedAt resets the timestamp — restarting the 10-second window.
   const eventKey = `${productId}_${shop}_${alertType}`;
+  const boss = await getBoss();
 
-  try {
-    await prisma.inventoryBuffer.upsert({
+  // pg_advisory_xact_lock serializes concurrent webhooks for the same eventKey
+  // at the DB level — handles millisecond-apart bursts without a race condition.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${eventKey}))`;
+
+    const existing = await tx.inventoryBuffer.findUnique({
       where: { eventKey },
-      // @updatedAt is reset automatically by Prisma on every update — this is
-      // the "timer reset" mechanism the stale check in the worker depends on.
+      select: { jobId: true },
+    });
+
+    if (existing?.jobId) {
+      try {
+        await boss.cancel(QUEUE_NAME, existing.jobId);
+      } catch {
+        // Already ran or cancelled — safe to ignore.
+      }
+    }
+
+    await tx.inventoryBuffer.upsert({
+      where: { eventKey },
       update: { payload: payload as any },
       create: { eventKey, shop, productId, alertType, payload: payload as any },
     });
-  } catch (err: any) {
-    // P2002 = two concurrent requests both attempted INSERT (rare with PostgreSQL
-    // ON CONFLICT upsert, but handled defensively for safety).
-    if (err?.code === "P2002") {
-      await prisma.inventoryBuffer.update({
-        where: { eventKey },
-        data: { payload: payload as any },
-      });
-    } else {
-      throw err;
-    }
-  }
 
-  // Schedule a delayed job via pg-boss (uses the existing PostgreSQL DB —
-  // no Redis required). Each webhook adds one job; the worker's stale-check
-  // ensures only the LAST job in a burst actually fires the notification.
-  const boss = await getBoss();
-  await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
+    const jobId = await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
+    if (jobId) {
+      await tx.inventoryBuffer.update({ where: { eventKey }, data: { jobId } });
+    }
+  });
+
   console.log(
-    `[Webhook] Buffered ${alertType} alert for product ${productId} — key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s if no further updates`,
+    `[Webhook] Debounce reset for ${alertType} — product ${productId}, key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s`,
   );
 }
