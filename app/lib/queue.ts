@@ -1,12 +1,9 @@
-import { Queue } from "bullmq";
-import IORedis from "ioredis";
+import PgBoss from "pg-boss";
 
-// How long (ms) to wait for silence before firing one notification.
-export const DEBOUNCE_MS = 10_000;
+export const QUEUE_NAME = "inventory-buffer";
+export const DEBOUNCE_SECONDS = 10;
 
 // ── Shared payload type ──────────────────────────────────────────────────────
-// Stored in InventoryBuffer.payload so the worker has everything it needs
-// without making any additional Shopify API or DB calls.
 
 export interface StoreCtx {
   shop: string;
@@ -37,37 +34,32 @@ export interface BufferPayload {
   productCtx: ProductCtx;
 }
 
-// ── BullMQ job data ──────────────────────────────────────────────────────────
-
 export interface InventoryBufferJobData {
-  eventKey: string; // "{productId}_{shop}_{alertType}"
+  eventKey: string;
 }
 
-// ── Queue singleton (lazy — created on first use, server-side only) ──────────
+// ── pg-boss singleton (producer side — web process) ──────────────────────────
+// The worker process creates its own separate instance.
 
-let _connection: IORedis | null = null;
-let _queue: Queue<InventoryBufferJobData> | null = null;
+let _boss: PgBoss | null = null;
+let _initPromise: Promise<PgBoss> | null = null;
 
-function getConnection(): IORedis {
-  if (!_connection) {
-    _connection = new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379", {
-      maxRetriesPerRequest: null, // required by BullMQ
-      enableReadyCheck: false,
-      lazyConnect: true,
-    });
+export async function getBoss(): Promise<PgBoss> {
+  if (_boss) return _boss;
+
+  // Prevent multiple concurrent init calls from racing
+  if (!_initPromise) {
+    _initPromise = (async () => {
+      const boss = new PgBoss({
+        connectionString: process.env.DATABASE_URL!,
+        // Keep the producer lightweight — no polling, no scheduling overhead
+        noScheduling: true,
+      });
+      await boss.start();
+      _boss = boss;
+      return boss;
+    })();
   }
-  return _connection;
-}
 
-export function getInventoryBufferQueue(): Queue<InventoryBufferJobData> {
-  if (!_queue) {
-    _queue = new Queue<InventoryBufferJobData>("inventory-buffer", {
-      connection: getConnection(),
-      defaultJobOptions: {
-        removeOnComplete: true,
-        removeOnFail: 100,
-      },
-    });
-  }
-  return _queue;
+  return _initPromise;
 }

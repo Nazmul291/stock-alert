@@ -3,8 +3,9 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendRestockAlert } from "../lib/notifications";
 import {
-  getInventoryBufferQueue,
-  DEBOUNCE_MS,
+  getBoss,
+  QUEUE_NAME,
+  DEBOUNCE_SECONDS,
   type BufferPayload,
 } from "../lib/queue";
 
@@ -308,7 +309,7 @@ async function processInventoryUpdate(
   }
 }
 
-// ── Buffer upsert + BullMQ job scheduling ─────────────────────────────────────
+// ── Buffer upsert + pg-boss job scheduling ───────────────────────────────────
 
 async function upsertBufferAndSchedule(
   shop: string,
@@ -327,13 +328,7 @@ async function upsertBufferAndSchedule(
       // @updatedAt is reset automatically by Prisma on every update — this is
       // the "timer reset" mechanism the stale check in the worker depends on.
       update: { payload: payload as any },
-      create: {
-        eventKey,
-        shop,
-        productId,
-        alertType,
-        payload: payload as any,
-      },
+      create: { eventKey, shop, productId, alertType, payload: payload as any },
     });
   } catch (err: any) {
     // P2002 = two concurrent requests both attempted INSERT (rare with PostgreSQL
@@ -348,44 +343,12 @@ async function upsertBufferAndSchedule(
     }
   }
 
-  // Schedule a delayed job. The worker's stale check means only the LAST job
-  // (from the final webhook in a burst) actually fires the notification.
-  // Earlier jobs wake up, see that updatedAt is too recent, and exit silently.
-  try {
-    await getInventoryBufferQueue().add(
-      "send-alert",
-      { eventKey },
-      { delay: DEBOUNCE_MS },
-    );
-    console.log(
-      `[Webhook] Buffered ${alertType} alert for product ${productId} — key: ${eventKey}, fires in ${DEBOUNCE_MS / 1000}s if no further updates`,
-    );
-  } catch (queueErr) {
-    // Redis unavailable — fall back to direct (un-debounced) notification so
-    // merchants still receive alerts even if the queue is down.
-    console.error(
-      "[Webhook] BullMQ unavailable, falling back to direct notification:",
-      queueErr,
-    );
-    const { sendLowStockAlert, sendOutOfStockAlert } = await import(
-      "../lib/notifications"
-    );
-    if (alertType === "out_of_stock") {
-      await sendOutOfStockAlert(
-        payload.storeCtx,
-        payload.productCtx,
-        payload.settingsCtx,
-      );
-    } else {
-      await sendLowStockAlert(
-        payload.storeCtx,
-        payload.productCtx,
-        payload.newQty,
-        payload.threshold,
-        payload.settingsCtx,
-      );
-    }
-    // Clean up any dangling buffer row
-    await prisma.inventoryBuffer.delete({ where: { eventKey } }).catch(() => {});
-  }
+  // Schedule a delayed job via pg-boss (uses the existing PostgreSQL DB —
+  // no Redis required). Each webhook adds one job; the worker's stale-check
+  // ensures only the LAST job in a burst actually fires the notification.
+  const boss = await getBoss();
+  await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
+  console.log(
+    `[Webhook] Buffered ${alertType} alert for product ${productId} — key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s if no further updates`,
+  );
 }
