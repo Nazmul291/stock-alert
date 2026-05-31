@@ -1,4 +1,4 @@
-import PgBoss from "pg-boss";
+import { PgBoss } from "pg-boss";
 
 export const QUEUE_NAME = "inventory-buffer";
 export const DEBOUNCE_SECONDS = 10;
@@ -56,6 +56,8 @@ export async function getBoss(): Promise<PgBoss> {
         noScheduling: true,
       });
       await boss.start();
+      // pg-boss v12 requires explicit queue creation before send/work
+      await boss.createQueue(QUEUE_NAME);
       _boss = boss;
       return boss;
     })();

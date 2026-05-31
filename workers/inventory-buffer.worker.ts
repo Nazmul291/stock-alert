@@ -10,7 +10,7 @@
  */
 
 import "dotenv/config";
-import PgBoss from "pg-boss";
+import { PgBoss } from "pg-boss";
 import prisma from "../app/db.server.js";
 import {
   sendLowStockAlert,
@@ -33,6 +33,8 @@ boss.on("error", (err) =>
 );
 
 await boss.start();
+// pg-boss v12 requires explicit queue creation before work() or send()
+await boss.createQueue(QUEUE_NAME);
 console.log("[Worker] pg-boss started. Listening on queue:", QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────

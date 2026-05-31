@@ -80,9 +80,4 @@ export default defineConfig({
       "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/support",
     ],
   },
-  ssr: {
-    // pg-boss is CJS; bundling it lets Vite handle the CJS→ESM interop
-    // so `import PgBoss from 'pg-boss'` resolves the default export correctly.
-    noExternal: ["pg-boss"],
-  },
 }) satisfies UserConfig;
