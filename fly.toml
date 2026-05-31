@@ -1,0 +1,37 @@
+app = "nco-stock-alert"
+primary_region = "iad"
+
+[build]
+  # Fly builds the image using the Dockerfile in the project root
+
+# ── Run DB migrations before new machines start (zero-downtime safe) ─────────
+[deploy]
+  release_command = "npx prisma migrate deploy"
+
+# ── Two process types, one app, one image ────────────────────────────────────
+# Fly creates a separate VM for each process type.
+# They share all secrets (REDIS_URL, DATABASE_URL, etc.) automatically.
+# Scale independently: fly scale count web=1 worker=1
+[processes]
+  web    = "npm run start"
+  worker = "npm run start:worker"
+
+# ── HTTP traffic goes to the web process only ────────────────────────────────
+[http_service]
+  internal_port        = 3000
+  force_https          = true
+  auto_stop_machines   = false   # must stay alive to receive Shopify webhooks
+  auto_start_machines  = true
+  min_machines_running = 1
+  processes            = ["web"]
+
+# ── Machine sizes per process type ───────────────────────────────────────────
+[[vm]]
+  size      = "shared-cpu-1x"
+  memory    = "512mb"
+  processes = ["web"]
+
+[[vm]]
+  size      = "shared-cpu-1x"
+  memory    = "256mb"
+  processes = ["worker"]

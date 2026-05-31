@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String    @unique
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?   @db.VarChar(255)
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+  plan          Plan      @default(basic)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  storeSettings     StoreSettings?
+  inventoryTracking InventoryTracking[]
+  alertHistory      AlertHistory[]
+  setupProgress     SetupProgress?
+
+  @@index([plan])
+}
+
+enum Plan {
+  basic
+  pro
+  enterprise
+}
+
+enum AlertType {
+  low_stock
+  out_of_stock
+  restock
+}
+
+enum InventoryStatus {
+  in_stock
+  low_stock
+  out_of_stock
+  deactivated
+}
+
+model StoreSettings {
+  id                   String   @id @default(uuid()) @db.Uuid
+  shop                 String   @unique
+  lowStockThreshold    Int      @default(5) @map("low_stock_threshold")
+  autoHideEnabled      Boolean  @default(false) @map("auto_hide_enabled")
+  emailNotifications   Boolean  @default(true) @map("email_notifications")
+  slackNotifications   Boolean  @default(false) @map("slack_notifications")
+  notificationEmail    String?  @map("notification_email") @db.VarChar(255)
+  slackWebhookUrl      String?  @map("slack_webhook_url")
+  autoRepublishEnabled Boolean  @default(false) @map("auto_republish_enabled")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop])
+  @@map("store_settings")
+}
+
+model InventoryTracking {
+  id               String          @id @default(uuid()) @db.Uuid
+  shop             String
+  productId        BigInt          @map("product_id")
+  productTitle     String?         @map("product_title") @db.VarChar(500)
+  variantTitle     String?         @map("variant_title") @db.VarChar(500)
+  sku              String?         @db.VarChar(255)
+  currentQuantity  Int             @default(0) @map("current_quantity")
+  previousQuantity Int?            @map("previous_quantity")
+  lastCheckedAt    DateTime        @default(now()) @map("last_checked_at") @db.Timestamptz
+  lastAlertSentAt  DateTime?       @map("last_alert_sent_at") @db.Timestamptz
+  isHidden           Boolean         @default(false) @map("is_hidden")
+  monitoringEnabled  Boolean         @default(true) @map("monitoring_enabled")
+  inventoryStatus    InventoryStatus @default(in_stock) @map("inventory_status")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@unique([shop, productId])
+  @@index([shop])
+  @@index([shop, productId])
+  @@index([shop, currentQuantity])
+  @@index([shop, isHidden])
+  @@index([lastCheckedAt])
+  @@index([shop, lastAlertSentAt])
+  @@index([shop, inventoryStatus])
+  @@map("inventory_tracking")
+}
+
+model AlertHistory {
+  id                 String     @id @default(uuid()) @db.Uuid
+  shop               String
+  productId          BigInt?    @map("product_id")
+  productTitle       String?    @map("product_title") @db.VarChar(500)
+  alertType          AlertType? @map("alert_type")
+  quantityAtAlert    Int?       @map("quantity_at_alert")
+  thresholdTriggered Int?       @map("threshold_triggered")
+  sentToEmail        String?    @map("sent_to_email") @db.VarChar(255)
+  sentToSlack        Boolean    @default(false) @map("sent_to_slack")
+  sentAt             DateTime   @default(now()) @map("sent_at") @db.Timestamptz
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop])
+  @@index([sentAt(sort: Desc)])
+  @@index([shop, sentAt(sort: Desc)])
+  @@map("alert_history")
+}
+
+model SetupProgress {
+  id                          String   @id @default(uuid()) @db.Uuid
+  shop                        String   @unique
+  appInstalled                Boolean  @default(true) @map("app_installed")
+  globalSettingsConfigured    Boolean  @default(false) @map("global_settings_configured")
+  notificationsConfigured     Boolean  @default(false) @map("notifications_configured")
+  productThresholdsConfigured Boolean  @default(false) @map("product_thresholds_configured")
+  firstProductTracked         Boolean  @default(false) @map("first_product_tracked")
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop])
+  @@map("setup_progress")
+}
+
+
+
+
+// Transient debounce buffer — rows are deleted after the alert fires.
+// No FK relation to Session so cascades don't interfere with rapid writes.
+model InventoryBuffer {
+  id        String   @id @default(cuid())
+  eventKey  String   @unique // "{productId}_{shop}_{alertType}"
+  shop      String
+  productId String
+  alertType String   // "low_stock" | "out_of_stock"
+  payload   Json     // Full notification context; overwritten on each upsert
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz // auto-reset on every upsert → stale-check pivot
+
+  @@index([shop])
+  @@index([updatedAt])
+  @@map("inventory_buffer")
+}
+
+enum AdminRole {
+  ADMIN
+  SUPPORT_AGENT
+}
+
+enum ChatStatus {
+  OPEN
+  ENDED
+}
+
+enum ChatSender {
+  MERCHANT
+  ADMIN
+  BOT
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String
+  role         AdminRole @default(SUPPORT_AGENT)
+  isActive     Boolean   @default(true)
+  lastSeenAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  assignedChats ChatConversation[]
+
+  @@map("admin_users")
+}
+
+// NOTE: Add a relation to your Shop model if you want shop-level cascades:
+//   shop     Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+// Otherwise remove the `shop` field and use shopId as a plain string.
+
+model ChatConversation {
+  id            String        @id @default(cuid())
+  shopId        String
+  merchantEmail String?
+  status        ChatStatus    @default(OPEN)
+  startedAt     DateTime      @default(now())
+  endedAt       DateTime?
+  assignedToId  String?
+  assignedTo    AdminUser?    @relation(fields: [assignedToId], references: [id])
+  messages      ChatMessage[]
+
+  @@map("chat_conversations")
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         ChatSender
+  text           String
+  sentAt         DateTime         @default(now())
+
+  @@map("chat_messages")
+}

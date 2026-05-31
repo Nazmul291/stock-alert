@@ -1,38 +1,47 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "a4c382e2cb454fd7c45b655248b2d1f7"
-name = "Stock Alert Dev"
-handle = "stock-alert-dev-1"
-application_url = "https://dev.nazmulcodes.org"
+client_id = "38a870cdc7f41175fd49a52689539f9d"
+application_url = "https://nco-stock-alert.fly.dev"
 embedded = true
-
-[build]
-automatically_update_urls_on_dev = true
-dev_store_url = "stock-alert-2.myshopify.com"
+name = "Stock Alert"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_products,read_inventory,write_inventory"
+scopes = "read_inventory,read_products,write_inventory,write_products,read_locations"
 
-[auth]
-redirect_urls = [
-  "https://dev.nazmulcodes.org/auth/callback",
-  "https://dev.nazmulcodes.org/auth/shopify/callback",
-  "https://dev.nazmulcodes.org/api/auth/callback"
-]
 
 [webhooks]
-api_version = "2024-10"
+api_version = "2025-10"
 
-# Mandatory compliance webhooks
-[[webhooks.subscriptions]]
-compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
-uri = "/api/webhooks/compliance"
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
 
-# Inventory webhooks
-[[webhooks.subscriptions]]
-topics = ["inventory_levels/update", "products/update", "products/delete"]
-uri = "/api/webhooks/inventory"
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/inventory"
+  topics = [ "inventory_levels/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products"
+  topics = [ "products/delete", "products/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/compliance"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
 [pos]
 embedded = false
+
+[auth]
+redirect_urls = [
+  "https://nco-stock-alert.fly.dev/auth/callback",
+  "https://nco-stock-alert.fly.dev/auth/shopify/callback",
+  "https://nco-stock-alert.fly.dev/api/auth/callback"
+]
+
+[build]
+automatically_update_urls_on_dev = true
