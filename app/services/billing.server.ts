@@ -3,7 +3,7 @@ import { authenticate } from "../shopify.server";
 type AdminClient = Awaited<ReturnType<typeof authenticate.admin>>["admin"];
 
 export async function getIsTestStore(admin: AdminClient): Promise<boolean> {
-  if (process.env.ENABLE_TEST_CHARGES === "true") return true; // force test mode override
+  if (process.env.TEST_PAYMENT === "true") return true; // force test mode override
   try {
     const res = await admin.graphql(
       `#graphql
