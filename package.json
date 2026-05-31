@@ -19,7 +19,7 @@
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
     "dev:worker": "tsx --env-file=.env --watch workers/inventory-buffer.worker.ts",
-    "start:worker": "tsx --env-file=.env workers/inventory-buffer.worker.ts"
+    "start:worker": "tsx workers/inventory-buffer.worker.ts"
   },
   "type": "module",
   "engines": {
