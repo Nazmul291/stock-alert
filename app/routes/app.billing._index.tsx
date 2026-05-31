@@ -3,16 +3,18 @@ import { useLoaderData, useActionData, Form, useNavigation } from "react-router"
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
+import { getIsTestStore } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, admin, session } = await authenticate.admin(request);
   const shop = session.shop;
+  const isTest = await getIsTestStore(admin);
 
   let activePlan: "basic" | "pro" | null = null;
   try {
     const { appSubscriptions } = await billing.check({
       plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-      isTest: process.env.TEST_PAYMENT === "true",
+      isTest,
     });
     activePlan = appSubscriptions.some((s: any) => s.name === BILLING_PLAN_PRO)
       ? "pro"
@@ -34,7 +36,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { billing, admin, session } = await authenticate.admin(request);
+  const isTest = await getIsTestStore(admin);
   const form = await request.formData();
   const targetPlan = form.get("plan") as string;
   const storeSlug = session.shop.replace(".myshopify.com", "");
@@ -50,12 +53,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { appSubscriptions } = await billing.check({
       plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-      isTest: process.env.TEST_PAYMENT === "true",
+      isTest,
     });
     for (const sub of appSubscriptions) {
       await billing.cancel({
         subscriptionId: sub.id,
-        isTest: process.env.TEST_PAYMENT === "true",
+        isTest,
         prorate: false,
       });
     }
@@ -64,7 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    await billing.request({ plan, isTest: process.env.TEST_PAYMENT === "true", returnUrl });
+    await billing.request({ plan, isTest, returnUrl });
   } catch (err) {
     // billing.request throws a Response redirect on success — let it through
     if (err instanceof Response) throw err;
