@@ -321,43 +321,35 @@ async function upsertBufferAndSchedule(
   const eventKey = `${productId}_${shop}_${alertType}`;
   const boss = await getBoss();
 
-  // Cancel the previous pending job so the debounce timer resets.
-  // Only one pg-boss job per eventKey exists at any time.
-  const existing = await prisma.inventoryBuffer.findUnique({
-    where: { eventKey },
-    select: { jobId: true },
-  });
-  if (existing?.jobId) {
-    try {
-      await boss.cancel(QUEUE_NAME, existing.jobId);
-    } catch {
-      // Job already ran or was cancelled — safe to ignore.
-    }
-  }
+  // pg_advisory_xact_lock serializes concurrent webhooks for the same eventKey
+  // at the DB level — handles millisecond-apart bursts without a race condition.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${eventKey}))`;
 
-  // Upsert the buffer row with the latest payload.
-  try {
-    await prisma.inventoryBuffer.upsert({
+    const existing = await tx.inventoryBuffer.findUnique({
+      where: { eventKey },
+      select: { jobId: true },
+    });
+
+    if (existing?.jobId) {
+      try {
+        await boss.cancel(QUEUE_NAME, existing.jobId);
+      } catch {
+        // Already ran or cancelled — safe to ignore.
+      }
+    }
+
+    await tx.inventoryBuffer.upsert({
       where: { eventKey },
       update: { payload: payload as any },
       create: { eventKey, shop, productId, alertType, payload: payload as any },
     });
-  } catch (err: any) {
-    if (err?.code === "P2002") {
-      await prisma.inventoryBuffer.update({
-        where: { eventKey },
-        data: { payload: payload as any },
-      });
-    } else {
-      throw err;
-    }
-  }
 
-  // Schedule a new debounce job and store its ID so the next webhook can cancel it.
-  const jobId = await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
-  if (jobId) {
-    await prisma.inventoryBuffer.update({ where: { eventKey }, data: { jobId } });
-  }
+    const jobId = await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
+    if (jobId) {
+      await tx.inventoryBuffer.update({ where: { eventKey }, data: { jobId } });
+    }
+  });
 
   console.log(
     `[Webhook] Debounce reset for ${alertType} — product ${productId}, key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s`,
