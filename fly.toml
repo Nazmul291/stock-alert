@@ -1,4 +1,4 @@
-app = "stock-alert"
+app = "nco-stock-alert"
 primary_region = "iad"
 
 [build]
