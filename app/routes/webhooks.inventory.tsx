@@ -318,21 +318,31 @@ async function upsertBufferAndSchedule(
   payload: BufferPayload,
 ): Promise<void> {
   // eventKey uniquely identifies: which product, which shop, which alert type.
-  // A single row per key is maintained; each new webhook overwrites the payload
-  // and Prisma's @updatedAt resets the timestamp — restarting the 10-second window.
   const eventKey = `${productId}_${shop}_${alertType}`;
+  const boss = await getBoss();
 
+  // Cancel the previous pending job so the debounce timer resets.
+  // Only one pg-boss job per eventKey exists at any time.
+  const existing = await prisma.inventoryBuffer.findUnique({
+    where: { eventKey },
+    select: { jobId: true },
+  });
+  if (existing?.jobId) {
+    try {
+      await boss.cancel(QUEUE_NAME, existing.jobId);
+    } catch {
+      // Job already ran or was cancelled — safe to ignore.
+    }
+  }
+
+  // Upsert the buffer row with the latest payload.
   try {
     await prisma.inventoryBuffer.upsert({
       where: { eventKey },
-      // @updatedAt is reset automatically by Prisma on every update — this is
-      // the "timer reset" mechanism the stale check in the worker depends on.
       update: { payload: payload as any },
       create: { eventKey, shop, productId, alertType, payload: payload as any },
     });
   } catch (err: any) {
-    // P2002 = two concurrent requests both attempted INSERT (rare with PostgreSQL
-    // ON CONFLICT upsert, but handled defensively for safety).
     if (err?.code === "P2002") {
       await prisma.inventoryBuffer.update({
         where: { eventKey },
@@ -343,12 +353,13 @@ async function upsertBufferAndSchedule(
     }
   }
 
-  // Schedule a delayed job via pg-boss (uses the existing PostgreSQL DB —
-  // no Redis required). Each webhook adds one job; the worker's stale-check
-  // ensures only the LAST job in a burst actually fires the notification.
-  const boss = await getBoss();
-  await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
+  // Schedule a new debounce job and store its ID so the next webhook can cancel it.
+  const jobId = await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
+  if (jobId) {
+    await prisma.inventoryBuffer.update({ where: { eventKey }, data: { jobId } });
+  }
+
   console.log(
-    `[Webhook] Buffered ${alertType} alert for product ${productId} — key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s if no further updates`,
+    `[Webhook] Debounce reset for ${alertType} — product ${productId}, key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s`,
   );
 }

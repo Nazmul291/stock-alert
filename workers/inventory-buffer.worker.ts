@@ -18,7 +18,6 @@ import {
 } from "../app/lib/notifications.js";
 import {
   QUEUE_NAME,
-  DEBOUNCE_SECONDS,
   type BufferPayload,
   type InventoryBufferJobData,
 } from "../app/lib/queue.js";
@@ -61,32 +60,17 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
     return;
   }
 
-  // ── 2. Stale-check ────────────────────────────────────────────────────────
-  // If another webhook arrived after this job was scheduled it reset updatedAt
-  // and enqueued its own job. This job exits; the newer job fires the alert.
-  const staleCutoff = new Date(Date.now() - DEBOUNCE_SECONDS * 1000);
-
-  if (buffer.updatedAt > staleCutoff) {
-    const msSince = Date.now() - buffer.updatedAt.getTime();
-    console.log(
-      `[Worker] Buffer ${eventKey} updated ${msSince}ms ago — within debounce window. Skipping.`,
-    );
-    return;
-  }
-
-  // ── 3. Atomically claim the buffer row ───────────────────────────────────
-  // Multiple concurrent workers may pass the stale-check simultaneously.
-  // Only the one that actually deletes the row (count > 0) fires the alert.
-  const { count } = await prisma.inventoryBuffer.deleteMany({
-    where: { eventKey, updatedAt: { lte: staleCutoff } },
-  });
+  // ── 2. Atomically claim the buffer row ───────────────────────────────────
+  // The webhook handler guarantees only one pending job per eventKey, but
+  // deleteMany here guards against any edge-case concurrent execution.
+  const { count } = await prisma.inventoryBuffer.deleteMany({ where: { eventKey } });
 
   if (count === 0) {
-    console.log(`[Worker] Buffer ${eventKey} already claimed by another worker — skipping.`);
+    console.log(`[Worker] Buffer ${eventKey} already claimed — skipping.`);
     return;
   }
 
-  // ── 4. Fire the notification ──────────────────────────────────────────────
+  // ── 3. Fire the notification ──────────────────────────────────────────────
   const payload = buffer.payload as unknown as BufferPayload;
   console.log(`[Worker] Quiet window elapsed — firing ${payload.alertType} alert for ${eventKey}.`);
 

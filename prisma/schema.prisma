@@ -156,8 +156,9 @@ model InventoryBuffer {
   productId String
   alertType String   // "low_stock" | "out_of_stock"
   payload   Json     // Full notification context; overwritten on each upsert
+  jobId     String?  // pg-boss job ID of the current pending debounce job
   createdAt DateTime @default(now()) @db.Timestamptz
-  updatedAt DateTime @updatedAt @db.Timestamptz // auto-reset on every upsert → stale-check pivot
+  updatedAt DateTime @updatedAt @db.Timestamptz
 
   @@index([shop])
   @@index([updatedAt])
