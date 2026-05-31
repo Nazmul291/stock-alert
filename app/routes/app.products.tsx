@@ -620,8 +620,10 @@ function InventorySection({
               <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{loc.locationName}</span>
               <input
                 type="number"
+                min="0"
                 value={edits[key] ?? ""}
                 onChange={(e) => onEdit(key, e.target.value)}
+                placeholder="0"
                 style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 8px", fontSize: 13, textAlign: "right" }}
                 aria-label={`Quantity at ${loc.locationName}`}
               />
@@ -671,8 +673,10 @@ function InventorySection({
                       <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{loc.locationName}</span>
                       <input
                         type="number"
+                        min="0"
                         value={edits[key] ?? ""}
                         onChange={(e) => onEdit(key, e.target.value)}
+                        placeholder="0"
                         style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 8px", fontSize: 13, textAlign: "right" }}
                         aria-label={`Quantity at ${loc.locationName}`}
                       />
@@ -825,8 +829,8 @@ export default function ProductsPage() {
     .map(([key, val]) => {
       const parts = key.split("__");
       if (parts.length !== 2) return null;
-      const quantity = parseInt(val);
-      if (isNaN(quantity)) return null;
+      const parsed = parseInt(val);
+      const quantity = isNaN(parsed) || val.trim() === "" ? 0 : Math.max(0, parsed);
       return { inventoryItemId: parts[0], locationId: parts[1], quantity };
     })
     .filter(Boolean) as Array<{ inventoryItemId: string; locationId: string; quantity: number }>;

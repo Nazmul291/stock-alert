@@ -174,12 +174,12 @@ async function processInventoryUpdate(shop: string, inventoryItemId: string, dat
     orderBy: { sentAt: "desc" },
   });
 
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const oneHourAgo = new Date(Date.now() - 10 * 60 * 1000);
   const withinCooldown = lastAlert && lastAlert.sentAt > oneHourAgo && lastAlert.alertType === alertType;
 
   if (withinCooldown) {
     const minsAgo = Math.round((Date.now() - lastAlert!.sentAt.getTime()) / 60_000);
-    console.log(`[Webhook] Skipping ${alertType} alert for product ${productId} — same type sent ${minsAgo}m ago (< 1h cooldown)`);
+    console.log(`[Webhook] Skipping ${alertType} alert for product ${productId} — same type sent ${minsAgo}m ago (< 10m cooldown)`);
     return;
   }
 
