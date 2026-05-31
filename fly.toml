@@ -31,14 +31,6 @@ primary_region = "iad"
     soft_limit = 200
     hard_limit = 250
 
-  # Grace period lets Node.js finish loading before Fly checks the port.
-  # Without this the smoke check fires instantly and warns "not listening".
-  [[http_service.checks]]
-    grace_period = "15s"
-    interval     = "30s"
-    timeout      = "5s"
-    method       = "GET"
-    path         = "/api/health"
 
 # ── Machine sizes per process type ───────────────────────────────────────────
 [[vm]]
