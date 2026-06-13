@@ -5,6 +5,8 @@ import {
   getLowStockEmailTemplate,
   getOutOfStockEmailTemplate,
   getRestockEmailTemplate,
+  getDigestEmailTemplate,
+  type DigestEmailData,
 } from './email-templates';
 
 const transporter = nodemailer.createTransport({
@@ -369,5 +371,22 @@ export async function sendRestockAlert(
 
   if (sentToEmail || sentToSlack) {
     await logAlert(store.shop, productId, product.title, 'restock', currentQuantity, null, sentToEmail, sentToSlack);
+  }
+}
+
+export async function sendDigestEmail(shop: string, recipients: string[], data: DigestEmailData): Promise<void> {
+  const { subject, html } = getDigestEmailTemplate(data);
+  for (const recipient of recipients) {
+    try {
+      await transporter.sendMail({
+        from: { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+        to: recipient,
+        subject,
+        html,
+      });
+      console.log(`[Notifications] Digest sent to ${recipient} for ${shop}`);
+    } catch (err) {
+      console.error(`[Notifications] Digest failed to ${recipient} for ${shop}:`, err);
+    }
   }
 }

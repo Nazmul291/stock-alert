@@ -184,3 +184,80 @@ export function getRestockEmailTemplate(data: EmailTemplateData): { subject: str
     ),
   };
 }
+
+export interface DigestProduct {
+  productTitle: string | null;
+  sku: string | null;
+  currentQuantity: number;
+  inventoryStatus: string;
+}
+
+export interface DigestEmailData {
+  shop: string;
+  frequency: 'Daily' | 'Weekly';
+  outOfStock: DigestProduct[];
+  lowStock: DigestProduct[];
+}
+
+export function getDigestEmailTemplate(data: DigestEmailData): { subject: string; html: string } {
+  const storeName = data.shop.replace('.myshopify.com', '');
+  const totalAtRisk = data.outOfStock.length + data.lowStock.length;
+
+  const productRow = (p: DigestProduct, isOut: boolean) => `
+    <tr>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
+        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(p.productTitle ?? 'Unknown')}</div>
+        ${p.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(p.sku)}</div>` : ''}
+      </td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;">
+        <span style="font-size:14px;font-weight:700;color:${isOut ? '#dc2626' : '#d97706'};">${p.currentQuantity}</span>
+        <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:${isOut ? '#fee2e2' : '#fef3c7'};color:${isOut ? '#991b1b' : '#92400e'};font-size:11px;font-weight:600;">${isOut ? 'Out of Stock' : 'Low Stock'}</span>
+      </td>
+    </tr>`;
+
+  const rows = [
+    ...data.outOfStock.map(p => productRow(p, true)),
+    ...data.lowStock.map(p => productRow(p, false)),
+  ].join('');
+
+  const body = `
+    ${header('📦', `${data.frequency} Inventory Digest`, `${totalAtRisk} product${totalAtRisk !== 1 ? 's' : ''} need${totalAtRisk === 1 ? 's' : ''} attention — ${storeName}`)}
+    <tr>
+      <td style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+          <tr>
+            <td style="padding:16px 20px;background:#f9fafb;text-align:center;border-right:1px solid #e5e7eb;">
+              <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Out of Stock</div>
+              <div style="font-size:30px;font-weight:800;color:#dc2626;line-height:1;">${data.outOfStock.length}</div>
+            </td>
+            <td style="padding:16px 20px;background:#f9fafb;text-align:center;">
+              <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Low Stock</div>
+              <div style="font-size:30px;font-weight:800;color:#d97706;line-height:1;">${data.lowStock.length}</div>
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+          <tr style="background:#f9fafb;">
+            <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Product</th>
+            <th style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Stock</th>
+          </tr>
+          ${rows}
+        </table>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="border-radius:8px;${BRAND_GRADIENT}">
+              <a href="https://admin.shopify.com/store/${storeName}/apps/stock-alert/app/products?filter=out_of_stock"
+                style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
+                View At-Risk Products &rarr;
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+
+  return {
+    subject: `📦 ${data.frequency} Digest: ${totalAtRisk} product${totalAtRisk !== 1 ? 's' : ''} need${totalAtRisk === 1 ? 's' : ''} attention`,
+    html: shell(`${totalAtRisk} products need attention — ${storeName}`, body),
+  };
+}

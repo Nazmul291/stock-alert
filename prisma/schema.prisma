@@ -66,9 +66,12 @@ model StoreSettings {
   slackNotifications   Boolean  @default(false) @map("slack_notifications")
   notificationEmail    String?  @map("notification_email")
   slackWebhookUrl      String?  @map("slack_webhook_url")
-  autoRepublishEnabled Boolean  @default(false) @map("auto_republish_enabled")
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  autoRepublishEnabled Boolean   @default(false) @map("auto_republish_enabled")
+  digestEnabled        Boolean   @default(true) @map("digest_enabled")
+  digestFrequency      String    @default("weekly") @map("digest_frequency")
+  lastDigestSentAt     DateTime? @map("last_digest_sent_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 

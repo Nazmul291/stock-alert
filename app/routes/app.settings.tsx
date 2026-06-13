@@ -29,6 +29,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackNotifications: settings.slackNotifications,
           notificationEmail: settings.notificationEmail ?? "",
           slackWebhookUrl: settings.slackWebhookUrl ?? "",
+          digestEnabled: settings.digestEnabled,
+          digestFrequency: settings.digestFrequency,
         }
       : {
           autoHideEnabled: false,
@@ -38,6 +40,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackNotifications: false,
           notificationEmail: "",
           slackWebhookUrl: "",
+          digestEnabled: true,
+          digestFrequency: "weekly",
         },
   };
 };
@@ -110,6 +114,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { intent: "save", success: false as const, errors };
   }
 
+  const rawDigestFrequency = form.get("digestFrequency") as string;
   const data = {
     autoHideEnabled: form.get("autoHideEnabled") === "true",
     autoRepublishEnabled: form.get("autoRepublishEnabled") === "true",
@@ -118,6 +123,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     slackNotifications: form.get("slackNotifications") === "true",
     notificationEmail: rawEmail || null,
     slackWebhookUrl: rawSlack || null,
+    digestEnabled: form.get("digestEnabled") === "true",
+    digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
   };
 
   await prisma.storeSettings.upsert({
@@ -161,6 +168,8 @@ export default function SettingsPage() {
   const saving = nav.state === "submitting";
   const [emailEnabled, setEmailEnabled] = useState(settings.emailNotifications);
   const [slackEnabled, setSlackEnabled] = useState(settings.slackNotifications);
+  const [digestEnabled, setDigestEnabled] = useState(settings.digestEnabled);
+  const [digestFrequency, setDigestFrequency] = useState(settings.digestFrequency);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -367,6 +376,14 @@ export default function SettingsPage() {
             </div>
           </s-section>
         </div>
+
+        <DigestSection
+          plan={plan}
+          digestEnabled={digestEnabled}
+          digestFrequency={digestFrequency}
+          onDigestEnabledChange={setDigestEnabled}
+          onDigestFrequencyChange={setDigestFrequency}
+        />
       </Form>
 
       <div style={{ marginTop: 24 }}>
@@ -387,6 +404,79 @@ export default function SettingsPage() {
         </s-section>
       </div>
     </s-page>
+  );
+}
+
+function DigestSection({
+  plan,
+  digestEnabled,
+  digestFrequency,
+  onDigestEnabledChange,
+  onDigestFrequencyChange,
+}: {
+  plan: string;
+  digestEnabled: boolean;
+  digestFrequency: string;
+  onDigestEnabledChange: (val: boolean) => void;
+  onDigestFrequencyChange: (val: string) => void;
+}) {
+  const isPro = plan === "pro";
+  return (
+    <div style={{ marginTop: 24 }}>
+      <s-section heading="Digest Emails">
+        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
+          A summary of at-risk products sent to your notification email.{" "}
+          {isPro ? "Pro plan: choose daily or weekly." : "Basic plan: weekly digest every Monday."}
+        </p>
+
+        <ToggleField
+          label="Enable digest emails"
+          name="digestEnabled"
+          checked={digestEnabled}
+          onChange={onDigestEnabledChange}
+        />
+
+        {digestEnabled && (
+          <div style={{ marginTop: 8, marginLeft: 24 }}>
+            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>
+              Frequency
+            </label>
+            {isPro ? (
+              <div style={{ display: "flex", gap: 12 }}>
+                {(["daily", "weekly"] as const).map((freq) => (
+                  <label
+                    key={freq}
+                    style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 14 }}
+                  >
+                    <input
+                      type="radio"
+                      name="digestFrequency"
+                      value={freq}
+                      checked={digestFrequency === freq}
+                      onChange={() => onDigestFrequencyChange(freq)}
+                    />
+                    {freq.charAt(0).toUpperCase() + freq.slice(1)}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <>
+                <input type="hidden" name="digestFrequency" value="weekly" />
+                <span style={{ fontSize: 14, color: "#6b7280" }}>
+                  Weekly{" "}
+                  <span style={{ fontSize: 12, color: "#9ca3af" }}>
+                    (every Monday — upgrade to Pro for daily)
+                  </span>
+                </span>
+              </>
+            )}
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+              Digest is sent at 8:00 AM UTC only when at-risk products exist.
+            </p>
+          </div>
+        )}
+      </s-section>
+    </div>
   );
 }
 

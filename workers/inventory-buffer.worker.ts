@@ -18,9 +18,11 @@ import prisma from "../app/db.server.js";
 import {
   sendLowStockAlert,
   sendOutOfStockAlert,
+  sendDigestEmail,
 } from "../app/lib/notifications.js";
 import {
   QUEUE_NAME,
+  DIGEST_QUEUE_NAME,
   type BufferPayload,
   type InventoryBufferJobData,
 } from "../app/lib/queue.js";
@@ -35,8 +37,9 @@ boss.on("error", (err) => {
 });
 
 await boss.start();
-await boss.createQueue(QUEUE_NAME); // pg-boss v12: queue must exist before work()
-console.log("[Worker] pg-boss started. Listening on queue:", QUEUE_NAME);
+await boss.createQueue(QUEUE_NAME);
+await boss.createQueue(DIGEST_QUEUE_NAME);
+console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, DIGEST_QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────
 // pg-boss v12 WorkHandler always receives Job<T>[] — an array.
@@ -95,6 +98,84 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
     console.log(`[Worker] Buffer ${eventKey} was superseded during send — leaving new row for next job.`);
   } else {
     console.log(`[Worker] Alert sent and buffer cleared for ${eventKey}.`);
+  }
+}
+
+// ── Digest cron ──────────────────────────────────────────────────────────────
+// Fires once per day at 8am UTC.  The handler checks each shop's plan and
+// digest frequency to decide whether to actually send.
+await boss.schedule(DIGEST_QUEUE_NAME, "0 8 * * *", {});
+console.log("[Worker] Digest cron scheduled — fires daily at 08:00 UTC");
+
+await boss.work<Record<string, never>>(DIGEST_QUEUE_NAME, async () => {
+  await processDigests();
+});
+
+async function processDigests(): Promise<void> {
+  const now = new Date();
+  const isMonday = now.getUTCDay() === 1;
+
+  console.log(`[Digest] Running check — ${now.toUTCString()} — isMonday: ${isMonday}`);
+
+  const shops = await prisma.storeSettings.findMany({
+    where: {
+      digestEnabled: true,
+      emailNotifications: true,
+      notificationEmail: { not: null },
+    },
+    include: { session: { select: { plan: true } } },
+  });
+
+  console.log(`[Digest] ${shops.length} shop(s) eligible`);
+
+  for (const settings of shops) {
+    const shop = settings.shop;
+    const plan = settings.session?.plan ?? "basic";
+    const isDaily = plan === "pro" && settings.digestFrequency === "daily";
+
+    if (!isDaily && !isMonday) continue;
+
+    // Skip if already sent in the last 20 hours (prevents double-fire on restart)
+    if (settings.lastDigestSentAt) {
+      const hoursSince = (now.getTime() - settings.lastDigestSentAt.getTime()) / 3_600_000;
+      if (hoursSince < 20) {
+        console.log(`[Digest] Skipping ${shop} — sent ${hoursSince.toFixed(1)}h ago`);
+        continue;
+      }
+    }
+
+    const atRisk = await prisma.inventoryTracking.findMany({
+      where: {
+        shop,
+        inventoryStatus: { in: ["out_of_stock", "low_stock"] },
+        monitoringEnabled: true,
+      },
+      orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
+      take: 20,
+      select: { productTitle: true, sku: true, currentQuantity: true, inventoryStatus: true },
+    });
+
+    if (atRisk.length === 0) {
+      console.log(`[Digest] ${shop} — nothing at risk, skipping`);
+      continue;
+    }
+
+    const recipients = settings.notificationEmail!.split(",").map((e) => e.trim()).filter(Boolean);
+    const frequency = isDaily ? "Daily" : "Weekly";
+
+    await sendDigestEmail(shop, recipients, {
+      shop,
+      frequency,
+      outOfStock: atRisk.filter((p) => p.inventoryStatus === "out_of_stock"),
+      lowStock: atRisk.filter((p) => p.inventoryStatus === "low_stock"),
+    });
+
+    await prisma.storeSettings.update({
+      where: { shop },
+      data: { lastDigestSentAt: now },
+    });
+
+    console.log(`[Digest] ${frequency} digest → [${recipients.join(", ")}] for ${shop} — ${atRisk.length} products`);
   }
 }
 
