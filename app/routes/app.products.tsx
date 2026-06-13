@@ -9,6 +9,7 @@ import { getMaxProducts } from "../lib/plan-limits";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
+import { calcSalesVelocity, computeStockOutDays } from "../lib/velocity.server";
 import { ProductEditModal } from "../components/ProductEditModal";
 import type { ProductRow } from "../components/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/InventorySection";
@@ -296,6 +297,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         imageAlt,
         shopifyStatus,
         inventoryItemId: firstInventoryItemId,
+        stockOutDays: tracking.stockOutDays ?? null,
       };
     }
 
@@ -414,6 +416,36 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold }: {
       if (pruned > 0) {
         console.log(`[Sync] Pruned ${pruned} stale tracking row(s) for ${shop}`);
       }
+    }
+
+    // Velocity calculation — query last 30 days of orders to compute avg daily sales
+    try {
+      await syncState.progress(shop, 99);
+      const velocity = await calcSalesVelocity(admin);
+      const velUpdates: Array<{ productId: bigint; avgDailySales: number; stockOutDays: number | null }> = [];
+      for (const p of allProducts) {
+        const avg = velocity.get(p.productId.toString()) ?? 0;
+        if (avg > 0) {
+          velUpdates.push({
+            productId: p.productId,
+            avgDailySales: avg,
+            stockOutDays: computeStockOutDays(p.currentQuantity, avg),
+          });
+        }
+      }
+      if (velUpdates.length > 0) {
+        await prisma.$transaction(
+          velUpdates.map((v) =>
+            prisma.inventoryTracking.updateMany({
+              where: { shop, productId: v.productId },
+              data: { avgDailySales: v.avgDailySales, stockOutDays: v.stockOutDays },
+            }),
+          ),
+        );
+        console.log(`[Sync] Velocity updated for ${velUpdates.length} product(s) in ${shop}`);
+      }
+    } catch (err) {
+      console.warn(`[Sync] Velocity calc failed for ${shop}:`, err instanceof Error ? err.message : err);
     }
 
     await prisma.setupProgress.upsert({
@@ -815,7 +847,7 @@ export default function ProductsPage() {
                       style={{ cursor: selectableIds.length === 0 ? "not-allowed" : "pointer" }}
                     />
                   </th>
-                  {["Product", "SKU", "Quantity", "Status", "Monitor Alert", "Action"].map((h) => (
+                  {["Product", "SKU", "Quantity", "Status", "Days Left", "Monitor Alert", "Action"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -857,6 +889,9 @@ export default function ProductsPage() {
                         <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500 }}>
                           {s.label}
                         </span>
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} />
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span style={{
@@ -988,6 +1023,22 @@ function SyncButton({ pct, onClick, slot }: { pct: number | null; onClick: () =>
     >
       {syncing ? `Syncing ${displayPct}%` : "Sync Products"}
     </s-button>
+  );
+}
+
+function StockOutBadge({ days }: { days: number | null }) {
+  if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
+  if (days === 0) return (
+    <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
+      Out of stock
+    </span>
+  );
+  const bg   = days < 7  ? "#fee2e2" : days < 14 ? "#fef3c7" : "#d1fae5";
+  const color = days < 7  ? "#991b1b" : days < 14 ? "#92400e" : "#065f46";
+  return (
+    <span style={{ background: bg, color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+      ~{days}d
+    </span>
   );
 }
 

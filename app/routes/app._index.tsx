@@ -20,7 +20,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
   sevenDaysAgo.setUTCHours(0, 0, 0, 0);
 
-  const [statusGroups, hiddenCount, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows, atRiskRaw] = await Promise.all([
+  const [statusGroups, hiddenCount, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows, atRiskRaw, stockOutSoonCount] = await Promise.all([
     prisma.inventoryTracking.groupBy({ by: ["inventoryStatus"], where: { shop }, _count: { _all: true } }),
     prisma.inventoryTracking.count({ where: { shop, isHidden: true } }),
     getCachedSettings(shop),
@@ -41,6 +41,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
       take: 8,
       select: { productId: true, productTitle: true, sku: true, currentQuantity: true, inventoryStatus: true },
+    }),
+    prisma.inventoryTracking.count({
+      where: { shop, stockOutDays: { not: null, lt: 7 }, inventoryStatus: { not: "out_of_stock" } },
     }),
   ]);
 
@@ -96,6 +99,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     notificationEmail: settings?.notificationEmail ?? null,
     alertsToday,
     spark7,
+    stockOutSoonCount,
     atRiskProducts: atRiskRaw.map((p) => ({
       productId: p.productId.toString(),
       productTitle: p.productTitle,
@@ -117,7 +121,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function Dashboard() {
-  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts } =
+  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts, stockOutSoonCount } =
     useLoaderData<typeof loader>();
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
@@ -184,6 +188,26 @@ export default function Dashboard() {
         <AlertSparkline data={spark7} />
         <WebhookHealthBar lastWebhookAt={lastWebhookAt} lastSyncCompletedAt={lastSyncCompletedAt} lastSyncCount={lastSyncCount} />
       </s-section>
+
+      {/* Stock-out prediction warning */}
+      {stockOutSoonCount > 0 && (
+        <div style={{ marginTop: 16, padding: "12px 16px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20 }}>⏱️</span>
+            <div>
+              <span style={{ fontWeight: 700, color: "#92400e", fontSize: 14 }}>
+                {stockOutSoonCount} product{stockOutSoonCount !== 1 ? "s" : ""} will stock out within 7 days
+              </span>
+              <p style={{ margin: "2px 0 0", fontSize: 13, color: "#78350f" }}>
+                Based on your 30-day sales velocity. Run a sync to refresh predictions.
+              </p>
+            </div>
+          </div>
+          <a href="/app/products" style={{ fontSize: 13, fontWeight: 600, color: "#92400e", textDecoration: "none", whiteSpace: "nowrap", border: "1px solid #fed7aa", borderRadius: 6, padding: "6px 12px", background: "#fff" }}>
+            View products →
+          </a>
+        </div>
+      )}
 
       {/* Products at risk */}
       {atRiskProducts.length > 0 && (

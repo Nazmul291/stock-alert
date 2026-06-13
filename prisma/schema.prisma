@@ -98,6 +98,8 @@ model InventoryTracking {
   isHidden           Boolean         @default(false) @map("is_hidden")
   monitoringEnabled  Boolean         @default(true) @map("monitoring_enabled")
   inventoryStatus    InventoryStatus @default(in_stock) @map("inventory_status")
+  avgDailySales    Float?          @map("avg_daily_sales")
+  stockOutDays     Int?            @map("stock_out_days")
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 

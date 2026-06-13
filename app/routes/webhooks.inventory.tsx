@@ -12,6 +12,7 @@ import {
 } from "../lib/queue";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { syncState } from "../lib/sync-state.server";
+import { computeStockOutDays } from "../lib/velocity.server";
 
 const INVENTORY_ITEM_QUERY = `
   query ($id: ID!) {
@@ -191,6 +192,7 @@ async function processInventoryUpdate(
 
   // Update DB tracking whenever qty changed
   if (qtyChanged) {
+    const newStockOutDays = computeStockOutDays(newQty, existingTracking.avgDailySales);
     await prisma.inventoryTracking.update({
       where: { id: existingTracking.id },
       data: {
@@ -198,6 +200,7 @@ async function processInventoryUpdate(
         previousQuantity: previousQty,
         inventoryStatus: newStatus,
         lastCheckedAt: new Date(),
+        ...(existingTracking.avgDailySales ? { stockOutDays: newStockOutDays } : {}),
       },
     });
   }

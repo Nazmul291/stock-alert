@@ -17,6 +17,7 @@ export type ProductRow = {
   imageAlt: string;
   shopifyStatus: string;
   inventoryItemId: string | null;
+  stockOutDays?: number | null;
 };
 
 type ProductSettings = {
