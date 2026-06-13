@@ -152,14 +152,15 @@ model SetupProgress {
 
 // Per-shop sync progress — persisted so all web VMs see the same state.
 model SyncState {
-  shop        String    @id
-  running     Boolean   @default(false)
-  progress    Int       @default(0)
-  startedAt   DateTime  @map("started_at") @db.Timestamptz
-  completedAt DateTime? @map("completed_at") @db.Timestamptz
-  syncedCount Int?      @map("synced_count")
-  error       String?
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  shop          String    @id
+  running       Boolean   @default(false)
+  progress      Int       @default(0)
+  startedAt     DateTime  @map("started_at") @db.Timestamptz
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz
+  syncedCount   Int?      @map("synced_count")
+  error         String?
+  lastWebhookAt DateTime? @map("last_webhook_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("sync_state")
 }

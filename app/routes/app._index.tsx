@@ -80,6 +80,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     syncRunning: shopSyncState?.running ?? false,
     lastSyncCompletedAt: shopSyncState?.completedAt?.toISOString() ?? null,
     lastSyncCount: shopSyncState?.syncedCount ?? null,
+    lastWebhookAt: shopSyncState?.lastWebhookAt?.toISOString() ?? null,
     recentAlerts: recentAlerts.map((a) => ({
       id: a.id,
       productTitle: a.productTitle,
@@ -110,7 +111,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function Dashboard() {
-  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts } =
+  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts } =
     useLoaderData<typeof loader>();
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
@@ -185,11 +186,7 @@ export default function Dashboard() {
           })}
         </div>
         <AlertSparkline data={spark7} />
-        {lastSyncCompletedAt && (
-          <p style={{ margin: "10px 0 0", fontSize: 13, color: "#9ca3af" }}>
-            Last synced {timeAgo(lastSyncCompletedAt)}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
-          </p>
-        )}
+        <WebhookHealthBar lastWebhookAt={lastWebhookAt} lastSyncCompletedAt={lastSyncCompletedAt} lastSyncCount={lastSyncCount} />
       </s-section>
 
       {/* Products at risk */}
@@ -294,6 +291,65 @@ export default function Dashboard() {
         </s-stack>
       </s-section>
     </s-page>
+  );
+}
+
+function WebhookHealthBar({
+  lastWebhookAt,
+  lastSyncCompletedAt,
+  lastSyncCount,
+}: {
+  lastWebhookAt: string | null;
+  lastSyncCompletedAt: string | null;
+  lastSyncCount: number | null;
+}) {
+  const now = Date.now();
+  const webhookAge = lastWebhookAt ? (now - new Date(lastWebhookAt).getTime()) / 3_600_000 : null;
+
+  let dot: string;
+  let label: string;
+  let color: string;
+  let bg: string;
+  let border: string;
+
+  if (webhookAge === null) {
+    dot = "⬤";
+    label = "No webhooks received yet — sync your products to start monitoring";
+    color = "#6b7280";
+    bg = "#f9fafb";
+    border = "#e5e7eb";
+  } else if (webhookAge < 1) {
+    dot = "⬤";
+    label = `Webhooks active — last received ${timeAgo(lastWebhookAt!)}`;
+    color = "#059669";
+    bg = "#f0fdf4";
+    border = "#86efac";
+  } else if (webhookAge < 24) {
+    dot = "⬤";
+    label = `Last webhook ${timeAgo(lastWebhookAt!)} — monitoring active`;
+    color = "#d97706";
+    bg = "#fffbeb";
+    border = "#fde68a";
+  } else {
+    dot = "⬤";
+    label = `No webhook in ${Math.floor(webhookAge)}h — inventory data may be stale`;
+    color = "#dc2626";
+    bg = "#fff5f5";
+    border = "#fca5a5";
+  }
+
+  return (
+    <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: bg, border: `1px solid ${border}`, borderRadius: 20, padding: "4px 10px" }}>
+        <span style={{ fontSize: 8, color, lineHeight: 1 }}>{dot}</span>
+        <span style={{ fontSize: 12, color, fontWeight: 500 }}>{label}</span>
+      </div>
+      {lastSyncCompletedAt && (
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>
+          Last full sync {timeAgo(lastSyncCompletedAt)}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
+        </span>
+      )}
+    </div>
   );
 }
 

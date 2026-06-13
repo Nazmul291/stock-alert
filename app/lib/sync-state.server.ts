@@ -33,6 +33,14 @@ export const syncState = {
     });
   },
 
+  async webhookReceived(shop: string): Promise<void> {
+    await prisma.syncState.upsert({
+      where: { shop },
+      create: { shop, running: false, progress: 0, startedAt: new Date(), lastWebhookAt: new Date() },
+      update: { lastWebhookAt: new Date() },
+    });
+  },
+
   async get(shop: string) {
     return prisma.syncState.findUnique({ where: { shop } });
   },

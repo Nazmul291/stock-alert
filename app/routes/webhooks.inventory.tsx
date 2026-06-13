@@ -11,6 +11,7 @@ import {
   type BufferPayload,
 } from "../lib/queue";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
+import { syncState } from "../lib/sync-state.server";
 
 const INVENTORY_ITEM_QUERY = `
   query ($id: ID!) {
@@ -67,6 +68,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response(null, { status: 200 });
   }
   requestCache.set(cacheKey, now);
+
+  // Track webhook health non-blocking
+  syncState.webhookReceived(shop).catch(() => {});
 
   // Return 200 immediately; all heavy work is async
   processInventoryUpdate(shop, inventoryItemId, data, admin).catch((err) =>
