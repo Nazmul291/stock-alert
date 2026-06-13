@@ -35,6 +35,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandColor: settings.brandColor ?? "#4f46e5",
           brandSenderName: settings.brandSenderName ?? "",
           outboundWebhookUrl: settings.outboundWebhookUrl ?? "",
+          supplierLeadTimeDays: settings.supplierLeadTimeDays ?? 7,
         }
       : {
           autoHideEnabled: false,
@@ -50,6 +51,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandColor: "#4f46e5",
           brandSenderName: "",
           outboundWebhookUrl: "",
+          supplierLeadTimeDays: 7,
         },
   };
 };
@@ -124,6 +126,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const rawDigestFrequency = form.get("digestFrequency") as string;
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
+  const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
   const data = {
     autoHideEnabled: form.get("autoHideEnabled") === "true",
     autoRepublishEnabled: form.get("autoRepublishEnabled") === "true",
@@ -134,6 +137,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     slackWebhookUrl: rawSlack || null,
     digestEnabled: form.get("digestEnabled") === "true",
     digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
+    supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
     ...(plan === "pro" ? {
       brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
       brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
@@ -278,6 +282,26 @@ export default function SettingsPage() {
               ))}
             </select>
             <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Alert when inventory falls below this amount.</p>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              Supplier lead time
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="number"
+                name="supplierLeadTimeDays"
+                defaultValue={settings.supplierLeadTimeDays}
+                min={1}
+                max={90}
+                style={{ width: 72, border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
+              />
+              <span style={{ fontSize: 14, color: "#374151" }}>days</span>
+            </div>
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+              How long it takes your supplier to deliver. Used to calculate "Reorder By" dates on the Products page.
+            </p>
           </div>
         </s-section>
 

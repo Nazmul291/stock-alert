@@ -378,6 +378,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     lastSyncCount: shopSyncState?.syncedCount ?? null,
     autoHideEnabled: settings?.autoHideEnabled ?? false,
     autoRepublishEnabled: settings?.autoRepublishEnabled ?? false,
+    supplierLeadTimeDays: settings?.supplierLeadTimeDays ?? 7,
   };
 };
 
@@ -722,7 +723,7 @@ const FILTER_TABS = [
 
 export default function ProductsPage() {
   const loaderData = useLoaderData<typeof loader>() as any;
-  const { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, prev, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled } = loaderData;
+  const { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, prev, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled, supplierLeadTimeDays } = loaderData;
 
   const nav = useNavigation();
   const submit = useSubmit();
@@ -910,7 +911,7 @@ export default function ProductsPage() {
                       style={{ cursor: selectableIds.length === 0 ? "not-allowed" : "pointer" }}
                     />
                   </th>
-                  {["Product", "SKU", "Quantity", "Status", "Days Left", "Monitor Alert", "Action"].map((h) => (
+                  {["Product", "SKU", "Quantity", "Status", "Days Left", "Reorder By", "Monitor Alert", "Action"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -955,6 +956,9 @@ export default function ProductsPage() {
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} />
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span style={{
@@ -1086,6 +1090,38 @@ function SyncButton({ pct, onClick, slot }: { pct: number | null; onClick: () =>
     >
       {syncing ? `Syncing ${displayPct}%` : "Sync Products"}
     </s-button>
+  );
+}
+
+function ReorderBadge({ days, leadTime }: { days: number | null; leadTime: number }) {
+  if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
+  if (days === 0) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
+
+  const daysUntilReorder = days - leadTime;
+
+  if (daysUntilReorder <= 0) {
+    return (
+      <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+        Reorder now!
+      </span>
+    );
+  }
+
+  const reorderDate = new Date();
+  reorderDate.setDate(reorderDate.getDate() + daysUntilReorder);
+  const label = reorderDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const isUrgent = daysUntilReorder <= 3;
+
+  return (
+    <span style={{
+      background: isUrgent ? "#fef3c7" : "#f9fafb",
+      color: isUrgent ? "#92400e" : "#374151",
+      border: `1px solid ${isUrgent ? "#fde68a" : "#e5e7eb"}`,
+      padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: isUrgent ? 600 : 400,
+      whiteSpace: "nowrap",
+    }}>
+      {label}
+    </span>
   );
 }
 
