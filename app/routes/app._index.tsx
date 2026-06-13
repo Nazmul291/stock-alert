@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
@@ -7,26 +7,10 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { format } from "date-fns";
 import { syncState } from "../lib/sync-state.server";
-
-
-const PRODUCTS_TRACKING_QUERY = `
-  query ($first: Int!, $after: String) {
-    products(first: $first, after: $after) {
-      edges {
-        node {
-          legacyResourceId
-          variants(first: 100) {
-            edges { node { inventoryItem { tracked } } }
-          }
-        }
-      }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-`;
+import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
   const todayStart = new Date();
@@ -36,12 +20,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
   sevenDaysAgo.setUTCHours(0, 0, 0, 0);
 
-  const [tracking, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows] = await Promise.all([
-    prisma.inventoryTracking.findMany({ where: { shop }, select: { productId: true, currentQuantity: true, isHidden: true, inventoryStatus: true } }),
-    prisma.storeSettings.findUnique({ where: { shop } }),
+  const [statusGroups, hiddenCount, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows, atRiskRaw] = await Promise.all([
+    prisma.inventoryTracking.groupBy({ by: ["inventoryStatus"], where: { shop }, _count: { _all: true } }),
+    prisma.inventoryTracking.count({ where: { shop, isHidden: true } }),
+    getCachedSettings(shop),
     prisma.setupProgress.findUnique({ where: { shop } }),
     prisma.alertHistory.findMany({ where: { shop }, orderBy: { sentAt: "desc" }, take: 10 }),
-    prisma.session.findFirst({ where: { shop, isOnline: false } }),
+    getCachedSession(shop),
     prisma.alertHistory.count({ where: { shop, sentAt: { gte: todayStart } } }),
     syncState.get(shop),
     prisma.$queryRaw<{ day: string; count: number }[]>`
@@ -51,46 +36,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       GROUP BY day
       ORDER BY day ASC
     `,
+    prisma.inventoryTracking.findMany({
+      where: { shop, inventoryStatus: { in: ["out_of_stock", "low_stock"] } },
+      orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
+      take: 8,
+      select: { productId: true, productTitle: true, sku: true, currentQuantity: true, inventoryStatus: true },
+    }),
   ]);
 
-  const threshold = settings?.lowStockThreshold ?? 5;
-
-  // Fetch Shopify products to identify which have Shopify inventory tracking disabled
-  const untrackedShopifyIds = new Set<string>();
-  let shopifyTotal = tracking.length;
-  try {
-    let after: string | null = null;
-    let more = true;
-    let count = 0;
-    while (more) {
-      const r = await admin.graphql(PRODUCTS_TRACKING_QUERY, { variables: { first: 250, after } });
-      const j: any = await r.json();
-      for (const { node } of j.data?.products?.edges ?? []) {
-        count++;
-        const variants: any[] = node.variants.edges;
-        if (variants.length > 0 && variants.every((v) => !v.node.inventoryItem?.tracked)) {
-          untrackedShopifyIds.add(node.legacyResourceId);
-        }
-      }
-      more = j.data?.products?.pageInfo?.hasNextPage ?? false;
-      after = j.data?.products?.pageInfo?.endCursor ?? null;
-    }
-    shopifyTotal = count;
-  } catch {
-    // Non-fatal — fall back to DB-only counts
-  }
-
-  // Exclude Shopify-untracked products from inventory status counts
-  const trackedRows = tracking.filter((t) => !untrackedShopifyIds.has(t.productId.toString()));
-
+  const statusCounts = new Map(statusGroups.map((g) => [g.inventoryStatus as string, g._count._all]));
   const stats = {
-    totalProducts: shopifyTotal,
-    outOfStock: trackedRows.filter((p) => p.currentQuantity <= 0).length,
-    lowStock: trackedRows.filter((p) => p.currentQuantity > 0 && p.currentQuantity <= threshold).length,
-    inStock: trackedRows.filter((p) => p.currentQuantity > threshold).length,
-    hidden: tracking.filter((p) => p.isHidden).length,
-    deactivated: tracking.filter((p) => p.inventoryStatus === "deactivated").length,
-    notTracked: untrackedShopifyIds.size,
+    totalProducts: (statusCounts.get("in_stock") ?? 0) + (statusCounts.get("low_stock") ?? 0) + (statusCounts.get("out_of_stock") ?? 0),
+    outOfStock: statusCounts.get("out_of_stock") ?? 0,
+    lowStock: statusCounts.get("low_stock") ?? 0,
+    inStock: statusCounts.get("in_stock") ?? 0,
+    hidden: hiddenCount,
+    deactivated: statusCounts.get("deactivated") ?? 0,
   };
 
   const setupSteps = [
@@ -128,6 +89,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     notificationEmail: settings?.notificationEmail ?? null,
     alertsToday,
     spark7,
+    atRiskProducts: atRiskRaw.map((p) => ({
+      productId: p.productId.toString(),
+      productTitle: p.productTitle,
+      sku: p.sku,
+      currentQuantity: p.currentQuantity,
+      inventoryStatus: p.inventoryStatus as string,
+    })),
   };
 };
 
@@ -142,7 +110,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function Dashboard() {
-  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, recentAlerts, notificationEmail, alertsToday, spark7 } =
+  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts } =
     useLoaderData<typeof loader>();
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
@@ -189,20 +157,32 @@ export default function Dashboard() {
       <s-section heading="Inventory Overview">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 12, margin: "8px 0" }}>
           {[
-            { label: "Total", value: stats.totalProducts, color: "#374151" },
-            { label: "In Stock", value: stats.inStock, color: "#059669" },
-            { label: "Low Stock", value: stats.lowStock, color: "#d97706" },
-            { label: "Out of Stock", value: stats.outOfStock, color: "#dc2626" },
-            { label: "Hidden", value: stats.hidden, color: "#6b7280" },
-            { label: "Deactivated", value: stats.deactivated, color: "#9ca3af" },
-            { label: "Not Tracked", value: stats.notTracked, color: "#7c3aed" },
-            { label: "Alerts Today", value: alertsToday, color: alertsToday > 0 ? "#d97706" : "#6b7280" },
-          ].map((s) => (
-            <div key={s.label} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, textAlign: "center" }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
-              <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>{s.label}</div>
-            </div>
-          ))}
+            { label: "Tracked", value: stats.totalProducts, color: "#374151", href: stats.totalProducts > 0 ? "/app/products?filter=tracked" : null },
+            { label: "In Stock", value: stats.inStock, color: "#059669", href: stats.inStock > 0 ? "/app/products?filter=in_stock" : null },
+            { label: "Low Stock", value: stats.lowStock, color: "#d97706", href: stats.lowStock > 0 ? "/app/products?filter=low_stock" : null },
+            { label: "Out of Stock", value: stats.outOfStock, color: "#dc2626", href: stats.outOfStock > 0 ? "/app/products?filter=out_of_stock" : null },
+            { label: "Hidden", value: stats.hidden, color: "#6b7280", href: null },
+            { label: "Deactivated", value: stats.deactivated, color: "#9ca3af", href: null },
+            { label: "Alerts Today", value: alertsToday, color: alertsToday > 0 ? "#d97706" : "#6b7280", href: alertsToday > 0 ? "/app/alert-history" : null },
+          ].map((s) => {
+            const inner = (
+              <>
+                <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>{s.label}</div>
+              </>
+            );
+            const base: React.CSSProperties = { background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, textAlign: "center" };
+            return s.href ? (
+              <a key={s.label} href={s.href} style={{ ...base, textDecoration: "none", display: "block", transition: "border-color .15s", cursor: "pointer" }}
+                onMouseOver={(e) => (e.currentTarget.style.borderColor = "#9ca3af")}
+                onMouseOut={(e) => (e.currentTarget.style.borderColor = "#e5e7eb")}
+              >
+                {inner}
+              </a>
+            ) : (
+              <div key={s.label} style={base}>{inner}</div>
+            );
+          })}
         </div>
         <AlertSparkline data={spark7} />
         {lastSyncCompletedAt && (
@@ -211,6 +191,38 @@ export default function Dashboard() {
           </p>
         )}
       </s-section>
+
+      {/* Products at risk */}
+      {atRiskProducts.length > 0 && (
+        <s-section heading="Products at Risk">
+          <a slot="primary-action" href="/app/products?filter=out_of_stock" style={{ fontSize: 13, color: "#1d4ed8", textDecoration: "none" }}>View all →</a>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {atRiskProducts.map((p) => {
+              const isOut = p.inventoryStatus === "out_of_stock";
+              return (
+                <a
+                  key={p.productId}
+                  href={`/app/products?filter=out_of_stock`}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: isOut ? "#fff5f5" : "#fffbeb", border: `1px solid ${isOut ? "#fca5a5" : "#fde68a"}`, borderRadius: 6, padding: "10px 14px", textDecoration: "none" }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{p.productTitle ?? "—"}</div>
+                    {p.sku && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>SKU: {p.sku}</div>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                    <span style={{ fontWeight: 700, fontSize: 18, color: isOut ? "#dc2626" : "#d97706" }}>
+                      {p.currentQuantity}
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: isOut ? "#fee2e2" : "#fef3c7", color: isOut ? "#991b1b" : "#92400e", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {isOut ? "Out of Stock" : "Low Stock"}
+                    </span>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </s-section>
+      )}
 
       {/* Recent alerts */}
       <s-section heading="Recent Alerts">

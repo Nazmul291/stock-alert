@@ -5,6 +5,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendTestNotification } from "../lib/notifications";
+import { invalidateShopCache } from "../lib/shop-cache.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -124,6 +125,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     update: data,
     create: { shop, ...data },
   });
+  invalidateShopCache(shop);
 
   const hasNotifications = !!(data.notificationEmail || data.slackWebhookUrl);
   const isConfigured = data.lowStockThreshold !== 5 || !!data.notificationEmail;

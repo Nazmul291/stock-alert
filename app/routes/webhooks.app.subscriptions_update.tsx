@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { BILLING_PLAN_PRO, BILLING_PLAN_BASIC } from "../shopify.server";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
+import { invalidateShopCache } from "../lib/shop-cache.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, payload } = await authenticate.webhook(request);
@@ -25,6 +26,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shop, isOnline: false },
       data: { plan },
     });
+    invalidateShopCache(shop);
     console.log(`[Billing] Plan updated to ${plan} for ${shop} (subscription ${status})`);
   } else if (["DECLINED", "EXPIRED", "CANCELLED", "FROZEN"].includes(status)) {
     // Subscription lapsed — downgrade to basic so Pro features are revoked promptly.
@@ -32,6 +34,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shop, isOnline: false },
       data: { plan: "basic" },
     });
+    invalidateShopCache(shop);
     console.log(`[Billing] Subscription ${status} — downgraded ${shop} to basic`);
     // Enforce the Basic product limit immediately so merchants can't keep benefiting
     // from Pro-tier tracking after their subscription lapses.
