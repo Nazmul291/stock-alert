@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher, useRevalidator } from "react-router";
-import type { ReactNode } from "react";
+import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher } from "react-router";
+import { useSyncStream } from "../hooks/use-sync-stream";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getMaxProducts } from "../lib/plan-limits";
+import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 
 const PRODUCTS_GRAPHQL = `
@@ -102,6 +103,40 @@ const PRODUCT_INVENTORY_QUERY = `
   }
 `;
 
+const PRODUCT_SETTINGS_QUERY = `
+  query getProductSettings($id: ID!) {
+    product(id: $id) {
+      customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { id value }
+      autoHide: metafield(namespace: "stock_alert", key: "auto_hide") { id value }
+      autoRepublish: metafield(namespace: "stock_alert", key: "auto_republish") { id value }
+    }
+  }
+`;
+
+const METAFIELDS_SET_MUTATION = `
+  mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $metafields) {
+      userErrors { field message }
+    }
+  }
+`;
+
+const METAFIELD_DELETE_MUTATION = `
+  mutation metafieldDelete($input: MetafieldDeleteInput!) {
+    metafieldDelete(input: $input) {
+      deletedId
+      userErrors { field message }
+    }
+  }
+`;
+
+type ProductSettings = {
+  customThreshold: string;
+  customThresholdId: string | null;
+  autoHide: boolean | null;
+  autoRepublish: boolean | null;
+};
+
 type LocationInventory = { locationId: string; locationName: string; quantity: number };
 type VariantInventory = {
   id: string;
@@ -162,14 +197,38 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
+  if (url.searchParams.get("intent") === "get_product_settings") {
+    const productId = url.searchParams.get("productId") as string;
+    try {
+      const res = await admin.graphql(PRODUCT_SETTINGS_QUERY, {
+        variables: { id: `gid://shopify/Product/${productId}` },
+      });
+      const json: any = await res.json();
+      const p = json.data?.product;
+      return {
+        productSettings: {
+          customThreshold: p?.customThreshold?.value ?? "",
+          customThresholdId: p?.customThreshold?.id ?? null,
+          autoHide: p?.autoHide?.value !== undefined ? p.autoHide.value === "true" : null,
+          autoRepublish: p?.autoRepublish?.value !== undefined ? p.autoRepublish.value === "true" : null,
+        } as ProductSettings,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { productSettings: null, settingsError: msg };
+    }
+  }
+
   const search = url.searchParams.get("search") ?? "";
   const after = url.searchParams.get("after") ?? null;
+  const prev = url.searchParams.get("prev") ?? "";   // comma-separated stack of previous page cursors
   const filter = url.searchParams.get("filter") ?? "all";
   const pageSize = 50;
 
-  const [storeSession, settings] = await Promise.all([
+  const [storeSession, settings, shopSyncState] = await Promise.all([
     prisma.session.findFirst({ where: { shop, isOnline: false } }),
     prisma.storeSettings.findUnique({ where: { shop } }),
+    syncState.get(shop),
   ]);
 
   const plan = storeSession?.plan ?? "basic";
@@ -199,7 +258,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     productIds.length > 0
       ? prisma.inventoryTracking.findMany({ where: { shop, productId: { in: productIds } } })
       : Promise.resolve([]),
-    prisma.inventoryTracking.count({ where: { shop } }),
+    prisma.inventoryTracking.count({ where: { shop, inventoryStatus: { not: "deactivated" } } }),
   ]);
 
   const trackingMap = new Map(trackingRecords.map((t) => [t.productId.toString(), t]));
@@ -289,11 +348,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? allProducts.filter((p) => !p.isTracked)
       : allProducts;
 
-  return { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, syncRunning: syncState.get(shop)?.running ?? false };
+  return {
+    shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, prev,
+    syncRunning: shopSyncState?.running ?? false,
+    lastSyncCompletedAt: shopSyncState?.completedAt?.toISOString() ?? null,
+    lastSyncCount: shopSyncState?.syncedCount ?? null,
+    autoHideEnabled: settings?.autoHideEnabled ?? false,
+    autoRepublishEnabled: settings?.autoRepublishEnabled ?? false,
+  };
 };
 
-async function runProductSync({ admin, shop, maxProducts, threshold }: {
-  admin: any; shop: string; maxProducts: number; threshold: number;
+async function runProductSync({ admin, shop, plan, maxProducts, threshold }: {
+  admin: any; shop: string; plan: string; maxProducts: number; threshold: number;
 }) {
   let allProducts: any[] = [];
   let cursor: string | null = null;
@@ -307,6 +373,16 @@ async function runProductSync({ admin, shop, maxProducts, threshold }: {
         variables: { first: batchSize, after: cursor },
       });
       const gqlJson: any = await gqlResponse.json();
+
+      // Shopify leaky-bucket: back off before the next request if available
+      // capacity is close to zero to avoid THROTTLED errors mid-sync.
+      const throttle = gqlJson.extensions?.cost?.throttleStatus;
+      if (throttle && throttle.currentlyAvailable < throttle.restoreRate * 1.5) {
+        const needed = throttle.restoreRate * 1.5 - throttle.currentlyAvailable;
+        const waitMs = Math.ceil((needed / throttle.restoreRate) * 1000);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+
       const page = gqlJson.data?.products;
       if (!page) break;
 
@@ -337,22 +413,38 @@ async function runProductSync({ admin, shop, maxProducts, threshold }: {
 
       // Report fetch progress: 5% base + up to 75% based on fetched vs maxProducts
       const fetchPct = Math.min(80, 5 + Math.round((allProducts.length / maxProducts) * 75));
-      syncState.progress(shop, fetchPct);
+      await syncState.progress(shop, fetchPct);
     }
 
-    // Phase 2: Write to database (80% → 98%)
-    syncState.progress(shop, 82);
-    for (let i = 0; i < allProducts.length; i++) {
-      const p = allProducts[i];
-      await prisma.inventoryTracking.upsert({
-        where: { shop_productId: { shop, productId: p.productId } },
-        update: { productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, lastCheckedAt: new Date() },
-        create: { shop, productId: p.productId, productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, previousQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus },
+    // Phase 2: Write to database in chunks of 100 (80% → 98%)
+    // Batching inside a transaction cuts roundtrips from N to ceil(N/100).
+    await syncState.progress(shop, 82);
+    const CHUNK = 100;
+    const now = new Date();
+    for (let i = 0; i < allProducts.length; i += CHUNK) {
+      const chunk = allProducts.slice(i, i + CHUNK);
+      await prisma.$transaction(
+        chunk.map((p) =>
+          prisma.inventoryTracking.upsert({
+            where: { shop_productId: { shop, productId: p.productId } },
+            update: { productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, lastCheckedAt: now },
+            create: { shop, productId: p.productId, productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, previousQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus },
+          }),
+        ),
+      );
+      const dbPct = 82 + Math.round(((i + chunk.length) / allProducts.length) * 16);
+      await syncState.progress(shop, dbPct);
+    }
+
+    // Phase 3: Remove tracking rows for products no longer in Shopify.
+    // Without this, deleted products accumulate forever and inflate the tracked count.
+    if (allProducts.length > 0) {
+      const syncedIds = allProducts.map((p) => p.productId);
+      const { count: pruned } = await prisma.inventoryTracking.deleteMany({
+        where: { shop, productId: { notIn: syncedIds } },
       });
-      // Report DB write progress every 10 products
-      if (i % 10 === 0) {
-        const dbPct = 82 + Math.round((i / allProducts.length) * 16);
-        syncState.progress(shop, dbPct);
+      if (pruned > 0) {
+        console.log(`[Sync] Pruned ${pruned} stale tracking row(s) for ${shop}`);
       }
     }
 
@@ -362,9 +454,15 @@ async function runProductSync({ admin, shop, maxProducts, threshold }: {
       create: { shop, appInstalled: true, firstProductTracked: true, productThresholdsConfigured: true, globalSettingsConfigured: false, notificationsConfigured: false },
     });
 
-    syncState.done(shop, allProducts.length);
+    // Deactivate rows beyond the plan cap so the merchant can't silently exceed their limit.
+    const enforcement = await enforcePlanLimits(shop, plan);
+    if (enforcement.deactivatedCount > 0) {
+      console.log(`[Sync] Plan limit enforced for ${shop}: deactivated ${enforcement.deactivatedCount} products (max ${enforcement.maxAllowed})`);
+    }
+
+    await syncState.done(shop, allProducts.length);
   } catch (err) {
-    syncState.fail(shop, err instanceof Error ? err.message : "Unknown error");
+    await syncState.fail(shop, err instanceof Error ? err.message : "Unknown error");
   }
 }
 
@@ -464,6 +562,43 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
     }
 
+    // 4. Update per-product metafields (only when tracking is enabled)
+    if (tracked) {
+      const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
+      const autoHide = form.get("autoHide") === "true";
+      const autoRepublish = form.get("autoRepublish") === "true";
+      const customThresholdMetafieldId = ((form.get("customThresholdMetafieldId") as string) ?? "").trim() || null;
+      const ownerId = `gid://shopify/Product/${productId}`;
+
+      const metafieldsToSet: any[] = [
+        { ownerId, namespace: "stock_alert", key: "auto_hide", value: String(autoHide), type: "boolean" },
+        { ownerId, namespace: "stock_alert", key: "auto_republish", value: String(autoRepublish), type: "boolean" },
+      ];
+
+      const parsedThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
+      if (!isNaN(parsedThreshold) && parsedThreshold >= 0) {
+        metafieldsToSet.push({ ownerId, namespace: "stock_alert", key: "custom_threshold", value: String(parsedThreshold), type: "number_integer" });
+      }
+
+      try {
+        const mfRes = await admin.graphql(METAFIELDS_SET_MUTATION, { variables: { metafields: metafieldsToSet } });
+        const mfJson: any = await mfRes.json();
+        const mfErrs = mfJson.data?.metafieldsSet?.userErrors ?? [];
+        if (mfErrs.length > 0) errors.push(mfErrs.map((e: any) => e.message).join(", "));
+      } catch (err) {
+        errors.push(`Metafield update failed: ${err instanceof Error ? err.message : "Unknown"}`);
+      }
+
+      // If threshold cleared but a metafield existed, delete it from Shopify
+      if (customThresholdRaw === "" && customThresholdMetafieldId) {
+        try {
+          await admin.graphql(METAFIELD_DELETE_MUTATION, { variables: { input: { id: customThresholdMetafieldId } } });
+        } catch {
+          // Non-critical
+        }
+      }
+    }
+
     if (errors.length > 0) return { error: errors.join(" | "), updatedProductId: productId };
     return { success: true, message: "Product updated successfully.", updatedProductId: productId };
   }
@@ -505,10 +640,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "sync") {
-    // Skip if already running
-    if (syncState.get(shop)?.running) {
-      return { status: "already_running" };
-    }
+    const current = await syncState.get(shop);
+    if (current?.running) return { status: "already_running" };
 
     const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
     const plan = storeSession?.plan ?? "basic";
@@ -516,10 +649,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const settings = await prisma.storeSettings.findUnique({ where: { shop } });
     const threshold = settings?.lowStockThreshold ?? 5;
 
-    syncState.start(shop);
+    await syncState.start(shop);
 
     // Fire and forget — do not await
-    runProductSync({ admin, shop, maxProducts, threshold }).catch(() => {});
+    runProductSync({ admin, shop, plan, maxProducts, threshold }).catch(() => {});
 
     return { status: "started" };
   }
@@ -694,7 +827,7 @@ function InventorySection({
 
 export default function ProductsPage() {
   const loaderData = useLoaderData<typeof loader>() as any;
-  const { shop, plan, maxProducts, trackedCount, products, pageInfo, search, filter, after, syncRunning } = loaderData;
+  const { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, prev, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled } = loaderData;
 
   const nav = useNavigation();
   const submit = useSubmit();
@@ -702,60 +835,16 @@ export default function ProductsPage() {
   const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
 
   const busy = nav.state === "submitting";
-  const { revalidate } = useRevalidator();
 
-  const [syncPct, setSyncPct] = useState<number | null>(null);
-  const [syncStreamError, setSyncStreamError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop, syncRunning);
 
-  const openSseStream = () => {
-    if (esRef.current) return;
-    setSyncStreamError(null);
-    const es = new EventSource(`/api/sync-stream?shop=${encodeURIComponent(shop)}`);
-    esRef.current = es;
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === "progress") setSyncPct(data.pct);
-      if (data.type === "done") {
-        setSyncPct(100);
-        es.close();
-        esRef.current = null;
-        setTimeout(() => { setSyncPct(null); revalidate(); }, 1000);
-      }
-      if (data.type === "idle") {
-        es.close();
-        esRef.current = null;
-        setSyncPct(null);
-      }
-      if (data.type === "error" || data.type === "auth_error") {
-        setSyncStreamError(data.message ?? "Sync failed — network error.");
-        es.close();
-        esRef.current = null;
-        setSyncPct(null);
-      }
-    };
-    es.onerror = () => {
-      setSyncStreamError("Sync connection lost. Please retry.");
-      es.close();
-      esRef.current = null;
-      setSyncPct(null);
-    };
-  };
-
-  // Open SSE when action returns "started"
   const actionData = useActionData<typeof action>();
   useEffect(() => {
-    if ((actionData as any)?.status === "started") openSseStream();
-  }, [actionData]);
-
-  // Also open SSE if page loads with sync already running
-  useEffect(() => {
-    if (syncRunning && !esRef.current) openSseStream();
-  }, [syncRunning]);
-
-  useEffect(() => () => { esRef.current?.close(); }, []);
+    if ((actionData as any)?.status === "started") openStream();
+  }, [actionData, openStream]);
 
   const enableTrackingFetcher = useFetcher<{ status?: string; error?: string }>();
+  const settingsFetcher = useFetcher<{ productSettings?: ProductSettings | null; settingsError?: string }>();
 
   const [editProduct, setEditProduct] = useState<ProductRow | null>(null);
   const [editStatus, setEditStatus] = useState("");
@@ -763,6 +852,10 @@ export default function ProductsPage() {
   const [editMonitoring, setEditMonitoring] = useState(false);
   const [expandedVariants, setExpandedVariants] = useState<Set<string>>(new Set());
   const [inventoryEdits, setInventoryEdits] = useState<Record<string, string>>({});
+  const [editCustomThreshold, setEditCustomThreshold] = useState("");
+  const [editAutoHide, setEditAutoHide] = useState(false);
+  const [editAutoRepublish, setEditAutoRepublish] = useState(false);
+  const [customThresholdMetafieldId, setCustomThresholdMetafieldId] = useState<string | null>(null);
 
   // Initial inventory fetch when modal opens for an already-tracked product
   useEffect(() => {
@@ -771,6 +864,26 @@ export default function ProductsPage() {
     setExpandedVariants(new Set());
     setInventoryEdits({});
   }, [editProduct?.productId]);
+
+  // Load per-product metafield settings whenever modal opens
+  useEffect(() => {
+    if (!editProduct) return;
+    settingsFetcher.load(`/app/products?intent=get_product_settings&productId=${editProduct.productId}`);
+    setEditCustomThreshold("");
+    setEditAutoHide(autoHideEnabled);
+    setEditAutoRepublish(autoRepublishEnabled);
+    setCustomThresholdMetafieldId(null);
+  }, [editProduct?.productId]);
+
+  // Populate settings state when metafield data arrives
+  useEffect(() => {
+    const s = settingsFetcher.data?.productSettings;
+    if (!s) return;
+    setEditCustomThreshold(s.customThreshold ?? "");
+    setEditAutoHide(s.autoHide !== null ? s.autoHide : autoHideEnabled);
+    setEditAutoRepublish(s.autoRepublish !== null ? s.autoRepublish : autoRepublishEnabled);
+    setCustomThresholdMetafieldId(s.customThresholdId);
+  }, [settingsFetcher.data]);
 
   // Close modal on successful save
   useEffect(() => {
@@ -808,10 +921,17 @@ export default function ProductsPage() {
     const p = new URLSearchParams();
     if (search) p.set("search", search);
     if (filter !== "all") p.set("filter", filter);
+    if (prev) p.set("prev", prev); // preserved by default; callers can override with null to clear
     Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); else p.delete(k); });
     const qs = p.toString();
     return `/app/products${qs ? `?${qs}` : ""}`;
   };
+
+  // Compute prev/next cursor values for pagination links
+  const prevList = prev ? prev.split(",") : [];
+  const prevPageAfter = prevList[prevList.length - 1] ?? null;
+  const prevPagePrev = prevList.slice(0, -1).join(",") || null;
+  const nextPagePrev = [prev, after].filter(Boolean).join(",") || null;
 
   const toggleVariant = (id: string) => {
     setExpandedVariants((prev) => {
@@ -842,7 +962,7 @@ export default function ProductsPage() {
       <SyncButton
         slot="primary-action"
         pct={syncPct}
-        onClick={() => { if (syncPct === null && !busy) { setSyncStreamError(null); submit({ intent: "sync" }, { method: "post" }); } }}
+        onClick={() => { if (syncPct === null && !busy) { clearError(); submit({ intent: "sync" }, { method: "post" }); } }}
       />
 
       {actionData && "error" in actionData && (
@@ -861,7 +981,7 @@ export default function ProductsPage() {
           <button
             type="button"
             onClick={() => {
-              setSyncStreamError(null);
+              clearError();
               if (syncPct === null && !busy) submit({ intent: "sync" }, { method: "post" });
             }}
             style={{ flexShrink: 0, padding: "5px 14px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fff", color: "#991b1b", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
@@ -875,6 +995,12 @@ export default function ProductsPage() {
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
           Basic plan: monitoring up to {maxProducts} products.{" "}
           <a href="/app/billing" style={{ color: "#1d4ed8", fontWeight: 600 }}>Upgrade to Pro →</a>
+        </div>
+      )}
+
+      {lastSyncCompletedAt && (
+        <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 12 }}>
+          Last synced {timeAgo(lastSyncCompletedAt)}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
         </div>
       )}
 
@@ -905,7 +1031,7 @@ export default function ProductsPage() {
           {FILTER_TABS.map((tab) => (
             <Link
               key={tab.key}
-              to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null })}
+              to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null, prev: null })}
               style={{
                 padding: "6px 14px", fontSize: 13, textDecoration: "none", whiteSpace: "nowrap",
                 fontWeight: filter === tab.key || (tab.key === "all" && filter === "all") ? 600 : 400,
@@ -998,16 +1124,30 @@ export default function ProductsPage() {
         {/* Pagination */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
           <span style={{ fontSize: 13, color: "#6b7280" }}>
-            {after ? "Showing next page" : "Showing first page"}
+            {after ? `Page ${prevList.length + 2}` : "Page 1"}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
+            {prevList.length > 1 && (
+              <Link
+                to={buildUrl({ after: null, prev: null })}
+                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
+              >
+                ← First
+              </Link>
+            )}
             {after && (
-              <Link to={buildUrl({ after: null })} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
-                ← First Page
+              <Link
+                to={buildUrl({ after: prevPageAfter, prev: prevPagePrev })}
+                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
+              >
+                ← Previous
               </Link>
             )}
             {pageInfo.hasNextPage && pageInfo.endCursor && (
-              <Link to={buildUrl({ after: pageInfo.endCursor })} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>
+              <Link
+                to={buildUrl({ after: pageInfo.endCursor, prev: nextPagePrev })}
+                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
+              >
                 Next →
               </Link>
             )}
@@ -1149,6 +1289,101 @@ export default function ProductsPage() {
                   <input type="hidden" name="monitoringEnabled" value={String(editMonitoring && editTracked)} />
                 </div>
 
+                {/* Inventory settings — only shown when tracking is enabled */}
+                {editTracked && (
+                  <div style={{ marginBottom: 16, padding: "14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                    <p style={{ margin: "0 0 12px", fontWeight: 600, fontSize: 13, color: "#374151" }}>
+                      Inventory Settings
+                    </p>
+
+                    {/* Auto-hide sold-out products */}
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                        <div>
+                          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>Auto-hide sold-out products</p>
+                          <p style={{ margin: "1px 0 0", fontSize: 12, color: "#9ca3af" }}>Automatically unpublish when stock hits zero</p>
+                        </div>
+                        <div
+                          onClick={() => setEditAutoHide((v) => !v)}
+                          style={{
+                            width: 36, height: 20, borderRadius: 10, background: editAutoHide ? "#008060" : "#d1d5db",
+                            position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer", marginLeft: 12,
+                          }}
+                        >
+                          <div style={{
+                            position: "absolute", top: 2, left: editAutoHide ? 18 : 2,
+                            width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                            transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                          }} />
+                        </div>
+                      </label>
+                      <input type="hidden" name="autoHide" value={String(editAutoHide)} />
+                    </div>
+
+                    {/* Auto-republish when restocked */}
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                        <div>
+                          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>Auto-republish when restocked</p>
+                          <p style={{ margin: "1px 0 0", fontSize: 12, color: "#9ca3af" }}>Republish automatically when inventory is added</p>
+                        </div>
+                        <div
+                          onClick={() => setEditAutoRepublish((v) => !v)}
+                          style={{
+                            width: 36, height: 20, borderRadius: 10, background: editAutoRepublish ? "#008060" : "#d1d5db",
+                            position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer", marginLeft: 12,
+                          }}
+                        >
+                          <div style={{
+                            position: "absolute", top: 2, left: editAutoRepublish ? 18 : 2,
+                            width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                            transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                          }} />
+                        </div>
+                      </label>
+                      <input type="hidden" name="autoRepublish" value={String(editAutoRepublish)} />
+                    </div>
+
+                    {/* Low-stock threshold */}
+                    <div>
+                      <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>
+                        Low-Stock Threshold
+                        {plan !== "pro" && (
+                          <span style={{ marginLeft: 6, fontSize: 11, background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: 4 }}>
+                            Pro only
+                          </span>
+                        )}
+                      </label>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          type="number"
+                          min="0"
+                          value={editCustomThreshold}
+                          onChange={(e) => setEditCustomThreshold(e.target.value)}
+                          placeholder={`Store default (${threshold})`}
+                          disabled={plan !== "pro"}
+                          style={{
+                            width: 150, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13,
+                            background: plan !== "pro" ? "#f3f4f6" : "#fff",
+                            color: plan !== "pro" ? "#9ca3af" : "#111827",
+                            cursor: plan !== "pro" ? "not-allowed" : "text",
+                          }}
+                          aria-label="Custom threshold"
+                        />
+                        {editCustomThreshold && plan === "pro" && (
+                          <button type="button" onClick={() => setEditCustomThreshold("")}
+                            style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", padding: "4px 6px" }}>
+                            Reset to default
+                          </button>
+                        )}
+                      </div>
+                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>Alert when inventory falls below this amount</p>
+                      <input type="hidden" name="customThreshold" value={editCustomThreshold} />
+                      <input type="hidden" name="customThresholdMetafieldId" value={customThresholdMetafieldId ?? ""} />
+                    </div>
+                  </div>
+                )}
+
                 {/* Inventory section — only shown when tracking is enabled */}
                 {editTracked && (
                   <div style={{ marginBottom: 20 }}>
@@ -1190,6 +1425,16 @@ export default function ProductsPage() {
       )}
     </s-page>
   );
+}
+
+function timeAgo(iso: string): string {
+  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 function SyncButton({ pct, onClick, slot }: { pct: number | null; onClick: () => void; slot?: Lowercase<string> }) {

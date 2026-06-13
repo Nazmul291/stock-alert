@@ -1,54 +1,39 @@
-type ProgressCallback = (pct: number, done: boolean, error?: string) => void;
-
-type ShopSyncState = {
-  running: boolean;
-  startedAt: number;
-  completedAt?: number;
-  progress: number;
-  synced?: number;
-  error?: string;
-};
-
-const state = new Map<string, ShopSyncState>();
-const callbacks = new Map<string, Set<ProgressCallback>>();
-
-function notify(shop: string, pct: number, done: boolean, error?: string) {
-  callbacks.get(shop)?.forEach((cb) => cb(pct, done, error));
-  if (done || error) callbacks.delete(shop);
-}
+import prisma from '../db.server';
 
 export const syncState = {
-  start(shop: string) {
-    state.set(shop, { running: true, startedAt: Date.now(), progress: 5 });
-    notify(shop, 5, false);
+  async start(shop: string): Promise<void> {
+    await prisma.syncState.upsert({
+      where: { shop },
+      create: { shop, running: true, progress: 5, startedAt: new Date() },
+      update: { running: true, progress: 5, startedAt: new Date(), completedAt: null, syncedCount: null, error: null },
+    });
   },
 
-  progress(shop: string, pct: number) {
-    const prev = state.get(shop);
-    if (!prev?.running) return;
-    state.set(shop, { ...prev, progress: pct });
-    notify(shop, pct, false);
+  async progress(shop: string, pct: number): Promise<void> {
+    await prisma.syncState.upsert({
+      where: { shop },
+      create: { shop, running: true, progress: pct, startedAt: new Date() },
+      update: { progress: pct },
+    });
   },
 
-  done(shop: string, synced: number) {
-    const prev = state.get(shop);
-    state.set(shop, { running: false, startedAt: prev?.startedAt ?? Date.now(), completedAt: Date.now(), progress: 100, synced });
-    notify(shop, 100, true);
+  async done(shop: string, synced: number): Promise<void> {
+    await prisma.syncState.upsert({
+      where: { shop },
+      create: { shop, running: false, progress: 100, startedAt: new Date(), completedAt: new Date(), syncedCount: synced },
+      update: { running: false, progress: 100, completedAt: new Date(), syncedCount: synced, error: null },
+    });
   },
 
-  fail(shop: string, error: string) {
-    const prev = state.get(shop);
-    state.set(shop, { running: false, startedAt: prev?.startedAt ?? Date.now(), progress: 0, error });
-    notify(shop, 0, false, error);
+  async fail(shop: string, error: string): Promise<void> {
+    await prisma.syncState.upsert({
+      where: { shop },
+      create: { shop, running: false, progress: 0, startedAt: new Date(), error },
+      update: { running: false, progress: 0, error },
+    });
   },
 
-  onProgress(shop: string, cb: ProgressCallback): () => void {
-    if (!callbacks.has(shop)) callbacks.set(shop, new Set());
-    callbacks.get(shop)!.add(cb);
-    return () => callbacks.get(shop)?.delete(cb);
-  },
-
-  get(shop: string): ShopSyncState | null {
-    return state.get(shop) ?? null;
+  async get(shop: string) {
+    return prisma.syncState.findUnique({ where: { shop } });
   },
 };

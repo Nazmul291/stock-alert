@@ -22,12 +22,16 @@ api_version = "2025-10"
   topics = [ "app/scopes_update" ]
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks/app/subscriptions_update"
+  topics = [ "app_subscriptions/update" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/inventory"
   topics = [ "inventory_levels/update" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/products"
-  topics = [ "products/delete", "products/update" ]
+  topics = [ "products/create", "products/delete", "products/update" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/compliance"

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher, useRevalidator } from "react-router";
+import { useLoaderData, useFetcher } from "react-router";
+import { useSyncStream } from "../hooks/use-sync-stream";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { format } from "date-fns";
 import { syncState } from "../lib/sync-state.server";
+
 
 const PRODUCTS_TRACKING_QUERY = `
   query ($first: Int!, $after: String) {
@@ -27,11 +29,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const [tracking, settings, setupProgress, recentAlerts] = await Promise.all([
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
+  sevenDaysAgo.setUTCHours(0, 0, 0, 0);
+
+  const [tracking, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows] = await Promise.all([
     prisma.inventoryTracking.findMany({ where: { shop }, select: { productId: true, currentQuantity: true, isHidden: true, inventoryStatus: true } }),
     prisma.storeSettings.findUnique({ where: { shop } }),
     prisma.setupProgress.findUnique({ where: { shop } }),
     prisma.alertHistory.findMany({ where: { shop }, orderBy: { sentAt: "desc" }, take: 10 }),
+    prisma.session.findFirst({ where: { shop, isOnline: false } }),
+    prisma.alertHistory.count({ where: { shop, sentAt: { gte: todayStart } } }),
+    syncState.get(shop),
+    prisma.$queryRaw<{ day: string; count: number }[]>`
+      SELECT TO_CHAR(sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)::int AS count
+      FROM alert_history
+      WHERE shop = ${shop} AND sent_at >= ${sevenDaysAgo}
+      GROUP BY day
+      ORDER BY day ASC
+    `,
   ]);
 
   const threshold = settings?.lowStockThreshold ?? 5;
@@ -74,8 +93,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     notTracked: untrackedShopifyIds.size,
   };
 
-  const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
-
   const setupSteps = [
     setupProgress?.appInstalled ?? true,
     setupProgress?.globalSettingsConfigured ?? false,
@@ -83,13 +100,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ];
   const progressPct = Math.round((setupSteps.filter(Boolean).length / setupSteps.length) * 100);
 
+  // Build a 7-element array [oldest … today] for the sparkline
+  const rowMap = new Map(sparkRows.map((r) => [r.day, r.count]));
+  const todayUTC = new Date();
+  todayUTC.setUTCHours(0, 0, 0, 0);
+  const spark7 = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(todayUTC);
+    d.setUTCDate(d.getUTCDate() - (6 - i));
+    return rowMap.get(d.toISOString().slice(0, 10)) ?? 0;
+  });
+
   return {
     shop,
     plan: storeSession?.plan ?? "basic",
     stats,
     setupProgress,
     progressPct,
-    syncRunning: syncState.get(shop)?.running ?? false,
+    syncRunning: shopSyncState?.running ?? false,
+    lastSyncCompletedAt: shopSyncState?.completedAt?.toISOString() ?? null,
+    lastSyncCount: shopSyncState?.syncedCount ?? null,
     recentAlerts: recentAlerts.map((a) => ({
       id: a.id,
       productTitle: a.productTitle,
@@ -97,55 +126,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       sentAt: a.sentAt.toISOString(),
     })),
     notificationEmail: settings?.notificationEmail ?? null,
+    alertsToday,
+    spark7,
   };
 };
 
+function timeAgo(iso: string): string {
+  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function Dashboard() {
-  const { shop, plan, stats, setupProgress, progressPct, syncRunning, recentAlerts, notificationEmail } =
+  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, recentAlerts, notificationEmail, alertsToday, spark7 } =
     useLoaderData<typeof loader>();
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
-  const { revalidate } = useRevalidator();
-  const [syncPct, setSyncPct] = useState<number | null>(null);
-  const [syncStreamError, setSyncStreamError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
-
-  const openSseStream = () => {
-    if (esRef.current) return;
-    setSyncStreamError(null);
-    const es = new EventSource(`/api/sync-stream?shop=${encodeURIComponent(shop)}`);
-    esRef.current = es;
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === "progress") setSyncPct(data.pct);
-      if (data.type === "done") {
-        setSyncPct(100);
-        es.close(); esRef.current = null;
-        setTimeout(() => { setSyncPct(null); revalidate(); }, 1000);
-      }
-      if (data.type === "idle") {
-        es.close(); esRef.current = null; setSyncPct(null);
-      }
-      if (data.type === "error" || data.type === "auth_error") {
-        setSyncStreamError(data.message ?? "Sync failed — network error.");
-        es.close(); esRef.current = null; setSyncPct(null);
-      }
-    };
-    es.onerror = () => {
-      setSyncStreamError("Sync connection lost. Please retry.");
-      es.close(); esRef.current = null; setSyncPct(null);
-    };
-  };
+  const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop, syncRunning);
 
   useEffect(() => {
-    if (syncFetcher.data?.status === "started") openSseStream();
-  }, [syncFetcher.data]);
-
-  useEffect(() => {
-    if (syncRunning && !esRef.current) openSseStream();
-  }, [syncRunning]);
-
-  useEffect(() => () => { esRef.current?.close(); }, []);
+    if (syncFetcher.data?.status === "started") openStream();
+  }, [syncFetcher.data, openStream]);
 
   const syncActionError = syncPct === null && syncFetcher.state === "idle" ? (syncFetcher.data?.error ?? null) : null;
   const syncError = syncStreamError ?? syncActionError;
@@ -191,6 +196,7 @@ export default function Dashboard() {
             { label: "Hidden", value: stats.hidden, color: "#6b7280" },
             { label: "Deactivated", value: stats.deactivated, color: "#9ca3af" },
             { label: "Not Tracked", value: stats.notTracked, color: "#7c3aed" },
+            { label: "Alerts Today", value: alertsToday, color: alertsToday > 0 ? "#d97706" : "#6b7280" },
           ].map((s) => (
             <div key={s.label} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, textAlign: "center" }}>
               <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -198,10 +204,17 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
+        <AlertSparkline data={spark7} />
+        {lastSyncCompletedAt && (
+          <p style={{ margin: "10px 0 0", fontSize: 13, color: "#9ca3af" }}>
+            Last synced {timeAgo(lastSyncCompletedAt)}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
+          </p>
+        )}
       </s-section>
 
       {/* Recent alerts */}
       <s-section heading="Recent Alerts">
+        <a slot="primary-action" href="/app/alert-history" style={{ fontSize: 13, color: "#1d4ed8", textDecoration: "none" }}>View all →</a>
         {recentAlerts.length === 0 ? (
           <s-paragraph>No alerts yet — alerts will appear here when inventory thresholds are triggered.</s-paragraph>
         ) : (
@@ -255,7 +268,7 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={() => {
-                  setSyncStreamError(null);
+                  clearError();
                   if (syncFetcher.state === "idle") syncFetcher.submit({ intent: "sync" }, { method: "post", action: "/app/products" });
                 }}
                 style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fff", color: "#991b1b", cursor: "pointer", fontWeight: 600 }}
@@ -269,6 +282,60 @@ export default function Dashboard() {
         </s-stack>
       </s-section>
     </s-page>
+  );
+}
+
+function AlertSparkline({ data }: { data: number[] }) {
+  const BAR_W = 28;
+  const GAP = 6;
+  const BAR_H = 44;
+  const LABEL_H = 16;
+  const total = data.length; // always 7
+  const svgW = total * BAR_W + (total - 1) * GAP;
+  const svgH = BAR_H + LABEL_H;
+  const max = Math.max(...data, 1);
+  const totalAlerts = data.reduce((a, b) => a + b, 0);
+
+  // Day labels: Mon/Tue/... for each of the 7 days
+  const today = new Date();
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - (6 - i));
+    return d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2);
+  });
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>Alerts — last 7 days</span>
+        <span style={{ fontSize: 12, color: "#6b7280" }}>{totalAlerts} total</span>
+      </div>
+      <svg width={svgW} height={svgH} style={{ display: "block", overflow: "visible" }}>
+        {data.map((count, i) => {
+          const x = i * (BAR_W + GAP);
+          const barH = count === 0 ? 2 : Math.max(4, Math.round((count / max) * BAR_H));
+          const y = BAR_H - barH;
+          const isToday = i === 6;
+          return (
+            <g key={i}>
+              <rect
+                x={x} y={y} width={BAR_W} height={barH}
+                rx={3}
+                fill={count === 0 ? "#f3f4f6" : isToday ? "#d97706" : "#fde68a"}
+                stroke={count === 0 ? "#e5e7eb" : isToday ? "#b45309" : "#f59e0b"}
+                strokeWidth={1}
+              />
+              {count > 0 && (
+                <text x={x + BAR_W / 2} y={y - 3} textAnchor="middle" fontSize={9} fill="#6b7280">{count}</text>
+              )}
+              <text x={x + BAR_W / 2} y={svgH - 1} textAnchor="middle" fontSize={9} fill={isToday ? "#374151" : "#9ca3af"} fontWeight={isToday ? 700 : 400}>
+                {days[i]}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 

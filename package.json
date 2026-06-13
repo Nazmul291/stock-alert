@@ -18,8 +18,8 @@
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "dev:worker": "tsx --env-file=.env --watch workers/inventory-buffer.worker.ts",
-    "start:worker": "tsx workers/inventory-buffer.worker.ts"
+    "dev:worker": "PROCESS_TYPE=worker tsx --env-file=.env --watch workers/inventory-buffer.worker.ts",
+    "start:worker": "PROCESS_TYPE=worker tsx workers/inventory-buffer.worker.ts"
   },
   "type": "module",
   "engines": {

@@ -6,6 +6,13 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
 import { getIsTestStore } from "../services/billing.server";
+import { ensureWebhooks } from "../lib/webhook-health.server";
+
+const todayUTC = () => {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, admin, session } = await authenticate.admin(request);
@@ -44,7 +51,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", shop };
+  const alertsToday = await prisma.alertHistory.count({
+    where: { shop, sentAt: { gte: todayUTC() } },
+  });
+
+  // Non-blocking — re-registers any missing Shopify webhook subscriptions once per hour.
+  ensureWebhooks(admin, shop, process.env.SHOPIFY_APP_URL || "").catch(() => {});
+
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", shop, alertsToday };
 };
 
 
@@ -85,7 +99,7 @@ function NavigationLoadingOverlay() {
 }
 
 export default function App() {
-  const { apiKey, shop } = useLoaderData<typeof loader>();
+  const { apiKey, shop, alertsToday } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const isNavigating = navigation.state === "loading";
@@ -97,6 +111,9 @@ export default function App() {
       <s-app-nav>
         <s-link href="/app">Dashboard</s-link>
         <s-link href="/app/products">Products</s-link>
+        <s-link href="/app/alert-history">
+          {alertsToday > 0 ? `Alert History (${alertsToday})` : "Alert History"}
+        </s-link>
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/billing">Billing</s-link>
       </s-app-nav>

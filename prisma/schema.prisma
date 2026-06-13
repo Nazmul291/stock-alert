@@ -64,7 +64,7 @@ model StoreSettings {
   autoHideEnabled      Boolean  @default(false) @map("auto_hide_enabled")
   emailNotifications   Boolean  @default(true) @map("email_notifications")
   slackNotifications   Boolean  @default(false) @map("slack_notifications")
-  notificationEmail    String?  @map("notification_email") @db.VarChar(255)
+  notificationEmail    String?  @map("notification_email")
   slackWebhookUrl      String?  @map("slack_webhook_url")
   autoRepublishEnabled Boolean  @default(false) @map("auto_republish_enabled")
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
@@ -87,6 +87,7 @@ model InventoryTracking {
   previousQuantity Int?            @map("previous_quantity")
   lastCheckedAt    DateTime        @default(now()) @map("last_checked_at") @db.Timestamptz
   lastAlertSentAt  DateTime?       @map("last_alert_sent_at") @db.Timestamptz
+  lastAlertType    AlertType?      @map("last_alert_type")
   isHidden           Boolean         @default(false) @map("is_hidden")
   monitoringEnabled  Boolean         @default(true) @map("monitoring_enabled")
   inventoryStatus    InventoryStatus @default(in_stock) @map("inventory_status")
@@ -97,7 +98,6 @@ model InventoryTracking {
 
   @@unique([shop, productId])
   @@index([shop])
-  @@index([shop, productId])
   @@index([shop, currentQuantity])
   @@index([shop, isHidden])
   @@index([lastCheckedAt])
@@ -146,6 +146,20 @@ model SetupProgress {
 
 
 
+
+// Per-shop sync progress — persisted so all web VMs see the same state.
+model SyncState {
+  shop        String    @id
+  running     Boolean   @default(false)
+  progress    Int       @default(0)
+  startedAt   DateTime  @map("started_at") @db.Timestamptz
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+  syncedCount Int?      @map("synced_count")
+  error       String?
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("sync_state")
+}
 
 // Transient debounce buffer — rows are deleted after the alert fires.
 // No FK relation to Session so cascades don't interfere with rapid writes.
