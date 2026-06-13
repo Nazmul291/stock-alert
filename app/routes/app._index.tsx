@@ -165,6 +165,7 @@ export default function Dashboard() {
             { label: "Hidden", value: stats.hidden, color: "#6b7280", href: null },
             { label: "Deactivated", value: stats.deactivated, color: "#9ca3af", href: null },
             { label: "Alerts Today", value: alertsToday, color: alertsToday > 0 ? "#d97706" : "#6b7280", href: alertsToday > 0 ? "/app/alert-history" : null },
+            { label: "Analytics", value: "→", color: "#4f46e5", href: "/app/analytics" },
           ].map((s) => {
             const inner = (
               <>
