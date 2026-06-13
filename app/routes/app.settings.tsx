@@ -34,6 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandLogoUrl: settings.brandLogoUrl ?? "",
           brandColor: settings.brandColor ?? "#4f46e5",
           brandSenderName: settings.brandSenderName ?? "",
+          outboundWebhookUrl: settings.outboundWebhookUrl ?? "",
         }
       : {
           autoHideEnabled: false,
@@ -48,6 +49,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandLogoUrl: "",
           brandColor: "#4f46e5",
           brandSenderName: "",
+          outboundWebhookUrl: "",
         },
   };
 };
@@ -136,6 +138,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
       brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
       brandSenderName: ((form.get("brandSenderName") as string) ?? "").trim() || null,
+      outboundWebhookUrl: ((form.get("outboundWebhookUrl") as string) ?? "").trim() || null,
     } : {}),
   };
 
@@ -185,6 +188,7 @@ export default function SettingsPage() {
   const [brandLogoUrl, setBrandLogoUrl] = useState(settings.brandLogoUrl);
   const [brandColor, setBrandColor] = useState(settings.brandColor);
   const [brandSenderName, setBrandSenderName] = useState(settings.brandSenderName);
+  const [outboundWebhookUrl, setOutboundWebhookUrl] = useState(settings.outboundWebhookUrl);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -409,6 +413,12 @@ export default function SettingsPage() {
           onColorChange={setBrandColor}
           onSenderNameChange={setBrandSenderName}
         />
+
+        <OutboundWebhookSection
+          plan={plan}
+          url={outboundWebhookUrl}
+          onUrlChange={setOutboundWebhookUrl}
+        />
       </Form>
 
       <div style={{ marginTop: 24 }}>
@@ -500,6 +510,65 @@ function DigestSection({
             </p>
           </div>
         )}
+      </s-section>
+    </div>
+  );
+}
+
+function OutboundWebhookSection({
+  plan, url, onUrlChange,
+}: {
+  plan: string;
+  url: string;
+  onUrlChange: (v: string) => void;
+}) {
+  const isPro = plan === "pro";
+  return (
+    <div style={{ marginTop: 24 }}>
+      <s-section heading="Outbound Webhook">
+        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
+          Fire a JSON POST to any URL on every stock event (low stock, out of stock, restock). Use it to connect Zapier, Make, Slack workflows, or your own ERP.{" "}
+          {!isPro && (
+            <span style={{ color: "#9ca3af" }}>
+              Requires Professional plan.{" "}
+              <a href="/app/billing" style={{ color: "#4f46e5" }}>Upgrade →</a>
+            </span>
+          )}
+        </p>
+
+        <div style={{ opacity: isPro ? 1 : 0.5, pointerEvents: isPro ? "auto" : "none" }}>
+          <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+            Webhook URL
+          </label>
+          <input
+            type="url"
+            name="outboundWebhookUrl"
+            value={url}
+            onChange={(e) => onUrlChange(e.target.value)}
+            placeholder="https://hooks.zapier.com/hooks/catch/..."
+            disabled={!isPro}
+            style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
+          />
+          <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+            Stock Alert will POST a JSON payload to this URL whenever an alert is triggered.
+          </p>
+
+          {isPro && url && (
+            <div style={{ marginTop: 10, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Example payload</p>
+              <pre style={{ fontSize: 11, color: "#4b5563", margin: 0, overflow: "auto" }}>{JSON.stringify({
+                event: "low_stock",
+                shop: "your-store.myshopify.com",
+                productId: "1234567890",
+                productTitle: "Blue T-Shirt",
+                sku: "BTS-001",
+                currentQuantity: 3,
+                threshold: 5,
+                timestamp: new Date().toISOString(),
+              }, null, 2)}</pre>
+            </div>
+          )}
+        </div>
       </s-section>
     </div>
   );
@@ -632,6 +701,8 @@ function PlanCard({ plan }: { plan: string }) {
     { label: "Multiple email recipients",         pro: true  },
     { label: "Auto-republish on restock",         pro: true  },
     { label: "Per-product custom thresholds",     pro: true  },
+    { label: "Outbound webhook / Zapier",         pro: true  },
+    { label: "Email branding",                    pro: true  },
   ];
 
   return (

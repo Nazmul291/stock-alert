@@ -13,6 +13,7 @@ import {
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { syncState } from "../lib/sync-state.server";
 import { computeStockOutDays } from "../lib/velocity.server";
+import { fireOutboundWebhook } from "../lib/outbound-webhook.server";
 
 const INVENTORY_ITEM_QUERY = `
   query ($id: ID!) {
@@ -290,6 +291,20 @@ async function processInventoryUpdate(
       settingsCtx,
       productCtx,
     });
+  }
+
+  // ── 8b. Outbound webhook (Pro, non-blocking) ──────────────────────────────
+  if (storeSession?.plan === "pro" && settings.outboundWebhookUrl) {
+    fireOutboundWebhook(settings.outboundWebhookUrl, {
+      event: alertType as "low_stock" | "out_of_stock" | "restock",
+      shop,
+      productId,
+      productTitle: productCtx.title,
+      sku: productCtx.sku,
+      currentQuantity: newQty,
+      threshold,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
   }
 
   // ── 9. Auto-hide / auto-republish (fires immediately, separate from alerts) ──

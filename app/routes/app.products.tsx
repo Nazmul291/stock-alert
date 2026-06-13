@@ -130,6 +130,51 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = session.shop;
   const url = new URL(request.url);
 
+  if (url.searchParams.get("intent") === "export_csv") {
+    const csvFilter = url.searchParams.get("filter") ?? "all";
+    const statusFilter: string[] =
+      csvFilter === "out_of_stock" ? ["out_of_stock"]
+      : csvFilter === "low_stock"  ? ["low_stock"]
+      : csvFilter === "in_stock"   ? ["in_stock"]
+      : ["in_stock", "low_stock", "out_of_stock"];
+
+    const rows = await prisma.inventoryTracking.findMany({
+      where: { shop, inventoryStatus: { in: statusFilter as any }, monitoringEnabled: true },
+      orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
+      select: {
+        productId: true, productTitle: true, sku: true,
+        currentQuantity: true, inventoryStatus: true,
+        stockOutDays: true, avgDailySales: true,
+        lastAlertType: true, lastAlertSentAt: true,
+      },
+    });
+
+    const header = ["Product Title", "SKU", "Quantity", "Status", "Days Left", "Avg Daily Sales", "Last Alert", "Last Alert Date"];
+    const escape = (v: string | null | undefined) => `"${(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [
+      header.join(","),
+      ...rows.map((r) => [
+        escape(r.productTitle),
+        escape(r.sku),
+        r.currentQuantity,
+        r.inventoryStatus,
+        r.stockOutDays ?? "",
+        r.avgDailySales != null ? r.avgDailySales.toFixed(2) : "",
+        r.lastAlertType ?? "",
+        r.lastAlertSentAt ? r.lastAlertSentAt.toISOString().slice(0, 10) : "",
+      ].join(",")),
+    ];
+
+    const csv = lines.join("\r\n");
+    const filename = `stock-alert-${csvFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  }
+
   if (url.searchParams.get("intent") === "get_product_inventory") {
     const productId = url.searchParams.get("productId") as string;
     try {
@@ -806,22 +851,40 @@ export default function ProductsPage() {
           )}
         </Form>
 
-        <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
-          {FILTER_TABS.map((tab) => (
-            <Link
-              key={tab.key}
-              to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null, prev: null })}
-              style={{
-                padding: "6px 14px", fontSize: 13, textDecoration: "none", whiteSpace: "nowrap",
-                fontWeight: filter === tab.key || (tab.key === "all" && filter === "all") ? 600 : 400,
-                color: filter === tab.key || (tab.key === "all" && filter === "all") ? "#111827" : "#6b7280",
-                borderBottom: filter === tab.key || (tab.key === "all" && filter === "all") ? "2px solid #111827" : "2px solid transparent",
-              }}
-            >
-              {tab.label}
-            </Link>
-          ))}
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8, marginBottom: 0 }}>
+          <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e5e7eb", flex: 1 }}>
+            {FILTER_TABS.map((tab) => (
+              <Link
+                key={tab.key}
+                to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null, prev: null })}
+                style={{
+                  padding: "6px 14px", fontSize: 13, textDecoration: "none", whiteSpace: "nowrap",
+                  fontWeight: filter === tab.key || (tab.key === "all" && filter === "all") ? 600 : 400,
+                  color: filter === tab.key || (tab.key === "all" && filter === "all") ? "#111827" : "#6b7280",
+                  borderBottom: filter === tab.key || (tab.key === "all" && filter === "all") ? "2px solid #111827" : "2px solid transparent",
+                }}
+              >
+                {tab.label}
+              </Link>
+            ))}
+          </div>
+          <a
+            href={`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`}
+            download
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "5px 12px", borderRadius: 6, border: "1px solid #d1d5db",
+              background: "#fff", color: "#374151", fontSize: 13, textDecoration: "none",
+              whiteSpace: "nowrap", marginBottom: 1,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export CSV
+          </a>
         </div>
+        <div style={{ marginBottom: 16 }} />
 
         {products.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>

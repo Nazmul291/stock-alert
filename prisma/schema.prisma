@@ -74,6 +74,7 @@ model StoreSettings {
   brandLogoUrl         String?   @map("brand_logo_url") @db.VarChar(500)
   brandColor           String?   @map("brand_color") @db.VarChar(7)
   brandSenderName      String?   @map("brand_sender_name") @db.VarChar(100)
+  outboundWebhookUrl   String?   @map("outbound_webhook_url") @db.VarChar(500)
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
