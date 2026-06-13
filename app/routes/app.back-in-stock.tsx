@@ -13,7 +13,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1") || 1);
 
-  const [rows, total, productGroups] = await Promise.all([
+  const [rows, total, productGroups, restockDates] = await Promise.all([
     prisma.backInStockSubscriber.findMany({
       where: { shop },
       orderBy: { subscribedAt: "desc" },
@@ -26,6 +26,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shop },
       _count: { _all: true },
       orderBy: { _count: { email: "desc" } },
+    }),
+    prisma.inventoryTracking.findMany({
+      where: { shop },
+      select: { productId: true, expectedRestockDate: true },
     }),
   ]);
 
@@ -43,11 +47,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     total,
     page,
     totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
-    productGroups: productGroups.map((g) => ({
-      productId: g.productId.toString(),
-      productTitle: g.productTitle,
-      count: g._count._all,
-    })),
+    productGroups: productGroups.map((g) => {
+      const rd = restockDates.find((r) => r.productId === g.productId);
+      return {
+        productId: g.productId.toString(),
+        productTitle: g.productTitle,
+        count: g._count._all,
+        expectedRestockDate: rd?.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
+      };
+    }),
     widgetSnippet: `<script>
   (function() {
     var form = document.getElementById('bis-form');
@@ -122,7 +130,14 @@ export default function BackInStockPage() {
               >
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{g.productTitle ?? `Product #${g.productId}`}</div>
-                  <div style={{ fontSize: 12, color: "#9ca3af" }}>ID: {g.productId}</div>
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>
+                    ID: {g.productId}
+                    {g.expectedRestockDate && (
+                      <span style={{ marginLeft: 10, color: "#059669", fontWeight: 500 }}>
+                        · Expected back: {new Date(g.expectedRestockDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <span style={{ fontSize: 18, fontWeight: 700, color: "#4f46e5" }}>{g.count}</span>

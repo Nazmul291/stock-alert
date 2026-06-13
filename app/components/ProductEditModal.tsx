@@ -18,6 +18,8 @@ export type ProductRow = {
   shopifyStatus: string;
   inventoryItemId: string | null;
   stockOutDays?: number | null;
+  manualDailySales?: number | null;
+  expectedRestockDate?: string | null;
 };
 
 type ProductSettings = {
@@ -365,6 +367,53 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
                 )}
               </div>
             )}
+
+            {/* Expected restock date */}
+            <div style={{ marginBottom: 20, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+              <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
+                Expected restock date
+              </label>
+              <input
+                type="date"
+                name="expectedRestockDate"
+                defaultValue={product.expectedRestockDate ?? ""}
+                style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
+              />
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
+                When do you expect this product to be restocked? Shown on the Back in Stock page.
+              </p>
+            </div>
+
+            {/* Manual velocity override */}
+            <div style={{ marginBottom: 20, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+              <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
+                Daily sales override
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="number"
+                  name="manualDailySales"
+                  defaultValue={product.manualDailySales ?? ""}
+                  min={0}
+                  step={0.1}
+                  placeholder={product.manualDailySales == null ? "Auto" : ""}
+                  style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
+                />
+                <span style={{ fontSize: 13, color: "#374151" }}>units / day</span>
+                {product.manualDailySales != null && (
+                  <button
+                    type="button"
+                    onClick={(e) => { const inp = (e.currentTarget.previousElementSibling?.previousElementSibling as HTMLInputElement); if (inp) inp.value = ""; }}
+                    style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
+                Override the auto-calculated rate for new products with no order history. Leave blank to use 30-day average.
+              </p>
+            </div>
 
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" onClick={onClose} disabled={saving}

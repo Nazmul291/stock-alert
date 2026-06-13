@@ -3,6 +3,22 @@ import prisma from "../db.server";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// In-memory rate limit: max 5 signups per IP per 10 minutes
+const ipBucket = new Map<string, { count: number; resetAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of ipBucket) if (now > v.resetAt) ipBucket.delete(k);
+}, 60_000);
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = ipBucket.get(ip) ?? { count: 0, resetAt: now + 10 * 60 * 1000 };
+  if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + 10 * 60 * 1000; }
+  entry.count++;
+  ipBucket.set(ip, entry);
+  return entry.count > 5;
+}
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -34,6 +50,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type" },
     });
   }
+
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (isRateLimited(ip)) return json({ error: "Too many requests. Please try again later." }, 429);
 
   let body: { shop?: string; productId?: string; productTitle?: string; email?: string };
   try {

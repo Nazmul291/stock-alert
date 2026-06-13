@@ -37,8 +37,8 @@ const PRODUCTS_GRAPHQL = `
 `;
 
 const SYNC_PRODUCTS_GRAPHQL = `
-  query getProducts($first: Int!, $after: String) {
-    products(first: $first, after: $after) {
+  query getProducts($first: Int!, $after: String, $query: String) {
+    products(first: $first, after: $after, query: $query) {
       edges {
         node {
           id title status
@@ -52,6 +52,15 @@ const SYNC_PRODUCTS_GRAPHQL = `
           }
         }
       }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+const COLLECTIONS_GRAPHQL = `
+  query getCollections($first: Int!, $after: String) {
+    collections(first: $first, after: $after) {
+      edges { node { id title legacyResourceId } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -173,6 +182,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         "Content-Disposition": `attachment; filename="${filename}"`,
       },
     });
+  }
+
+  if (url.searchParams.get("intent") === "get_collections") {
+    const collections: { id: string; title: string }[] = [];
+    let cursor: string | null = null;
+    let hasNext = true;
+    while (hasNext && collections.length < 250) {
+      const res = await admin.graphql(COLLECTIONS_GRAPHQL, { variables: { first: 50, ...(cursor ? { after: cursor } : {}) } });
+      const json: any = await res.json();
+      const page = json.data?.collections;
+      if (!page) break;
+      for (const e of page.edges) collections.push({ id: e.node.legacyResourceId, title: e.node.title });
+      hasNext = page.pageInfo.hasNextPage;
+      cursor = page.pageInfo.endCursor;
+    }
+    return { collections };
   }
 
   if (url.searchParams.get("intent") === "get_product_inventory") {
@@ -343,6 +368,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         shopifyStatus,
         inventoryItemId: firstInventoryItemId,
         stockOutDays: tracking.stockOutDays ?? null,
+        manualDailySales: tracking.manualDailySales ?? null,
+        expectedRestockDate: tracking.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
       };
     }
 
@@ -379,11 +406,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     autoHideEnabled: settings?.autoHideEnabled ?? false,
     autoRepublishEnabled: settings?.autoRepublishEnabled ?? false,
     supplierLeadTimeDays: settings?.supplierLeadTimeDays ?? 7,
+    monitoringFilter: settings?.monitoringFilter ?? "all",
+    monitoringCollectionId: settings?.monitoringCollectionId ?? null,
+    monitoringTags: settings?.monitoringTags ?? null,
   };
 };
 
-async function runProductSync({ admin, shop, plan, maxProducts, threshold }: {
+async function runProductSync({ admin, shop, plan, maxProducts, threshold, monitoringFilter, monitoringCollectionId, monitoringTags }: {
   admin: any; shop: string; plan: string; maxProducts: number; threshold: number;
+  monitoringFilter?: string; monitoringCollectionId?: string | null; monitoringTags?: string | null;
 }) {
   let allProducts: any[] = [];
   let cursor: string | null = null;
@@ -392,8 +423,14 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold }: {
   try {
     while (hasNextPage && allProducts.length < maxProducts) {
       const batchSize = Math.min(250, maxProducts - allProducts.length);
+      const syncQuery =
+        monitoringFilter === "collection" && monitoringCollectionId
+          ? `collection_id:${monitoringCollectionId}`
+          : monitoringFilter === "tags" && monitoringTags
+          ? monitoringTags.split(",").map((t) => `tag:${t.trim()}`).join(" OR ")
+          : null;
       const gqlResponse = await admin.graphql(SYNC_PRODUCTS_GRAPHQL, {
-        variables: { first: batchSize, after: cursor },
+        variables: { first: batchSize, after: cursor, ...(syncQuery ? { query: syncQuery } : {}) },
       });
       const gqlJson: any = await gqlResponse.json();
 
@@ -583,19 +620,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shop_productId: { shop, productId: BigInt(productId) } },
     });
 
+    const rawManualSales = ((form.get("manualDailySales") as string) ?? "").trim();
+    const manualDailySales = rawManualSales !== "" && !isNaN(parseFloat(rawManualSales)) ? parseFloat(rawManualSales) : null;
+    const rawRestockDate = ((form.get("expectedRestockDate") as string) ?? "").trim();
+    const expectedRestockDate = rawRestockDate ? new Date(rawRestockDate) : null;
+
     if (tracked) {
       const totalQty = inventoryUpdates.reduce((sum, u) => sum + u.quantity, 0);
       const qty = inventoryUpdates.length > 0 ? totalQty : (existing?.currentQuantity ?? 0);
       const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
         qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
+      const effectiveSales = manualDailySales ?? existing?.avgDailySales ?? null;
+      const stockOutDays = effectiveSales ? Math.min(999, Math.ceil(qty / effectiveSales)) : undefined;
       if (existing) {
         await prisma.inventoryTracking.update({
           where: { id: existing.id },
-          data: { ...(inventoryUpdates.length > 0 ? { currentQuantity: qty, inventoryStatus: invStatus } : {}), monitoringEnabled, lastCheckedAt: new Date() },
+          data: {
+            ...(inventoryUpdates.length > 0 ? { currentQuantity: qty, inventoryStatus: invStatus } : {}),
+            monitoringEnabled,
+            lastCheckedAt: new Date(),
+            manualDailySales,
+            expectedRestockDate,
+            ...(stockOutDays !== undefined ? { stockOutDays } : {}),
+          },
         });
       } else {
         await prisma.inventoryTracking.create({
-          data: { shop, productId: BigInt(productId), productTitle, currentQuantity: qty, previousQuantity: 0, inventoryStatus: invStatus, monitoringEnabled },
+          data: { shop, productId: BigInt(productId), productTitle, currentQuantity: qty, previousQuantity: 0, inventoryStatus: invStatus, monitoringEnabled, manualDailySales, expectedRestockDate },
         });
       }
     } else if (existing) {
@@ -697,7 +748,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const threshold = settings?.lowStockThreshold ?? 5;
 
     await syncState.start(shop);
-    runProductSync({ admin, shop, plan, maxProducts, threshold }).catch(() => {});
+    runProductSync({
+      admin, shop, plan, maxProducts, threshold,
+      monitoringFilter: settings?.monitoringFilter ?? "all",
+      monitoringCollectionId: settings?.monitoringCollectionId ?? null,
+      monitoringTags: settings?.monitoringTags ?? null,
+    }).catch(() => {});
 
     return { status: "started" };
   }
@@ -955,7 +1011,12 @@ export default function ProductsPage() {
                         </span>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} />
+                        <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} isManual={!!p.manualDailySales} />
+                        {p.expectedRestockDate && (
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+                            Back: {new Date(p.expectedRestockDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
@@ -1125,18 +1186,19 @@ function ReorderBadge({ days, leadTime }: { days: number | null; leadTime: numbe
   );
 }
 
-function StockOutBadge({ days }: { days: number | null }) {
+function StockOutBadge({ days, isManual }: { days: number | null; isManual?: boolean }) {
   if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
   if (days === 0) return (
     <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
       Out of stock
     </span>
   );
-  const bg   = days < 7  ? "#fee2e2" : days < 14 ? "#fef3c7" : "#d1fae5";
+  const bg    = days < 7  ? "#fee2e2" : days < 14 ? "#fef3c7" : "#d1fae5";
   const color = days < 7  ? "#991b1b" : days < 14 ? "#92400e" : "#065f46";
   return (
-    <span style={{ background: bg, color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
-      ~{days}d
+    <span style={{ background: bg, color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}
+      title={isManual ? "Based on manual daily sales rate" : "Based on 30-day sales average"}>
+      ~{days}d{isManual ? " ✎" : ""}
     </span>
   );
 }

@@ -193,7 +193,8 @@ async function processInventoryUpdate(
 
   // Update DB tracking whenever qty changed
   if (qtyChanged) {
-    const newStockOutDays = computeStockOutDays(newQty, existingTracking.avgDailySales);
+    const effectiveDailySales = existingTracking.manualDailySales ?? existingTracking.avgDailySales;
+    const newStockOutDays = computeStockOutDays(newQty, effectiveDailySales);
     await prisma.inventoryTracking.update({
       where: { id: existingTracking.id },
       data: {
@@ -201,7 +202,7 @@ async function processInventoryUpdate(
         previousQuantity: previousQty,
         inventoryStatus: newStatus,
         lastCheckedAt: new Date(),
-        ...(existingTracking.avgDailySales ? { stockOutDays: newStockOutDays } : {}),
+        ...(effectiveDailySales ? { stockOutDays: newStockOutDays } : {}),
       },
     });
   }

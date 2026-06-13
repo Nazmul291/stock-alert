@@ -36,6 +36,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandSenderName: settings.brandSenderName ?? "",
           outboundWebhookUrl: settings.outboundWebhookUrl ?? "",
           supplierLeadTimeDays: settings.supplierLeadTimeDays ?? 7,
+          monitoringFilter: settings.monitoringFilter ?? "all",
+          monitoringCollectionId: settings.monitoringCollectionId ?? "",
+          monitoringTags: settings.monitoringTags ?? "",
         }
       : {
           autoHideEnabled: false,
@@ -52,6 +55,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           brandSenderName: "",
           outboundWebhookUrl: "",
           supplierLeadTimeDays: 7,
+          monitoringFilter: "all",
+          monitoringCollectionId: "",
+          monitoringTags: "",
         },
   };
 };
@@ -138,6 +144,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     digestEnabled: form.get("digestEnabled") === "true",
     digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
+    monitoringFilter: (["all", "collection", "tags"] as const).includes(form.get("monitoringFilter") as any) ? form.get("monitoringFilter") as string : "all",
+    monitoringCollectionId: ((form.get("monitoringCollectionId") as string) ?? "").trim() || null,
+    monitoringTags: ((form.get("monitoringTags") as string) ?? "").trim() || null,
     ...(plan === "pro" ? {
       brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
       brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
@@ -193,6 +202,9 @@ export default function SettingsPage() {
   const [brandColor, setBrandColor] = useState(settings.brandColor);
   const [brandSenderName, setBrandSenderName] = useState(settings.brandSenderName);
   const [outboundWebhookUrl, setOutboundWebhookUrl] = useState(settings.outboundWebhookUrl);
+  const [monitoringFilter, setMonitoringFilter] = useState(settings.monitoringFilter);
+  const [monitoringCollectionId, setMonitoringCollectionId] = useState(settings.monitoringCollectionId);
+  const [monitoringTags, setMonitoringTags] = useState(settings.monitoringTags);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -443,6 +455,15 @@ export default function SettingsPage() {
           url={outboundWebhookUrl}
           onUrlChange={setOutboundWebhookUrl}
         />
+
+        <MonitoringScopeSection
+          filter={monitoringFilter}
+          collectionId={monitoringCollectionId}
+          tags={monitoringTags}
+          onFilterChange={setMonitoringFilter}
+          onCollectionIdChange={setMonitoringCollectionId}
+          onTagsChange={setMonitoringTags}
+        />
       </Form>
 
       <div style={{ marginTop: 24 }}>
@@ -532,6 +553,106 @@ function DigestSection({
             <p style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
               Digest is sent at 8:00 AM UTC only when at-risk products exist.
             </p>
+          </div>
+        )}
+      </s-section>
+    </div>
+  );
+}
+
+function MonitoringScopeSection({
+  filter, collectionId, tags, onFilterChange, onCollectionIdChange, onTagsChange,
+}: {
+  filter: string;
+  collectionId: string;
+  tags: string;
+  onFilterChange: (v: string) => void;
+  onCollectionIdChange: (v: string) => void;
+  onTagsChange: (v: string) => void;
+}) {
+  const options = [
+    { value: "all",        label: "All products",         desc: "Monitor every product in your store." },
+    { value: "collection", label: "Specific collection",  desc: "Only monitor products in a chosen collection." },
+    { value: "tags",       label: "Product tags",         desc: "Only monitor products that have specific tags." },
+  ];
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <s-section heading="Monitoring Scope">
+        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
+          Choose which products Stock Alert tracks. Changes take effect on the next sync.
+        </p>
+
+        <input type="hidden" name="monitoringFilter" value={filter} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          {options.map((opt) => (
+            <label
+              key={opt.value}
+              style={{
+                display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
+                padding: "10px 12px", borderRadius: 8,
+                border: `1px solid ${filter === opt.value ? "#4f46e5" : "#e5e7eb"}`,
+                background: filter === opt.value ? "#eef2ff" : "#fff",
+              }}
+            >
+              <input
+                type="radio"
+                name="_monitoringFilterRadio"
+                value={opt.value}
+                checked={filter === opt.value}
+                onChange={() => onFilterChange(opt.value)}
+                style={{ marginTop: 2 }}
+              />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{opt.label}</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>{opt.desc}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {filter === "collection" && (
+          <div style={{ marginTop: 4 }}>
+            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              Collection ID
+            </label>
+            <input
+              type="text"
+              name="monitoringCollectionId"
+              value={collectionId}
+              onChange={(e) => onCollectionIdChange(e.target.value)}
+              placeholder="e.g. 123456789"
+              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
+            />
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+              Find the ID in your Shopify admin URL when viewing a collection: <code>/collections/[ID]</code>. Then click <strong>Sync Products</strong> to apply.
+            </p>
+          </div>
+        )}
+
+        {filter === "tags" && (
+          <div style={{ marginTop: 4 }}>
+            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              Tags (comma-separated)
+            </label>
+            <input
+              type="text"
+              name="monitoringTags"
+              value={tags}
+              onChange={(e) => onTagsChange(e.target.value)}
+              placeholder="e.g. featured, sale, new-arrivals"
+              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
+            />
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+              Only products with <em>any</em> of these tags will be synced and monitored. Then click <strong>Sync Products</strong> to apply.
+            </p>
+          </div>
+        )}
+
+        {filter !== "all" && (
+          <div style={{ marginTop: 10, padding: "10px 14px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, fontSize: 13, color: "#92400e" }}>
+            Save settings and run a <strong>Sync Products</strong> from the Products page to apply the new scope. Products outside the filter will stop being tracked.
           </div>
         )}
       </s-section>
