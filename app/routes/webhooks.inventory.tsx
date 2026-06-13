@@ -10,6 +10,7 @@ import {
   JOB_RETRY_DELAY,
   type BufferPayload,
 } from "../lib/queue";
+import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 
 const INVENTORY_ITEM_QUERY = `
   query ($id: ID!) {
@@ -27,15 +28,16 @@ const INVENTORY_ITEM_QUERY = `
   }
 `;
 
-const PRODUCT_METAFIELDS_QUERY = `
-  query ($id: ID!) {
-    product(id: $id) {
-      customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { value }
-      autoHide: metafield(namespace: "stock_alert", key: "auto_hide") { value }
-      autoRepublish: metafield(namespace: "stock_alert", key: "auto_republish") { value }
-    }
+// 5-minute in-memory cache for per-product metafields — avoids an extra GraphQL
+// call on every inventory webhook for the same product within a 5-minute window.
+type ProductMeta = { customThreshold: number | null; autoHide: boolean | null; autoRepublish: boolean | null };
+const metafieldCache = new Map<string, { data: ProductMeta; expiresAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, entry] of metafieldCache) {
+    if (now > entry.expiresAt) metafieldCache.delete(k);
   }
-`;
+}, 60_000);
 
 // In-memory dedup cache (3-second TTL) — prevents the same location event from
 // hammering the DB when Shopify fires duplicate webhook deliveries.
@@ -134,27 +136,30 @@ async function processInventoryUpdate(
     return;
   }
 
-  // ── 3. Per-product metafield overrides ────────────────────────────────────
-  let productMeta = {
-    customThreshold: null as number | null,
-    autoHide: null as boolean | null,
-    autoRepublish: null as boolean | null,
-  };
-  try {
-    const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
-      variables: { id: `gid://shopify/Product/${productId}` },
-    });
-    const json: any = await res.json();
-    const p = json.data?.product;
-    if (p) {
-      productMeta = {
-        customThreshold: p.customThreshold?.value ? parseInt(p.customThreshold.value) : null,
-        autoHide: p.autoHide?.value !== undefined ? p.autoHide.value === "true" : null,
-        autoRepublish: p.autoRepublish?.value !== undefined ? p.autoRepublish.value === "true" : null,
-      };
+  // ── 3. Per-product metafield overrides (5-min cached) ────────────────────
+  const cacheMetaKey = `${shop}:${productId}`;
+  const cached = metafieldCache.get(cacheMetaKey);
+  let productMeta: ProductMeta = { customThreshold: null, autoHide: null, autoRepublish: null };
+  if (cached && Date.now() < cached.expiresAt) {
+    productMeta = cached.data;
+  } else {
+    try {
+      const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
+        variables: { id: `gid://shopify/Product/${productId}` },
+      });
+      const json: any = await res.json();
+      const p = json.data?.product;
+      if (p) {
+        productMeta = {
+          customThreshold: p.customThreshold?.value ? parseInt(p.customThreshold.value) : null,
+          autoHide: p.autoHide?.value !== undefined ? p.autoHide.value === "true" : null,
+          autoRepublish: p.autoRepublish?.value !== undefined ? p.autoRepublish.value === "true" : null,
+        };
+      }
+      metafieldCache.set(cacheMetaKey, { data: productMeta, expiresAt: Date.now() + 5 * 60 * 1000 });
+    } catch {
+      // Metafield fetch failed — fall through with store-level defaults
     }
-  } catch {
-    // Metafield fetch failed — fall through with store-level defaults
   }
 
   // ── 4. Status determination ───────────────────────────────────────────────
