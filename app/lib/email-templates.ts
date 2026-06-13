@@ -185,6 +185,54 @@ export function getRestockEmailTemplate(data: EmailTemplateData): { subject: str
   };
 }
 
+export interface BackInStockCustomerData {
+  storeName: string;
+  shopDomain: string;
+  productTitle: string;
+  productId: string;
+  productUrl?: string | null;
+  imageUrl?: string | null;
+  unsubscribeUrl: string;
+}
+
+export function getBackInStockCustomerTemplate(data: BackInStockCustomerData): { subject: string; html: string } {
+  const productUrl = data.productUrl ?? `https://${data.shopDomain}/products/${data.productId}`;
+  return {
+    subject: `🎉 Back in stock: ${data.productTitle}`,
+    html: shell(
+      `${data.productTitle} is back in stock at ${data.storeName} — grab it before it sells out again`,
+      `${header('🎉', 'Back in Stock!', `${data.productTitle} is available again at ${data.storeName}`)}
+      <tr>
+        <td style="padding:28px 32px 20px;">
+          ${data.imageUrl ? `
+          <div style="text-align:center;margin-bottom:20px;">
+            <img src="${esc(data.imageUrl)}" alt="${esc(data.productTitle)}" width="180" height="180"
+              style="border-radius:10px;object-fit:cover;border:1px solid #e5e7eb;" />
+          </div>` : ''}
+          <div style="font-size:20px;font-weight:700;color:#111827;margin-bottom:8px;">${esc(data.productTitle)}</div>
+          <div style="font-size:14px;color:#6b7280;margin-bottom:24px;">
+            You signed up to be notified when this item returned to <strong>${esc(data.storeName)}</strong>. It's back — but it may sell out again quickly.
+          </div>
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+            <tr>
+              <td style="border-radius:8px;${BRAND_GRADIENT}">
+                <a href="${esc(productUrl)}"
+                  style="display:inline-block;padding:14px 32px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
+                  Shop Now &rarr;
+                </a>
+              </td>
+            </tr>
+          </table>
+          <p style="font-size:12px;color:#9ca3af;margin:0;">
+            You're receiving this because you signed up for a back-in-stock notification.
+            <a href="${esc(data.unsubscribeUrl)}" style="color:#9ca3af;">Unsubscribe</a>
+          </p>
+        </td>
+      </tr>`,
+    ),
+  };
+}
+
 export interface DigestProduct {
   productTitle: string | null;
   sku: string | null;

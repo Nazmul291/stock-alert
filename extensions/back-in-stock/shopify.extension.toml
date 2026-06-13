@@ -1,0 +1,6 @@
+api_version = "2025-10"
+
+[[extensions]]
+type = "theme"
+name = "Back in Stock — Notify Form"
+handle = "back-in-stock-form"

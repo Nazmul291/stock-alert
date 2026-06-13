@@ -114,6 +114,7 @@ export default function App() {
         <s-link href="/app/alert-history">
           {alertsToday > 0 ? `Alert History (${alertsToday})` : "Alert History"}
         </s-link>
+        <s-link href="/app/back-in-stock">Back in Stock</s-link>
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/billing">Billing</s-link>
       </s-app-nav>

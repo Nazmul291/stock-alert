@@ -30,10 +30,11 @@ model Session {
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  storeSettings     StoreSettings?
-  inventoryTracking InventoryTracking[]
-  alertHistory      AlertHistory[]
-  setupProgress     SetupProgress?
+  storeSettings          StoreSettings?
+  inventoryTracking      InventoryTracking[]
+  alertHistory           AlertHistory[]
+  setupProgress          SetupProgress?
+  backInStockSubscribers BackInStockSubscriber[]
 
   @@index([plan])
 }
@@ -240,4 +241,21 @@ model ChatMessage {
   sentAt         DateTime         @default(now())
 
   @@map("chat_messages")
+}
+
+model BackInStockSubscriber {
+  id           String    @id @default(uuid()) @db.Uuid
+  shop         String
+  productId    BigInt    @map("product_id")
+  productTitle String?   @map("product_title") @db.VarChar(500)
+  email        String    @db.VarChar(255)
+  subscribedAt DateTime  @default(now()) @map("subscribed_at") @db.Timestamptz
+  notifiedAt   DateTime? @map("notified_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@unique([shop, productId, email])
+  @@index([shop])
+  @@index([shop, productId])
+  @@map("back_in_stock_subscribers")
 }

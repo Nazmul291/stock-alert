@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { sendRestockAlert } from "../lib/notifications";
+import { sendRestockAlert, sendBackInStockNotifications } from "../lib/notifications";
 import {
   getBoss,
   QUEUE_NAME,
@@ -263,6 +263,14 @@ async function processInventoryUpdate(
   if (alertType === "restock") {
     // Restock fires immediately — no need to debounce going from 0→N.
     await sendRestockAlert(storeCtx, productCtx, newQty, settingsCtx);
+    // Notify back-in-stock subscribers (non-blocking)
+    sendBackInStockNotifications(
+      shop,
+      productId,
+      productCtx.title,
+      shop,
+      process.env.SHOPIFY_APP_URL ?? "",
+    ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
   } else {
     // low_stock and out_of_stock go through the debounce buffer.
     // Shopify may fire dozens of parallel webhooks per bulk inventory update;

@@ -6,6 +6,7 @@ import {
   getOutOfStockEmailTemplate,
   getRestockEmailTemplate,
   getDigestEmailTemplate,
+  getBackInStockCustomerTemplate,
   type DigestEmailData,
 } from './email-templates';
 
@@ -372,6 +373,51 @@ export async function sendRestockAlert(
   if (sentToEmail || sentToSlack) {
     await logAlert(store.shop, productId, product.title, 'restock', currentQuantity, null, sentToEmail, sentToSlack);
   }
+}
+
+export async function sendBackInStockNotifications(
+  shop: string,
+  productId: string,
+  productTitle: string,
+  shopDomain: string,
+  appUrl: string,
+): Promise<number> {
+  const storeName = shopDomain.replace('.myshopify.com', '');
+  const subscribers = await prisma.backInStockSubscriber.findMany({
+    where: { shop, productId: BigInt(productId), notifiedAt: null },
+  });
+
+  if (subscribers.length === 0) return 0;
+
+  let sent = 0;
+  for (const sub of subscribers) {
+    const unsubscribeUrl = `${appUrl}/api/back-in-stock/unsubscribe?id=${sub.id}`;
+    const { subject, html } = getBackInStockCustomerTemplate({
+      storeName,
+      shopDomain,
+      productTitle,
+      productId,
+      unsubscribeUrl,
+    });
+    try {
+      await transporter.sendMail({
+        from: { name: storeName, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+        to: sub.email,
+        subject,
+        html,
+      });
+      await prisma.backInStockSubscriber.update({
+        where: { id: sub.id },
+        data: { notifiedAt: new Date() },
+      });
+      sent++;
+    } catch (err) {
+      console.error(`[Notifications] Back-in-stock email failed to ${sub.email}:`, err);
+    }
+  }
+
+  console.log(`[Notifications] Back-in-stock: notified ${sent}/${subscribers.length} subscribers for ${productTitle} (${shop})`);
+  return sent;
 }
 
 export async function sendDigestEmail(shop: string, recipients: string[], data: DigestEmailData): Promise<void> {

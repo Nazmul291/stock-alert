@@ -1,0 +1,105 @@
+{%- if product.available == false -%}
+<div
+  id="bis-wrapper-{{ product.id }}"
+  style="margin: {{ block.settings.margin_top }}px 0 {{ block.settings.margin_bottom }}px;"
+>
+  <p style="font-size:14px;color:#374151;margin:0 0 8px;font-weight:600;">
+    {{ block.settings.heading }}
+  </p>
+  <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
+    {{ block.settings.subheading }}
+  </p>
+
+  <form id="bis-form-{{ product.id }}" style="display:flex;gap:8px;flex-wrap:wrap;">
+    <input
+      type="email"
+      name="email"
+      placeholder="{{ block.settings.email_placeholder }}"
+      required
+      style="flex:1;min-width:200px;border:1px solid #d1d5db;border-radius:6px;padding:9px 14px;font-size:14px;outline:none;"
+    />
+    <button
+      type="submit"
+      style="padding:9px 20px;background:{{ block.settings.button_color }};color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;"
+    >
+      {{ block.settings.button_label }}
+    </button>
+  </form>
+
+  <div id="bis-msg-{{ product.id }}" style="display:none;margin-top:10px;font-size:14px;"></div>
+</div>
+
+<script>
+(function() {
+  var APP_URL = {{ shop.metafields.stock_alert.app_url | json | default: '""' }};
+  // Fallback: read from script tag data attribute
+  var scripts = document.querySelectorAll('script[data-bis-app-url]');
+  if (!APP_URL && scripts.length) APP_URL = scripts[scripts.length - 1].getAttribute('data-bis-app-url');
+
+  var form = document.getElementById('bis-form-{{ product.id }}');
+  var msg = document.getElementById('bis-msg-{{ product.id }}');
+  if (!form) return;
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var email = form.querySelector('[name=email]').value;
+    var btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    btn.textContent = '{{ block.settings.loading_label }}';
+
+    fetch((APP_URL || '') + '/api/back-in-stock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shop: {{ shop.permanent_domain | json }},
+        productId: '{{ product.id }}',
+        productTitle: {{ product.title | json }},
+        email: email
+      })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      form.style.display = 'none';
+      msg.style.display = 'block';
+      if (data.success) {
+        msg.style.color = '#059669';
+        msg.textContent = data.message || '{{ block.settings.success_message }}';
+      } else {
+        msg.style.color = '#dc2626';
+        msg.textContent = data.error || '{{ block.settings.error_message }}';
+        form.style.display = 'flex';
+        btn.disabled = false;
+        btn.textContent = '{{ block.settings.button_label }}';
+      }
+    })
+    .catch(function() {
+      msg.style.display = 'block';
+      msg.style.color = '#dc2626';
+      msg.textContent = '{{ block.settings.error_message }}';
+      form.style.display = 'flex';
+      btn.disabled = false;
+      btn.textContent = '{{ block.settings.button_label }}';
+    });
+  });
+})();
+</script>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Back in Stock",
+  "target": "section",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Out of stock" },
+    { "type": "text", "id": "subheading", "label": "Subheading", "default": "Enter your email and we'll notify you when it's available again." },
+    { "type": "text", "id": "email_placeholder", "label": "Email placeholder", "default": "your@email.com" },
+    { "type": "text", "id": "button_label", "label": "Button label", "default": "Notify Me" },
+    { "type": "text", "id": "loading_label", "label": "Loading label", "default": "Subscribing…" },
+    { "type": "text", "id": "success_message", "label": "Success message", "default": "You're on the list! We'll email you when this is back." },
+    { "type": "text", "id": "error_message", "label": "Error message", "default": "Something went wrong. Please try again." },
+    { "type": "color", "id": "button_color", "label": "Button color", "default": "#111827" },
+    { "type": "range", "id": "margin_top", "label": "Margin top", "min": 0, "max": 48, "step": 4, "unit": "px", "default": 16 },
+    { "type": "range", "id": "margin_bottom", "label": "Margin bottom", "min": 0, "max": 48, "step": 4, "unit": "px", "default": 8 }
+  ]
+}
+{% endschema %}
