@@ -31,6 +31,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackWebhookUrl: settings.slackWebhookUrl ?? "",
           digestEnabled: settings.digestEnabled,
           digestFrequency: settings.digestFrequency,
+          brandLogoUrl: settings.brandLogoUrl ?? "",
+          brandColor: settings.brandColor ?? "#4f46e5",
+          brandSenderName: settings.brandSenderName ?? "",
         }
       : {
           autoHideEnabled: false,
@@ -42,6 +45,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackWebhookUrl: "",
           digestEnabled: true,
           digestFrequency: "weekly",
+          brandLogoUrl: "",
+          brandColor: "#4f46e5",
+          brandSenderName: "",
         },
   };
 };
@@ -115,6 +121,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const rawDigestFrequency = form.get("digestFrequency") as string;
+  const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const data = {
     autoHideEnabled: form.get("autoHideEnabled") === "true",
     autoRepublishEnabled: form.get("autoRepublishEnabled") === "true",
@@ -125,6 +132,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     slackWebhookUrl: rawSlack || null,
     digestEnabled: form.get("digestEnabled") === "true",
     digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
+    ...(plan === "pro" ? {
+      brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
+      brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
+      brandSenderName: ((form.get("brandSenderName") as string) ?? "").trim() || null,
+    } : {}),
   };
 
   await prisma.storeSettings.upsert({
@@ -170,6 +182,9 @@ export default function SettingsPage() {
   const [slackEnabled, setSlackEnabled] = useState(settings.slackNotifications);
   const [digestEnabled, setDigestEnabled] = useState(settings.digestEnabled);
   const [digestFrequency, setDigestFrequency] = useState(settings.digestFrequency);
+  const [brandLogoUrl, setBrandLogoUrl] = useState(settings.brandLogoUrl);
+  const [brandColor, setBrandColor] = useState(settings.brandColor);
+  const [brandSenderName, setBrandSenderName] = useState(settings.brandSenderName);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -384,6 +399,16 @@ export default function SettingsPage() {
           onDigestEnabledChange={setDigestEnabled}
           onDigestFrequencyChange={setDigestFrequency}
         />
+
+        <BrandingSection
+          plan={plan}
+          brandLogoUrl={brandLogoUrl}
+          brandColor={brandColor}
+          brandSenderName={brandSenderName}
+          onLogoUrlChange={setBrandLogoUrl}
+          onColorChange={setBrandColor}
+          onSenderNameChange={setBrandSenderName}
+        />
       </Form>
 
       <div style={{ marginTop: 24 }}>
@@ -475,6 +500,122 @@ function DigestSection({
             </p>
           </div>
         )}
+      </s-section>
+    </div>
+  );
+}
+
+function BrandingSection({
+  plan,
+  brandLogoUrl,
+  brandColor,
+  brandSenderName,
+  onLogoUrlChange,
+  onColorChange,
+  onSenderNameChange,
+}: {
+  plan: string;
+  brandLogoUrl: string;
+  brandColor: string;
+  brandSenderName: string;
+  onLogoUrlChange: (v: string) => void;
+  onColorChange: (v: string) => void;
+  onSenderNameChange: (v: string) => void;
+}) {
+  const isPro = plan === "pro";
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <s-section heading="Email Branding">
+        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
+          Customize how your outgoing alert emails look. Applied to all email notifications sent from your store.{" "}
+          {!isPro && (
+            <span style={{ color: "#9ca3af" }}>
+              Requires Professional plan.{" "}
+              <a href="/app/billing" style={{ color: "#4f46e5" }}>Upgrade →</a>
+            </span>
+          )}
+        </p>
+
+        <div style={{ opacity: isPro ? 1 : 0.5, pointerEvents: isPro ? "auto" : "none" }}>
+          {/* Sender name */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              Sender name
+            </label>
+            <input
+              type="text"
+              name="brandSenderName"
+              value={brandSenderName}
+              onChange={(e) => onSenderNameChange(e.target.value)}
+              placeholder="Stock Alert"
+              disabled={!isPro}
+              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
+            />
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+              Shown as the "From" name in email clients. Defaults to "Stock Alert".
+            </p>
+          </div>
+
+          {/* Brand color */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              Brand color
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input
+                type="color"
+                value={brandColor || "#4f46e5"}
+                onChange={(e) => onColorChange(e.target.value)}
+                disabled={!isPro}
+                style={{ width: 40, height: 36, border: "1px solid #d1d5db", borderRadius: 6, cursor: isPro ? "pointer" : "not-allowed", padding: 2 }}
+              />
+              <input
+                type="text"
+                name="brandColor"
+                value={brandColor || "#4f46e5"}
+                onChange={(e) => onColorChange(e.target.value)}
+                placeholder="#4f46e5"
+                disabled={!isPro}
+                style={{ width: 120, border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14, fontFamily: "monospace" }}
+              />
+              <div style={{ width: 80, height: 36, borderRadius: 6, background: brandColor || "#4f46e5", border: "1px solid #e5e7eb" }} />
+            </div>
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+              Used for email headers, CTA buttons, and footer accents. Must be a valid 6-digit hex color.
+            </p>
+          </div>
+
+          {/* Logo URL */}
+          <div style={{ marginBottom: 4 }}>
+            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              Logo URL
+            </label>
+            <input
+              type="url"
+              name="brandLogoUrl"
+              value={brandLogoUrl}
+              onChange={(e) => onLogoUrlChange(e.target.value)}
+              placeholder="https://yourstore.com/logo.png"
+              disabled={!isPro}
+              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
+            />
+            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+              Public URL to your store logo (PNG or SVG recommended, max 400px wide). Displayed at the top of every email.
+            </p>
+            {isPro && brandLogoUrl && (
+              <div style={{ marginTop: 10, padding: "10px 14px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, display: "inline-block" }}>
+                <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Preview</p>
+                <img
+                  src={brandLogoUrl}
+                  alt="Brand logo preview"
+                  style={{ maxWidth: 200, maxHeight: 60, objectFit: "contain", display: "block" }}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </s-section>
     </div>
   );

@@ -8,6 +8,7 @@ import {
   getDigestEmailTemplate,
   getBackInStockCustomerTemplate,
   type DigestEmailData,
+  type BrandConfig,
 } from './email-templates';
 
 const transporter = nodemailer.createTransport({
@@ -28,6 +29,24 @@ interface SettingsContext {
   slackNotifications: boolean;
   notificationEmail: string | null;
   slackWebhookUrl: string | null;
+  brandLogoUrl?: string | null;
+  brandColor?: string | null;
+  brandSenderName?: string | null;
+}
+
+function fromAddress(settings: SettingsContext): { name: string; address: string } {
+  return {
+    name: settings.brandSenderName || 'Stock Alert',
+    address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org',
+  };
+}
+
+function toBrand(settings: SettingsContext): BrandConfig {
+  return {
+    logoUrl: settings.brandLogoUrl,
+    color: settings.brandColor,
+    senderName: settings.brandSenderName,
+  };
 }
 
 async function logAlert(
@@ -85,7 +104,7 @@ export async function sendLowStockAlert(
     threshold,
     variantTitle,
     imageUrl: product.imageUrl,
-  });
+  }, toBrand(settings));
 
   let sentToEmail: string | null = null;
   let sentToSlack = false;
@@ -99,7 +118,7 @@ export async function sendLowStockAlert(
         console.log(`[Notifications] Sending low stock email to ${recipient} for product ${product.title}`);
         try {
           await transporter.sendMail({
-            from: { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+            from: fromAddress(settings),
             to: recipient,
             subject: template.subject,
             html: template.html,
@@ -167,7 +186,7 @@ export async function sendOutOfStockAlert(
     sku: product.sku,
     variantTitle,
     imageUrl: product.imageUrl,
-  });
+  }, toBrand(settings));
 
   let sentToEmail: string | null = null;
   let sentToSlack = false;
@@ -180,7 +199,7 @@ export async function sendOutOfStockAlert(
       for (const recipient of recipients) {
         try {
           await transporter.sendMail({
-            from: { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+            from: fromAddress(settings),
             to: recipient,
             subject: template.subject,
             html: template.html,
@@ -242,7 +261,7 @@ export async function sendTestNotification(
       for (const recipient of recipients) {
         try {
           await transporter.sendMail({
-            from: { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+            from: fromAddress(settings),
             to: recipient,
             subject: `[Test] Stock Alert is connected — ${storeName}`,
             html: `
@@ -316,7 +335,7 @@ export async function sendRestockAlert(
     currentQuantity,
     variantTitle,
     imageUrl: product.imageUrl,
-  });
+  }, toBrand(settings));
 
   let sentToEmail: string | null = null;
   let sentToSlack = false;
@@ -329,7 +348,7 @@ export async function sendRestockAlert(
       for (const recipient of recipients) {
         try {
           await transporter.sendMail({
-            from: { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+            from: fromAddress(settings),
             to: recipient,
             subject: template.subject,
             html: template.html,
@@ -381,8 +400,9 @@ export async function sendBackInStockNotifications(
   productTitle: string,
   shopDomain: string,
   appUrl: string,
+  brand: BrandConfig = {},
 ): Promise<number> {
-  const storeName = shopDomain.replace('.myshopify.com', '');
+  const storeName = (brand.senderName) || shopDomain.replace('.myshopify.com', '');
   const subscribers = await prisma.backInStockSubscriber.findMany({
     where: { shop, productId: BigInt(productId), notifiedAt: null },
   });
@@ -398,7 +418,7 @@ export async function sendBackInStockNotifications(
       productTitle,
       productId,
       unsubscribeUrl,
-    });
+    }, brand);
     try {
       await transporter.sendMail({
         from: { name: storeName, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
@@ -420,12 +440,13 @@ export async function sendBackInStockNotifications(
   return sent;
 }
 
-export async function sendDigestEmail(shop: string, recipients: string[], data: DigestEmailData): Promise<void> {
-  const { subject, html } = getDigestEmailTemplate(data);
+export async function sendDigestEmail(shop: string, recipients: string[], data: DigestEmailData, brand: BrandConfig = {}): Promise<void> {
+  const { subject, html } = getDigestEmailTemplate(data, brand);
+  const senderName = brand.senderName || 'Stock Alert';
   for (const recipient of recipients) {
     try {
       await transporter.sendMail({
-        from: { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+        from: { name: senderName, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
         to: recipient,
         subject,
         html,

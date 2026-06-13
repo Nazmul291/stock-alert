@@ -168,6 +168,10 @@ async function processDigests(): Promise<void> {
       frequency,
       outOfStock: atRisk.filter((p) => p.inventoryStatus === "out_of_stock"),
       lowStock: atRisk.filter((p) => p.inventoryStatus === "low_stock"),
+    }, {
+      logoUrl: settings.brandLogoUrl,
+      color: settings.brandColor,
+      senderName: settings.brandSenderName,
     });
 
     await prisma.storeSettings.update({

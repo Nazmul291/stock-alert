@@ -71,6 +71,9 @@ model StoreSettings {
   digestEnabled        Boolean   @default(true) @map("digest_enabled")
   digestFrequency      String    @default("weekly") @map("digest_frequency")
   lastDigestSentAt     DateTime? @map("last_digest_sent_at") @db.Timestamptz
+  brandLogoUrl         String?   @map("brand_logo_url") @db.VarChar(500)
+  brandColor           String?   @map("brand_color") @db.VarChar(7)
+  brandSenderName      String?   @map("brand_sender_name") @db.VarChar(100)
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 

@@ -247,6 +247,9 @@ async function processInventoryUpdate(
     slackNotifications: settings.slackNotifications,
     notificationEmail: settings.notificationEmail,
     slackWebhookUrl: settings.slackWebhookUrl,
+    brandLogoUrl: settings.brandLogoUrl,
+    brandColor: settings.brandColor,
+    brandSenderName: settings.brandSenderName,
   };
   const productCtx = {
     id: productId,
@@ -270,6 +273,7 @@ async function processInventoryUpdate(
       productCtx.title,
       shop,
       process.env.SHOPIFY_APP_URL ?? "",
+      { logoUrl: settingsCtx.brandLogoUrl, color: settingsCtx.brandColor, senderName: settingsCtx.brandSenderName },
     ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
   } else {
     // low_stock and out_of_stock go through the debounce buffer.

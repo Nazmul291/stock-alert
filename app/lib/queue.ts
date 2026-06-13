@@ -19,6 +19,9 @@ export interface SettingsCtx {
   slackNotifications: boolean;
   notificationEmail: string | null;
   slackWebhookUrl: string | null;
+  brandLogoUrl?: string | null;
+  brandColor?: string | null;
+  brandSenderName?: string | null;
 }
 
 export interface ProductCtx {
