@@ -58,6 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     setupProgress?.appInstalled ?? true,
     setupProgress?.globalSettingsConfigured ?? false,
     setupProgress?.notificationsConfigured ?? false,
+    setupProgress?.firstProductTracked ?? false,
   ];
   const progressPct = Math.round((setupSteps.filter(Boolean).length / setupSteps.length) * 100);
 
@@ -75,7 +76,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shop,
     plan: storeSession?.plan ?? "basic",
     stats,
-    setupProgress,
+    setupProgress: {
+      appInstalled: setupProgress?.appInstalled ?? true,
+      globalSettingsConfigured: setupProgress?.globalSettingsConfigured ?? false,
+      notificationsConfigured: setupProgress?.notificationsConfigured ?? false,
+      firstProductTracked: setupProgress?.firstProductTracked ?? false,
+    },
     progressPct,
     syncRunning: shopSyncState?.running ?? false,
     lastSyncCompletedAt: shopSyncState?.completedAt?.toISOString() ?? null,
@@ -130,28 +136,18 @@ export default function Dashboard() {
         Manage Products
       </s-button>
 
-      {/* Setup progress */}
+      {/* Setup checklist */}
       {progressPct < 100 && (
-        <s-section heading="Setup Progress">
-          <s-paragraph>Complete these steps to start monitoring your inventory automatically.</s-paragraph>
-          <div style={{ margin: "12px 0" }}>
-            <div style={{ background: "#e5e7eb", borderRadius: 4, height: 8 }}>
-              <div style={{ background: "#667eea", borderRadius: 4, height: 8, width: `${progressPct}%`, transition: "width .3s" }} />
-            </div>
-            <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>{progressPct}% complete</p>
-          </div>
-          <s-unordered-list>
-            <s-list-item>
-              {setupProgress?.appInstalled ? "✅" : "⬜"} App Installed
-            </s-list-item>
-            <s-list-item>
-              {setupProgress?.globalSettingsConfigured ? "✅" : "⬜"} Global Settings Configured
-            </s-list-item>
-            <s-list-item>
-              {setupProgress?.notificationsConfigured ? "✅" : "⬜"} Notifications Set Up
-            </s-list-item>
-          </s-unordered-list>
-        </s-section>
+        <SetupChecklist
+          progress={setupProgress}
+          progressPct={progressPct}
+          syncPct={syncPct}
+          syncSubmitting={syncFetcher.state !== "idle"}
+          onSync={() => {
+            if (syncPct === null && syncFetcher.state === "idle")
+              syncFetcher.submit({ intent: "sync" }, { method: "post", action: "/app/products" });
+          }}
+        />
       )}
 
       {/* Inventory stats */}
@@ -291,6 +287,125 @@ export default function Dashboard() {
         </s-stack>
       </s-section>
     </s-page>
+  );
+}
+
+function SetupChecklist({
+  progress,
+  progressPct,
+  syncPct,
+  syncSubmitting,
+  onSync,
+}: {
+  progress: { appInstalled: boolean; globalSettingsConfigured: boolean; notificationsConfigured: boolean; firstProductTracked: boolean };
+  progressPct: number;
+  syncPct: number | null;
+  syncSubmitting: boolean;
+  onSync: () => void;
+}) {
+  const steps = [
+    {
+      done: progress.appInstalled,
+      title: "Install & subscribe",
+      description: "Stock Alert is installed and your plan is active.",
+      action: null,
+    },
+    {
+      done: progress.globalSettingsConfigured && progress.notificationsConfigured,
+      title: "Configure notifications",
+      description: "Set your low-stock threshold and add a notification email or Slack webhook.",
+      action: { label: "Go to Settings →", href: "/app/settings" },
+    },
+    {
+      done: progress.firstProductTracked,
+      title: "Sync your products",
+      description: "Import your Shopify catalog so Stock Alert can monitor inventory levels.",
+      action: null,
+      syncAction: true,
+    },
+    {
+      done: progress.firstProductTracked,
+      title: "Monitoring is live",
+      description: "Your products are tracked. You'll receive alerts when stock hits your threshold.",
+      action: { label: "View Products →", href: "/app/products" },
+    },
+  ];
+
+  const syncBusy = syncSubmitting || syncPct !== null;
+
+  return (
+    <div style={{ marginBottom: 24, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Getting Started</span>
+          <span style={{ fontSize: 13, color: "#6b7280", marginLeft: 10 }}>{progressPct}% complete</span>
+        </div>
+        <div style={{ width: 120, background: "#e5e7eb", borderRadius: 4, height: 6 }}>
+          <div style={{ background: "#667eea", borderRadius: 4, height: 6, width: `${progressPct}%`, transition: "width .3s" }} />
+        </div>
+      </div>
+
+      {/* Steps */}
+      <div>
+        {steps.map((step, i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 20px",
+              borderBottom: i < steps.length - 1 ? "1px solid #f9fafb" : "none",
+              opacity: step.done ? 0.6 : 1,
+            }}
+          >
+            {/* Step indicator */}
+            <div style={{
+              flexShrink: 0, width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+              background: step.done ? "#059669" : "#f3f4f6",
+              border: `2px solid ${step.done ? "#059669" : "#e5e7eb"}`,
+              fontSize: 12, fontWeight: 700, color: step.done ? "#fff" : "#9ca3af",
+            }}>
+              {step.done ? "✓" : i + 1}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, color: step.done ? "#6b7280" : "#111827", marginBottom: 2 }}>
+                {step.title}
+              </div>
+              <div style={{ fontSize: 13, color: "#9ca3af", lineHeight: 1.4 }}>{step.description}</div>
+            </div>
+
+            {/* Action */}
+            {!step.done && step.syncAction && (
+              <button
+                type="button"
+                onClick={onSync}
+                disabled={syncBusy}
+                style={{
+                  flexShrink: 0, padding: "6px 14px", borderRadius: 6, border: "1px solid #667eea",
+                  background: syncBusy ? "#f3f4f6" : "#667eea", color: syncBusy ? "#9ca3af" : "#fff",
+                  fontSize: 13, fontWeight: 600, cursor: syncBusy ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+                }}
+              >
+                {syncPct !== null ? `Syncing ${Math.round(syncPct)}%…` : syncSubmitting ? "Starting…" : "Sync Products →"}
+              </button>
+            )}
+            {!step.done && step.action && (
+              <a
+                href={step.action.href}
+                style={{
+                  flexShrink: 0, padding: "6px 14px", borderRadius: 6, border: "1px solid #667eea",
+                  background: "#667eea", color: "#fff", fontSize: 13, fontWeight: 600,
+                  textDecoration: "none", whiteSpace: "nowrap",
+                }}
+              >
+                {step.action.label}
+              </a>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
