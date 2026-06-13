@@ -4,6 +4,9 @@ client_id = "38a870cdc7f41175fd49a52689539f9d"
 application_url = "https://nco-stock-alert.fly.dev"
 embedded = true
 name = "Stock Alert"
+privacy_policy_url = "https://nco-stock-alert.fly.dev/privacy"
+app_home_page_url = "https://nco-stock-alert.fly.dev"
+support_url = "mailto:nazmul291@gmail.com"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes

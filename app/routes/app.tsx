@@ -121,6 +121,15 @@ export default function App() {
       </s-app-nav>
       <Outlet />
       <ChatWidget shop={shop} />
+      <div style={{ marginTop: 48, paddingTop: 16, borderTop: "1px solid #f3f4f6", textAlign: "center" }}>
+        <p style={{ fontSize: 12, color: "#d1d5db", margin: 0 }}>
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: "#d1d5db", textDecoration: "none" }}>Privacy Policy</a>
+          {" · "}
+          <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: "#d1d5db", textDecoration: "none" }}>Terms of Service</a>
+          {" · "}
+          <a href="mailto:nazmul291@gmail.com" style={{ color: "#d1d5db", textDecoration: "none" }}>Support</a>
+        </p>
+      </div>
     </AppProvider>
   );
 }
