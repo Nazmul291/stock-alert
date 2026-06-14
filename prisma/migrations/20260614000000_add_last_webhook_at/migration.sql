@@ -1,1 +1,2 @@
-ALTER TABLE "sync_state" ADD COLUMN IF NOT EXISTS "last_webhook_at" TIMESTAMPTZ;
+-- last_webhook_at is included in the sync_state CREATE TABLE in add_sync_state migration
+SELECT 1;
