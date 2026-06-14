@@ -1,5 +1,5 @@
 CREATE TABLE "back_in_stock_subscribers" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "id" UUID NOT NULL,
   "shop" TEXT NOT NULL,
   "product_id" BIGINT NOT NULL,
   "product_title" VARCHAR(500),
