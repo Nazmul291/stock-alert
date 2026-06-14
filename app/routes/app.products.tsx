@@ -877,7 +877,7 @@ export default function ProductsPage() {
       {plan !== "pro" && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
           Basic plan: monitoring up to {maxProducts} products.{" "}
-          <a href="/app/billing" style={{ color: "#1d4ed8", fontWeight: 600 }}>Upgrade to Pro →</a>
+          <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}
 

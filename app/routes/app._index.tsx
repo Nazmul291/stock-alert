@@ -213,7 +213,7 @@ export default function Dashboard() {
       {/* Products at risk */}
       {atRiskProducts.length > 0 && (
         <s-section heading="Products at Risk">
-          <a slot="primary-action" href="/app/products?filter=out_of_stock" style={{ fontSize: 13, color: "#1d4ed8", textDecoration: "none" }}>View all →</a>
+          <s-link slot="primary-action" href="/app/products?filter=out_of_stock">View all →</s-link>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {atRiskProducts.map((p) => {
               const isOut = p.inventoryStatus === "out_of_stock";
@@ -244,7 +244,7 @@ export default function Dashboard() {
 
       {/* Recent alerts */}
       <s-section heading="Recent Alerts">
-        <a slot="primary-action" href="/app/alert-history" style={{ fontSize: 13, color: "#1d4ed8", textDecoration: "none" }}>View all →</a>
+        <s-link slot="primary-action" href="/app/alert-history">View all →</s-link>
         {recentAlerts.length === 0 ? (
           <s-paragraph>No alerts yet — alerts will appear here when inventory thresholds are triggered.</s-paragraph>
         ) : (

@@ -258,8 +258,8 @@ export default function BackInStockPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
                   <span style={{ fontSize: 13, color: "#6b7280" }}>Page {page} of {totalPages}</span>
                   <div style={{ display: "flex", gap: 8 }}>
-                    {page > 1 && <a href={buildUrl(page - 1)} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>← Previous</a>}
-                    {page < totalPages && <a href={buildUrl(page + 1)} style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}>Next →</a>}
+                    {page > 1 && <s-link href={buildUrl(page - 1)}>← Previous</s-link>}
+                    {page < totalPages && <s-link href={buildUrl(page + 1)}>Next →</s-link>}
                   </div>
                 </div>
               )}

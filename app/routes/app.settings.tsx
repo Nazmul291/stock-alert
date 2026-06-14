@@ -260,7 +260,7 @@ export default function SettingsPage() {
           {plan !== "pro" && (
             <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
               Some features require the Professional plan.{" "}
-              <a href="/app/billing" style={{ color: "#1d4ed8" }}>Upgrade to unlock all features →</a>
+              <s-link href="/app/billing">Upgrade to unlock all features →</s-link>
             </div>
           )}
 
@@ -676,7 +676,7 @@ function OutboundWebhookSection({
           {!isPro && (
             <span style={{ color: "#9ca3af" }}>
               Requires Professional plan.{" "}
-              <a href="/app/billing" style={{ color: "#4f46e5" }}>Upgrade →</a>
+              <s-link href="/app/billing">Upgrade →</s-link>
             </span>
           )}
         </p>
@@ -746,7 +746,7 @@ function BrandingSection({
           {!isPro && (
             <span style={{ color: "#9ca3af" }}>
               Requires Professional plan.{" "}
-              <a href="/app/billing" style={{ color: "#4f46e5" }}>Upgrade →</a>
+              <s-link href="/app/billing">Upgrade →</s-link>
             </span>
           )}
         </p>
@@ -863,9 +863,7 @@ function PlanCard({ plan }: { plan: string }) {
           </span>
         </div>
         {!isPro && (
-          <a href="/app/billing" style={{ fontSize: 13, color: "#4f46e5", fontWeight: 600, textDecoration: "none" }}>
-            Upgrade to Pro →
-          </a>
+          <s-link href="/app/billing">Upgrade to Pro →</s-link>
         )}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "6px 16px" }}>
