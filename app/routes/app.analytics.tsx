@@ -67,7 +67,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   // Build 30-element daily array (fill gaps with 0)
-  const dayMap = new Map(dailyRows.map((r) => [r.day, r.count]));
+  // $queryRaw COUNT results come back as BigInt — convert to Number for JSON serialization
+  const dayMap = new Map(dailyRows.map((r) => [r.day, Number(r.count)]));
   const todayUTC = new Date(now);
   todayUTC.setUTCHours(0, 0, 0, 0);
   const daily30 = Array.from({ length: 30 }, (_, i) => {
