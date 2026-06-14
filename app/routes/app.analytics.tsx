@@ -12,7 +12,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const sixtyDaysAgo  = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
-  const [
+  let dailyRows: { day: string; count: number }[] = [];
+  let typeRows: { alert_type: string; count: number }[] = [];
+  let topProductRows: { product_title: string; count: number }[] = [];
+  let channelRow: { email_count: number; slack_count: number }[] = [];
+  let totalThisMonth = 0;
+  let totalLastMonth = 0;
+  let stockGroups: { inventoryStatus: string; _count: { _all: number } }[] = [];
+
+  try {
+  ([
     dailyRows,
     typeRows,
     topProductRows,
@@ -64,7 +73,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shop },
       _count: { _all: true },
     }),
-  ]);
+  ]));
+  } catch (err) {
+    console.error("[analytics] loader error:", err);
+  }
 
   // Build 30-element daily array (fill gaps with 0)
   // $queryRaw COUNT results come back as BigInt — convert to Number for JSON serialization
@@ -78,7 +90,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   const busiest = daily30.reduce((a, b) => (b.count > a.count ? b : a), { day: "", count: 0 });
-
   const stockMap = new Map(stockGroups.map((g) => [g.inventoryStatus as string, g._count._all]));
 
   return {
