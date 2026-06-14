@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
+import { useLoaderData, useFetcher, useNavigate } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -124,6 +124,7 @@ export default function Dashboard() {
   const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts, stockOutSoonCount } =
     useLoaderData<typeof loader>();
 
+  const navigate = useNavigate();
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
   const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop, syncRunning);
 
@@ -175,12 +176,14 @@ export default function Dashboard() {
             );
             const base: React.CSSProperties = { background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, textAlign: "center" };
             return s.href ? (
-              <a key={s.label} href={s.href} style={{ ...base, textDecoration: "none", display: "block", transition: "border-color .15s", cursor: "pointer" }}
+              <div key={s.label} role="button" tabIndex={0} onClick={() => navigate(s.href!)}
+                style={{ ...base, display: "block", transition: "border-color .15s", cursor: "pointer" }}
                 onMouseOver={(e) => (e.currentTarget.style.borderColor = "#9ca3af")}
                 onMouseOut={(e) => (e.currentTarget.style.borderColor = "#e5e7eb")}
+                onKeyDown={(e) => e.key === "Enter" && navigate(s.href!)}
               >
                 {inner}
-              </a>
+              </div>
             ) : (
               <div key={s.label} style={base}>{inner}</div>
             );
@@ -204,9 +207,9 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-          <a href="/app/products" style={{ fontSize: 13, fontWeight: 600, color: "#92400e", textDecoration: "none", whiteSpace: "nowrap", border: "1px solid #fed7aa", borderRadius: 6, padding: "6px 12px", background: "#fff" }}>
+          <button onClick={() => navigate("/app/products")} style={{ fontSize: 13, fontWeight: 600, color: "#92400e", whiteSpace: "nowrap", border: "1px solid #fed7aa", borderRadius: 6, padding: "6px 12px", background: "#fff", cursor: "pointer" }}>
             View products →
-          </a>
+          </button>
         </div>
       )}
 
@@ -218,10 +221,12 @@ export default function Dashboard() {
             {atRiskProducts.map((p) => {
               const isOut = p.inventoryStatus === "out_of_stock";
               return (
-                <a
+                <div
                   key={p.productId}
-                  href={`/app/products?filter=out_of_stock`}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: isOut ? "#fff5f5" : "#fffbeb", border: `1px solid ${isOut ? "#fca5a5" : "#fde68a"}`, borderRadius: 6, padding: "10px 14px", textDecoration: "none" }}
+                  role="button" tabIndex={0}
+                  onClick={() => navigate("/app/products?filter=out_of_stock")}
+                  onKeyDown={(e) => e.key === "Enter" && navigate("/app/products?filter=out_of_stock")}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: isOut ? "#fff5f5" : "#fffbeb", border: `1px solid ${isOut ? "#fca5a5" : "#fde68a"}`, borderRadius: 6, padding: "10px 14px", cursor: "pointer" }}
                 >
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{p.productTitle ?? "—"}</div>
@@ -235,7 +240,7 @@ export default function Dashboard() {
                       {isOut ? "Out of Stock" : "Low Stock"}
                     </span>
                   </div>
-                </a>
+                </div>
               );
             })}
           </div>
