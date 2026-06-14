@@ -14,6 +14,10 @@ if (process.env.NODE_ENV !== "production") {
 
 const prisma = global.prismaGlobal ?? new PrismaClient();
 
-autoSeedAdmin(prisma.adminUser).catch(console.error);
+// Only seed the admin user from the web process, not the background worker.
+// The worker imports this module too, but admin seeding is a web-only concern.
+if (process.env.PROCESS_TYPE !== "worker") {
+  autoSeedAdmin(prisma.adminUser).catch(console.error);
+}
 
 export default prisma;

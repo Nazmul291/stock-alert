@@ -16,7 +16,11 @@ export const loader = makeAdminDashboardLoader({
     statGroups: [
       {
         title: "Overview",
-        stats: [{ label: "Example metric", value: 42, accent: true }],
+        stats: [
+          { label: "Tracked Products", value: await db.inventoryTracking.count({ where: { monitoringEnabled: true } }), accent: true },
+          { label: "Alerts (30d)", value: await db.alertHistory.count({ where: { sentAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }) },
+          { label: "Active Stores", value: await db.session.count({ where: { isOnline: false } }) },
+        ],
       },
     ],
   }),

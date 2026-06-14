@@ -4,10 +4,13 @@ client_id = "38a870cdc7f41175fd49a52689539f9d"
 application_url = "https://nco-stock-alert.fly.dev"
 embedded = true
 name = "Stock Alert"
+privacy_policy_url = "https://nco-stock-alert.fly.dev/privacy"
+app_home_page_url = "https://nco-stock-alert.fly.dev"
+support_url = "mailto:nazmul291@gmail.com"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_inventory,read_products,write_inventory,write_products,read_locations"
+scopes = "read_inventory,read_products,write_inventory,write_products,read_locations,read_orders"
 
 
 [webhooks]
@@ -22,12 +25,16 @@ api_version = "2025-10"
   topics = [ "app/scopes_update" ]
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks/app/subscriptions_update"
+  topics = [ "app_subscriptions/update" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/inventory"
   topics = [ "inventory_levels/update" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/products"
-  topics = [ "products/delete", "products/update" ]
+  topics = [ "products/create", "products/delete", "products/update" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/compliance"

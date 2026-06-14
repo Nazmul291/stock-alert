@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
 import { getIsTestStore } from "../services/billing.server";
+import { invalidateShopCache } from "../lib/shop-cache.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, admin, session } = await authenticate.admin(request);
@@ -27,6 +28,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: { shop, isOnline: false },
         data: { plan: activePlan as any },
       });
+      invalidateShopCache(shop);
     }
   } catch {
     // Non-fatal — activePlan stays null

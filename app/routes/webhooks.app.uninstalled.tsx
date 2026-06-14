@@ -7,6 +7,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   await prisma.$transaction([
     prisma.inventoryBuffer.deleteMany({ where: { shop } }),
+    prisma.syncState.deleteMany({ where: { shop } }),
     prisma.chatConversation.deleteMany({ where: { shopId: shop } }),
     prisma.alertHistory.deleteMany({ where: { shop } }),
     prisma.inventoryTracking.deleteMany({ where: { shop } }),

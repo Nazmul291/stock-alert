@@ -10,141 +10,325 @@ export interface EmailTemplateData {
   imageUrl?: string | null;
 }
 
-const baseTemplate = (content: string, previewText: string) => `
-<!DOCTYPE html>
-<html lang="en">
+export interface BrandConfig {
+  logoUrl?: string | null;
+  color?: string | null;
+  senderName?: string | null;
+}
+
+const DEFAULT_COLOR = '#4f46e5';
+
+function brandBg(color: string | null | undefined): string {
+  const c = color || DEFAULT_COLOR;
+  return `background:${c};`;
+}
+
+function esc(str: string | null | undefined): string {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function shell(previewText: string, body: string, brand: BrandConfig = {}): string {
+  const accentColor = brand.color || DEFAULT_COLOR;
+  const padding = '&nbsp;&zwnj;'.repeat(40);
+  return `<!DOCTYPE html>
+<html lang="en" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stock Alert</title>
-  <style>
-    body { margin:0; padding:0; background:#f8f9fa; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; color:#212529; }
-    .wrap { max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,.1); overflow:hidden; }
-    .hdr { background:linear-gradient(135deg,#667eea,#764ba2); padding:32px 24px; text-align:center; color:#fff; font-size:24px; font-weight:700; }
-    .body { padding:32px 24px; }
-    .card { background:#f8f9fa; border-radius:8px; padding:24px; margin:24px 0; border-left:4px solid #667eea; }
-    .card.warn { border-left-color:#ffc107; }
-    .card.danger { border-left-color:#dc3545; }
-    .card.ok { border-left-color:#28a745; }
-    .title { font-size:20px; font-weight:600; margin:0 0 12px; }
-    .row { display:flex; padding:4px 0; }
-    .lbl { font-weight:600; color:#495057; width:140px; flex-shrink:0; }
-    .val { color:#212529; }
-    .btn { display:inline-block; background:linear-gradient(135deg,#667eea,#764ba2); color:#fff!important; text-decoration:none; padding:14px 28px; border-radius:6px; font-weight:600; font-size:16px; margin:24px 0; }
-    .tip { border-radius:6px; padding:16px; margin-top:24px; font-size:14px; }
-    .tip.warn { background:#fff3cd; border:1px solid #ffeaa7; color:#856404; }
-    .tip.danger { background:#f8d7da; border:1px solid #f5c6cb; color:#721c24; }
-    .tip.ok { background:#d4edda; border:1px solid #c3e6cb; color:#155724; }
-    .ftr { background:#f8f9fa; padding:24px; text-align:center; border-top:1px solid #dee2e6; font-size:14px; color:#6c757d; }
-    .ftr a { color:#667eea; text-decoration:none; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Stock Alert</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 </head>
-<body>
-  <div style="display:none;font-size:1px;max-height:0;overflow:hidden;">${previewText}</div>
-  <div class="wrap">
-    ${content}
-    <div class="ftr">
-      This email was sent by <a href="https://stock-alert.nazmulcodes.org">Stock Alert</a><br>
-      Automated inventory monitoring for your Shopify store<br>
-      <a href="mailto:info@nazmulcodes.org">Support</a>
-    </div>
-  </div>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${esc(previewText)}${padding}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
+  <tr><td style="padding:32px 16px;" align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+      ${body}
+      <!-- Footer -->
+      <tr><td style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:24px 32px;text-align:center;font-size:13px;color:#9ca3af;line-height:1.6;">
+        Sent by
+        <a href="https://stock-alert.nazmulcodes.org" style="color:${accentColor};text-decoration:none;font-weight:500;">Stock Alert</a>
+        &nbsp;&middot;&nbsp;
+        Automated inventory monitoring for Shopify
+        &nbsp;&middot;&nbsp;
+        <a href="mailto:info@nazmulcodes.org" style="color:${accentColor};text-decoration:none;">Support</a>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
 </body>
 </html>`;
+}
 
-export function getLowStockEmailTemplate(data: EmailTemplateData): { subject: string; html: string } {
-  const content = `
-    <div class="hdr">⚠️ Stock Alert — Low Stock</div>
-    <div class="body">
-      <p>One of your products is running low on inventory.</p>
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#fff3cd;border-radius:8px;border-left:4px solid #ffc107;overflow:hidden;">
+function header(emoji: string, title: string, subtitle: string, brand: BrandConfig = {}): string {
+  const senderLabel = brand.senderName ? esc(brand.senderName) : 'Stock Alert';
+  return `
+  <tr>
+    <td style="${brandBg(brand.color)} padding:28px 32px;">
+      ${brand.logoUrl
+        ? `<div style="margin-bottom:14px;"><img src="${esc(brand.logoUrl)}" alt="${senderLabel}" height="40" style="max-height:40px;max-width:160px;object-fit:contain;display:block;" /></div>`
+        : `<div style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.65);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px;">${senderLabel}</div>`
+      }
+      <div style="font-size:26px;font-weight:800;color:#ffffff;margin-bottom:4px;">${emoji} ${esc(title)}</div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.8);">${esc(subtitle)}</div>
+    </td>
+  </tr>`;
+}
+
+function productCard(
+  data: EmailTemplateData,
+  badge: { text: string; bg: string; color: string },
+  stats: Array<{ label: string; value: string; color: string }>,
+  ctaLabel: string,
+  brand: BrandConfig = {},
+): string {
+  return `
+  <tr>
+    <td style="padding:28px 32px 20px;">
+
+      <!-- Product row -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         <tr>
-          ${data.imageUrl ? `<td width="100" valign="top" style="padding:20px 0 20px 20px;">
-            <img src="${data.imageUrl}" alt="${data.productTitle}" width="80" height="80" style="border-radius:6px;object-fit:cover;border:1px solid #dee2e6;display:block;" />
+          ${data.imageUrl ? `
+          <td width="88" valign="top" style="padding-right:16px;">
+            <img src="${esc(data.imageUrl)}" alt="${esc(data.productTitle)}" width="80" height="80"
+              style="border-radius:8px;object-fit:cover;border:1px solid #e5e7eb;display:block;" />
           </td>` : ''}
-          <td valign="top" style="padding:20px;">
-            <div style="font-size:18px;font-weight:700;margin-bottom:12px;color:#212529;">${data.productTitle}</div>
-            ${data.variantTitle ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">Variant:</span> <span style="color:#212529;">${data.variantTitle}</span></div>` : ''}
-            ${data.sku ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">SKU:</span> <span style="color:#212529;">${data.sku}</span></div>` : ''}
-            <table cellpadding="0" cellspacing="0">
-              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;white-space:nowrap;">Current Stock:</td><td style="color:#e67e00;font-weight:700;">${data.currentQuantity} units</td></tr>
-              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Threshold:</td><td style="color:#212529;">${data.threshold} units</td></tr>
-              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Store:</td><td style="color:#212529;">${data.storeName}</td></tr>
-            </table>
+          <td valign="top">
+            <div style="font-size:18px;font-weight:700;color:#111827;line-height:1.3;margin-bottom:4px;">${esc(data.productTitle)}</div>
+            ${data.variantTitle ? `<div style="font-size:13px;color:#6b7280;margin-bottom:2px;">Variant: ${esc(data.variantTitle)}</div>` : ''}
+            ${data.sku ? `<div style="font-size:13px;color:#6b7280;margin-bottom:6px;">SKU: ${esc(data.sku)}</div>` : ''}
+            <span style="display:inline-block;padding:3px 10px;background:${badge.bg};color:${badge.color};font-size:12px;font-weight:600;border-radius:20px;">${badge.text}</span>
           </td>
         </tr>
       </table>
-      <div style="text-align:center;">
-        <a href="https://${data.shopDomain}/admin/products/${data.productId}" class="btn">📝 Manage Inventory</a>
+
+      <!-- Stats -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <tr>
+          ${stats.map((s, i) => `
+          <td style="padding:16px 20px;background:#f9fafb;text-align:center;${i < stats.length - 1 ? 'border-right:1px solid #e5e7eb;' : ''}">
+            <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">${esc(s.label)}</div>
+            <div style="font-size:30px;font-weight:800;color:${s.color};line-height:1;">${esc(s.value)}</div>
+          </td>`).join('')}
+        </tr>
+      </table>
+
+      <div style="font-size:13px;color:#6b7280;margin-bottom:22px;">
+        Store: <strong style="color:#374151;">${esc(data.storeName)}</strong>
       </div>
-      <div class="tip warn"><strong>💡 Tip:</strong> Consider restocking soon to avoid going out of stock.</div>
-    </div>`;
+
+      <!-- CTA -->
+      <table role="presentation" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="border-radius:8px;${brandBg(brand.color)}">
+            <a href="https://${data.shopDomain}/admin/products/${data.productId}"
+              style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
+              ${esc(ctaLabel)} &rarr;
+            </a>
+          </td>
+        </tr>
+      </table>
+
+    </td>
+  </tr>`;
+}
+
+function tip(text: string, bg: string, borderColor: string, color: string): string {
+  return `
+  <tr>
+    <td style="padding:0 32px 28px;">
+      <div style="background:${bg};border-left:4px solid ${borderColor};border-radius:0 6px 6px 0;padding:12px 16px;font-size:14px;color:${color};line-height:1.5;">
+        ${text}
+      </div>
+    </td>
+  </tr>`;
+}
+
+export function getLowStockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `⚠️ Low Stock Alert: ${data.productTitle}`,
-    html: baseTemplate(content, `${data.productTitle} is running low (${data.currentQuantity} left)`),
+    subject: `⚠️ Low Stock: ${data.productTitle} (${data.currentQuantity} left)`,
+    html: shell(
+      `${data.productTitle} is running low — ${data.currentQuantity} units remaining`,
+      `${header('⚠️', 'Low Stock Alert', `${data.productTitle} needs your attention`, brand)}
+       ${productCard(
+         data,
+         { text: '⚠️ Low Stock', bg: '#fef3c7', color: '#92400e' },
+         [
+           { label: 'Current Stock', value: String(data.currentQuantity ?? 0), color: '#d97706' },
+           { label: 'Threshold', value: String(data.threshold ?? 0), color: '#374151' },
+         ],
+         'Manage Inventory',
+         brand,
+       )}
+       ${tip('<strong>Restock soon</strong> — this product will sell out before the next delivery window if not replenished.', '#fffbeb', '#f59e0b', '#92400e')}`,
+      brand,
+    ),
   };
 }
 
-export function getOutOfStockEmailTemplate(data: EmailTemplateData): { subject: string; html: string } {
-  const content = `
-    <div class="hdr">❌ Stock Alert — Out of Stock</div>
-    <div class="body">
-      <p>One of your products has sold out.</p>
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#f8d7da;border-radius:8px;border-left:4px solid #dc3545;overflow:hidden;">
-        <tr>
-          ${data.imageUrl ? `<td width="100" valign="top" style="padding:20px 0 20px 20px;">
-            <img src="${data.imageUrl}" alt="${data.productTitle}" width="80" height="80" style="border-radius:6px;object-fit:cover;border:1px solid #dee2e6;display:block;" />
-          </td>` : ''}
-          <td valign="top" style="padding:20px;">
-            <div style="font-size:18px;font-weight:700;margin-bottom:12px;color:#212529;">${data.productTitle}</div>
-            ${data.variantTitle ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">Variant:</span> <span style="color:#212529;">${data.variantTitle}</span></div>` : ''}
-            ${data.sku ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">SKU:</span> <span style="color:#212529;">${data.sku}</span></div>` : ''}
-            <table cellpadding="0" cellspacing="0">
-              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;white-space:nowrap;">Current Stock:</td><td style="color:#dc3545;font-weight:700;">0 units</td></tr>
-              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Store:</td><td style="color:#212529;">${data.storeName}</td></tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-      <div style="text-align:center;">
-        <a href="https://${data.shopDomain}/admin/products/${data.productId}" class="btn">🔄 Restock Product</a>
-      </div>
-      <div class="tip danger"><strong>🚨 Action Required:</strong> This product is no longer available for purchase. Restock immediately to resume sales.</div>
-    </div>`;
+export function getOutOfStockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
     subject: `❌ Out of Stock: ${data.productTitle}`,
-    html: baseTemplate(content, `${data.productTitle} is now out of stock`),
+    html: shell(
+      `${data.productTitle} is now out of stock`,
+      `${header('❌', 'Out of Stock', `${data.productTitle} has sold out`, brand)}
+       ${productCard(
+         data,
+         { text: '❌ Sold Out', bg: '#fee2e2', color: '#991b1b' },
+         [{ label: 'Current Stock', value: '0', color: '#dc2626' }],
+         'Restock Product',
+         brand,
+       )}
+       ${tip('<strong>Action required</strong> — customers cannot purchase this product until inventory is restored.', '#fef2f2', '#dc2626', '#991b1b')}`,
+      brand,
+    ),
   };
 }
 
-export function getRestockEmailTemplate(data: EmailTemplateData): { subject: string; html: string } {
-  const content = `
-    <div class="hdr">🎉 Stock Alert — Back in Stock</div>
-    <div class="body">
-      <p>Great news! Your product is available again.</p>
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#d4edda;border-radius:8px;border-left:4px solid #28a745;overflow:hidden;">
-        <tr>
-          ${data.imageUrl ? `<td width="100" valign="top" style="padding:20px 0 20px 20px;">
-            <img src="${data.imageUrl}" alt="${data.productTitle}" width="80" height="80" style="border-radius:6px;object-fit:cover;border:1px solid #dee2e6;display:block;" />
-          </td>` : ''}
-          <td valign="top" style="padding:20px;">
-            <div style="font-size:18px;font-weight:700;margin-bottom:12px;color:#212529;">${data.productTitle}</div>
-            ${data.variantTitle ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">Variant:</span> <span style="color:#212529;">${data.variantTitle}</span></div>` : ''}
-            ${data.sku ? `<div style="margin-bottom:6px;"><span style="font-weight:600;color:#495057;">SKU:</span> <span style="color:#212529;">${data.sku}</span></div>` : ''}
-            <table cellpadding="0" cellspacing="0">
-              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;white-space:nowrap;">Current Stock:</td><td style="color:#28a745;font-weight:700;">${data.currentQuantity} units</td></tr>
-              <tr><td style="font-weight:600;color:#495057;padding:3px 16px 3px 0;">Store:</td><td style="color:#212529;">${data.storeName}</td></tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-      <div style="text-align:center;">
-        <a href="https://${data.shopDomain}/admin/products/${data.productId}" class="btn">👀 View Product</a>
-      </div>
-      <div class="tip ok"><strong>✅ Success:</strong> Customers can now purchase this product again. Consider promoting it to boost sales!</div>
-    </div>`;
+export function getRestockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `🎉 Back in Stock: ${data.productTitle}`,
-    html: baseTemplate(content, `${data.productTitle} is back in stock (${data.currentQuantity} units available)`),
+    subject: `🎉 Back in Stock: ${data.productTitle} (${data.currentQuantity} units)`,
+    html: shell(
+      `${data.productTitle} is back in stock — ${data.currentQuantity} units available`,
+      `${header('🎉', 'Back in Stock', `${data.productTitle} is available again`, brand)}
+       ${productCard(
+         data,
+         { text: '✅ In Stock', bg: '#d1fae5', color: '#065f46' },
+         [{ label: 'Available Now', value: String(data.currentQuantity ?? 0), color: '#059669' }],
+         'View Product',
+         brand,
+       )}
+       ${tip('<strong>Great news!</strong> — customers can now purchase this product again. Consider promoting it to boost sales.', '#f0fdf4', '#059669', '#065f46')}`,
+      brand,
+    ),
+  };
+}
+
+export interface BackInStockCustomerData {
+  storeName: string;
+  shopDomain: string;
+  productTitle: string;
+  productId: string;
+  productUrl?: string | null;
+  imageUrl?: string | null;
+  unsubscribeUrl: string;
+}
+
+export function getBackInStockCustomerTemplate(data: BackInStockCustomerData, brand: BrandConfig = {}): { subject: string; html: string } {
+  const productUrl = data.productUrl ?? `https://${data.shopDomain}/products/${data.productId}`;
+  return {
+    subject: `🎉 Back in stock: ${data.productTitle}`,
+    html: shell(
+      `${data.productTitle} is back in stock at ${data.storeName} — grab it before it sells out again`,
+      `${header('🎉', 'Back in Stock!', `${data.productTitle} is available again at ${data.storeName}`, brand)}
+      <tr>
+        <td style="padding:28px 32px 20px;">
+          ${data.imageUrl ? `
+          <div style="text-align:center;margin-bottom:20px;">
+            <img src="${esc(data.imageUrl)}" alt="${esc(data.productTitle)}" width="180" height="180"
+              style="border-radius:10px;object-fit:cover;border:1px solid #e5e7eb;" />
+          </div>` : ''}
+          <div style="font-size:20px;font-weight:700;color:#111827;margin-bottom:8px;">${esc(data.productTitle)}</div>
+          <div style="font-size:14px;color:#6b7280;margin-bottom:24px;">
+            You signed up to be notified when this item returned to <strong>${esc(data.storeName)}</strong>. It's back — but it may sell out again quickly.
+          </div>
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+            <tr>
+              <td style="border-radius:8px;${brandBg(brand.color)}">
+                <a href="${esc(productUrl)}"
+                  style="display:inline-block;padding:14px 32px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
+                  Shop Now &rarr;
+                </a>
+              </td>
+            </tr>
+          </table>
+          <p style="font-size:12px;color:#9ca3af;margin:0;">
+            You're receiving this because you signed up for a back-in-stock notification.
+            <a href="${esc(data.unsubscribeUrl)}" style="color:#9ca3af;">Unsubscribe</a>
+          </p>
+        </td>
+      </tr>`,
+      brand,
+    ),
+  };
+}
+
+export interface DigestProduct {
+  productTitle: string | null;
+  sku: string | null;
+  currentQuantity: number;
+  inventoryStatus: string;
+}
+
+export interface DigestEmailData {
+  shop: string;
+  frequency: 'Daily' | 'Weekly';
+  outOfStock: DigestProduct[];
+  lowStock: DigestProduct[];
+}
+
+export function getDigestEmailTemplate(data: DigestEmailData, brand: BrandConfig = {}): { subject: string; html: string } {
+  const storeName = data.shop.replace('.myshopify.com', '');
+  const totalAtRisk = data.outOfStock.length + data.lowStock.length;
+
+  const productRow = (p: DigestProduct, isOut: boolean) => `
+    <tr>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
+        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(p.productTitle ?? 'Unknown')}</div>
+        ${p.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(p.sku)}</div>` : ''}
+      </td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;">
+        <span style="font-size:14px;font-weight:700;color:${isOut ? '#dc2626' : '#d97706'};">${p.currentQuantity}</span>
+        <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:${isOut ? '#fee2e2' : '#fef3c7'};color:${isOut ? '#991b1b' : '#92400e'};font-size:11px;font-weight:600;">${isOut ? 'Out of Stock' : 'Low Stock'}</span>
+      </td>
+    </tr>`;
+
+  const rows = [
+    ...data.outOfStock.map(p => productRow(p, true)),
+    ...data.lowStock.map(p => productRow(p, false)),
+  ].join('');
+
+  const body = `
+    ${header('📦', `${data.frequency} Inventory Digest`, `${totalAtRisk} product${totalAtRisk !== 1 ? 's' : ''} need${totalAtRisk === 1 ? 's' : ''} attention — ${storeName}`, brand)}
+    <tr>
+      <td style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+          <tr>
+            <td style="padding:16px 20px;background:#f9fafb;text-align:center;border-right:1px solid #e5e7eb;">
+              <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Out of Stock</div>
+              <div style="font-size:30px;font-weight:800;color:#dc2626;line-height:1;">${data.outOfStock.length}</div>
+            </td>
+            <td style="padding:16px 20px;background:#f9fafb;text-align:center;">
+              <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Low Stock</div>
+              <div style="font-size:30px;font-weight:800;color:#d97706;line-height:1;">${data.lowStock.length}</div>
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+          <tr style="background:#f9fafb;">
+            <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Product</th>
+            <th style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Stock</th>
+          </tr>
+          ${rows}
+        </table>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          <tr>
+            <td style="border-radius:8px;${brandBg(brand.color)}">
+              <a href="https://admin.shopify.com/store/${storeName}/apps/stock-alert/app/products?filter=out_of_stock"
+                style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
+                View At-Risk Products &rarr;
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+
+  return {
+    subject: `📦 ${data.frequency} Digest: ${totalAtRisk} product${totalAtRisk !== 1 ? 's' : ''} need${totalAtRisk === 1 ? 's' : ''} attention`,
+    html: shell(`${totalAtRisk} products need attention — ${storeName}`, body, brand),
   };
 }

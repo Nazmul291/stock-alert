@@ -1,13 +1,19 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { sendRestockAlert } from "../lib/notifications";
+import { sendRestockAlert, sendBackInStockNotifications } from "../lib/notifications";
 import {
   getBoss,
   QUEUE_NAME,
   DEBOUNCE_SECONDS,
+  JOB_RETRY_LIMIT,
+  JOB_RETRY_DELAY,
   type BufferPayload,
 } from "../lib/queue";
+import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
+import { syncState } from "../lib/sync-state.server";
+import { computeStockOutDays } from "../lib/velocity.server";
+import { fireOutboundWebhook } from "../lib/outbound-webhook.server";
 
 const INVENTORY_ITEM_QUERY = `
   query ($id: ID!) {
@@ -25,15 +31,16 @@ const INVENTORY_ITEM_QUERY = `
   }
 `;
 
-const PRODUCT_METAFIELDS_QUERY = `
-  query ($id: ID!) {
-    product(id: $id) {
-      customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { value }
-      excludeFromAlerts: metafield(namespace: "stock_alert", key: "exclude_from_alerts") { value }
-      excludeFromAutoHide: metafield(namespace: "stock_alert", key: "exclude_from_auto_hide") { value }
-    }
+// 5-minute in-memory cache for per-product metafields — avoids an extra GraphQL
+// call on every inventory webhook for the same product within a 5-minute window.
+type ProductMeta = { customThreshold: number | null; autoHide: boolean | null; autoRepublish: boolean | null };
+const metafieldCache = new Map<string, { data: ProductMeta; expiresAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, entry] of metafieldCache) {
+    if (now > entry.expiresAt) metafieldCache.delete(k);
   }
-`;
+}, 60_000);
 
 // In-memory dedup cache (3-second TTL) — prevents the same location event from
 // hammering the DB when Shopify fires duplicate webhook deliveries.
@@ -63,6 +70,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response(null, { status: 200 });
   }
   requestCache.set(cacheKey, now);
+
+  // Track webhook health non-blocking
+  syncState.webhookReceived(shop).catch(() => {});
 
   // Return 200 immediately; all heavy work is async
   processInventoryUpdate(shop, inventoryItemId, data, admin).catch((err) =>
@@ -132,29 +142,30 @@ async function processInventoryUpdate(
     return;
   }
 
-  // ── 3. Per-product metafield overrides ────────────────────────────────────
-  let productMeta = {
-    customThreshold: null as number | null,
-    excludeFromAlerts: false,
-    excludeFromAutoHide: false,
-  };
-  try {
-    const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
-      variables: { id: `gid://shopify/Product/${productId}` },
-    });
-    const json: any = await res.json();
-    const p = json.data?.product;
-    if (p) {
-      productMeta = {
-        customThreshold: p.customThreshold?.value
-          ? parseInt(p.customThreshold.value)
-          : null,
-        excludeFromAlerts: p.excludeFromAlerts?.value === "true",
-        excludeFromAutoHide: p.excludeFromAutoHide?.value === "true",
-      };
+  // ── 3. Per-product metafield overrides (5-min cached) ────────────────────
+  const cacheMetaKey = `${shop}:${productId}`;
+  const cached = metafieldCache.get(cacheMetaKey);
+  let productMeta: ProductMeta = { customThreshold: null, autoHide: null, autoRepublish: null };
+  if (cached && Date.now() < cached.expiresAt) {
+    productMeta = cached.data;
+  } else {
+    try {
+      const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
+        variables: { id: `gid://shopify/Product/${productId}` },
+      });
+      const json: any = await res.json();
+      const p = json.data?.product;
+      if (p) {
+        productMeta = {
+          customThreshold: p.customThreshold?.value ? parseInt(p.customThreshold.value) : null,
+          autoHide: p.autoHide?.value !== undefined ? p.autoHide.value === "true" : null,
+          autoRepublish: p.autoRepublish?.value !== undefined ? p.autoRepublish.value === "true" : null,
+        };
+      }
+      metafieldCache.set(cacheMetaKey, { data: productMeta, expiresAt: Date.now() + 5 * 60 * 1000 });
+    } catch {
+      // Metafield fetch failed — fall through with store-level defaults
     }
-  } catch {
-    // Metafield fetch failed — fall through with store-level defaults
   }
 
   // ── 4. Status determination ───────────────────────────────────────────────
@@ -163,7 +174,11 @@ async function processInventoryUpdate(
   const newQty = newQtyTotal;
   const qtyChanged = newQty !== previousQty;
 
-  const threshold = productMeta.customThreshold ?? settings.lowStockThreshold;
+  // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
+  const threshold =
+    (storeSession?.plan === "pro" && productMeta.customThreshold !== null)
+      ? productMeta.customThreshold
+      : settings.lowStockThreshold;
   const newStatus: "in_stock" | "low_stock" | "out_of_stock" =
     newQty === 0 ? "out_of_stock" : newQty <= threshold ? "low_stock" : "in_stock";
 
@@ -178,6 +193,8 @@ async function processInventoryUpdate(
 
   // Update DB tracking whenever qty changed
   if (qtyChanged) {
+    const effectiveDailySales = existingTracking.manualDailySales ?? existingTracking.avgDailySales;
+    const newStockOutDays = computeStockOutDays(newQty, effectiveDailySales);
     await prisma.inventoryTracking.update({
       where: { id: existingTracking.id },
       data: {
@@ -185,6 +202,7 @@ async function processInventoryUpdate(
         previousQuantity: previousQty,
         inventoryStatus: newStatus,
         lastCheckedAt: new Date(),
+        ...(effectiveDailySales ? { stockOutDays: newStockOutDays } : {}),
       },
     });
   }
@@ -199,31 +217,26 @@ async function processInventoryUpdate(
       ? "restock"
       : null;
 
-  if (!alertType || productMeta.excludeFromAlerts) {
-    console.log(
-      `[Webhook] No alert needed — alertType:${alertType ?? "none"}, excluded:${productMeta.excludeFromAlerts}`,
-    );
+  if (!alertType) {
+    console.log(`[Webhook] No alert needed — alertType: none`);
     return;
   }
 
-  // ── 6. 10-minute cooldown check ───────────────────────────────────────────
-  // Prevents scheduling buffer jobs for alerts we know we'll suppress anyway.
-  const lastAlert = await prisma.alertHistory.findFirst({
-    where: { shop, productId: BigInt(productId) },
-    orderBy: { sentAt: "desc" },
-  });
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+  // ── 6. 24-hour per-type cooldown check ───────────────────────────────────
+  // Uses the stamp written to inventory_tracking by logAlert — no extra query.
+  // Prevents repeated alerts when inventory bounces repeatedly near the threshold.
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const withinCooldown =
-    lastAlert &&
-    lastAlert.sentAt > tenMinutesAgo &&
-    lastAlert.alertType === alertType;
+    existingTracking.lastAlertSentAt !== null &&
+    existingTracking.lastAlertSentAt > twentyFourHoursAgo &&
+    existingTracking.lastAlertType === alertType;
 
   if (withinCooldown) {
-    const minsAgo = Math.round(
-      (Date.now() - lastAlert!.sentAt.getTime()) / 60_000,
+    const hoursAgo = Math.round(
+      (Date.now() - existingTracking.lastAlertSentAt!.getTime()) / 3_600_000,
     );
     console.log(
-      `[Webhook] Skipping ${alertType} alert for product ${productId} — same type sent ${minsAgo}m ago (< 10m cooldown)`,
+      `[Webhook] Skipping ${alertType} alert for product ${productId} — same type sent ${hoursAgo}h ago (< 24h cooldown)`,
     );
     return;
   }
@@ -239,6 +252,9 @@ async function processInventoryUpdate(
     slackNotifications: settings.slackNotifications,
     notificationEmail: settings.notificationEmail,
     slackWebhookUrl: settings.slackWebhookUrl,
+    brandLogoUrl: settings.brandLogoUrl,
+    brandColor: settings.brandColor,
+    brandSenderName: settings.brandSenderName,
   };
   const productCtx = {
     id: productId,
@@ -255,6 +271,15 @@ async function processInventoryUpdate(
   if (alertType === "restock") {
     // Restock fires immediately — no need to debounce going from 0→N.
     await sendRestockAlert(storeCtx, productCtx, newQty, settingsCtx);
+    // Notify back-in-stock subscribers (non-blocking)
+    sendBackInStockNotifications(
+      shop,
+      productId,
+      productCtx.title,
+      shop,
+      process.env.SHOPIFY_APP_URL ?? "",
+      { logoUrl: settingsCtx.brandLogoUrl, color: settingsCtx.brandColor, senderName: settingsCtx.brandSenderName },
+    ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
   } else {
     // low_stock and out_of_stock go through the debounce buffer.
     // Shopify may fire dozens of parallel webhooks per bulk inventory update;
@@ -269,43 +294,67 @@ async function processInventoryUpdate(
     });
   }
 
+  // ── 8b. Outbound webhook (Pro, non-blocking) ──────────────────────────────
+  if (storeSession?.plan === "pro" && settings.outboundWebhookUrl) {
+    fireOutboundWebhook(settings.outboundWebhookUrl, {
+      event: alertType as "low_stock" | "out_of_stock" | "restock",
+      shop,
+      productId,
+      productTitle: productCtx.title,
+      sku: productCtx.sku,
+      currentQuantity: newQty,
+      threshold,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+  }
+
   // ── 9. Auto-hide / auto-republish (fires immediately, separate from alerts) ──
+  // Per-product setting wins; falls back to store-wide default when not set.
+  const effectiveAutoHide = productMeta.autoHide !== null ? productMeta.autoHide : settings.autoHideEnabled;
+  const effectiveAutoRepublish = productMeta.autoRepublish !== null ? productMeta.autoRepublish : settings.autoRepublishEnabled;
+
   if (
     newStatus === "out_of_stock" &&
-    settings.autoHideEnabled &&
-    !productMeta.excludeFromAutoHide &&
+    effectiveAutoHide &&
     !existingTracking.isHidden
   ) {
-    await Promise.all([
-      admin.graphql(
-        `mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`,
-        { variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } } },
-      ),
-      prisma.inventoryTracking.update({
+    const res = await admin.graphql(
+      `mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`,
+      { variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } } },
+    );
+    const json: any = await res.json();
+    const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
+    if (errs.length > 0) {
+      console.error(`[Webhook] Auto-hide failed for product ${productId}:`, errs.join(", "));
+    } else {
+      await prisma.inventoryTracking.update({
         where: { id: existingTracking.id },
         data: { isHidden: true },
-      }),
-    ]);
+      });
+    }
   }
 
   if (
     newStatus === "in_stock" &&
     previousQty === 0 &&
-    settings.autoRepublishEnabled &&
+    effectiveAutoRepublish &&
     storeSession?.plan === "pro" &&
-    !productMeta.excludeFromAutoHide &&
     existingTracking.isHidden
   ) {
-    await Promise.all([
-      admin.graphql(
-        `mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`,
-        { variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } } },
-      ),
-      prisma.inventoryTracking.update({
+    const res = await admin.graphql(
+      `mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`,
+      { variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } } },
+    );
+    const json: any = await res.json();
+    const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
+    if (errs.length > 0) {
+      console.error(`[Webhook] Auto-republish failed for product ${productId}:`, errs.join(", "));
+    } else {
+      await prisma.inventoryTracking.update({
         where: { id: existingTracking.id },
         data: { isHidden: false },
-      }),
-    ]);
+      });
+    }
   }
 }
 
@@ -345,7 +394,12 @@ async function upsertBufferAndSchedule(
       create: { eventKey, shop, productId, alertType, payload: payload as any },
     });
 
-    const jobId = await boss.send(QUEUE_NAME, { eventKey }, { startAfter: DEBOUNCE_SECONDS });
+    const jobId = await boss.send(QUEUE_NAME, { eventKey }, {
+      startAfter: DEBOUNCE_SECONDS,
+      retryLimit: JOB_RETRY_LIMIT,
+      retryDelay: JOB_RETRY_DELAY,
+      retryBackoff: true,
+    });
     if (jobId) {
       await tx.inventoryBuffer.update({ where: { eventKey }, data: { jobId } });
     }

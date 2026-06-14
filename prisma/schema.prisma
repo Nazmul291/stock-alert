@@ -30,10 +30,11 @@ model Session {
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  storeSettings     StoreSettings?
-  inventoryTracking InventoryTracking[]
-  alertHistory      AlertHistory[]
-  setupProgress     SetupProgress?
+  storeSettings          StoreSettings?
+  inventoryTracking      InventoryTracking[]
+  alertHistory           AlertHistory[]
+  setupProgress          SetupProgress?
+  backInStockSubscribers BackInStockSubscriber[]
 
   @@index([plan])
 }
@@ -64,11 +65,22 @@ model StoreSettings {
   autoHideEnabled      Boolean  @default(false) @map("auto_hide_enabled")
   emailNotifications   Boolean  @default(true) @map("email_notifications")
   slackNotifications   Boolean  @default(false) @map("slack_notifications")
-  notificationEmail    String?  @map("notification_email") @db.VarChar(255)
+  notificationEmail    String?  @map("notification_email")
   slackWebhookUrl      String?  @map("slack_webhook_url")
-  autoRepublishEnabled Boolean  @default(false) @map("auto_republish_enabled")
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  autoRepublishEnabled Boolean   @default(false) @map("auto_republish_enabled")
+  digestEnabled        Boolean   @default(true) @map("digest_enabled")
+  digestFrequency      String    @default("weekly") @map("digest_frequency")
+  lastDigestSentAt     DateTime? @map("last_digest_sent_at") @db.Timestamptz
+  brandLogoUrl         String?   @map("brand_logo_url") @db.VarChar(500)
+  brandColor           String?   @map("brand_color") @db.VarChar(7)
+  brandSenderName      String?   @map("brand_sender_name") @db.VarChar(100)
+  outboundWebhookUrl   String?   @map("outbound_webhook_url") @db.VarChar(500)
+  supplierLeadTimeDays Int       @default(7) @map("supplier_lead_time_days")
+  monitoringFilter     String    @default("all") @map("monitoring_filter")
+  monitoringCollectionId String? @map("monitoring_collection_id") @db.VarChar(50)
+  monitoringTags       String?   @map("monitoring_tags") @db.VarChar(500)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 
@@ -87,9 +99,14 @@ model InventoryTracking {
   previousQuantity Int?            @map("previous_quantity")
   lastCheckedAt    DateTime        @default(now()) @map("last_checked_at") @db.Timestamptz
   lastAlertSentAt  DateTime?       @map("last_alert_sent_at") @db.Timestamptz
+  lastAlertType    AlertType?      @map("last_alert_type")
   isHidden           Boolean         @default(false) @map("is_hidden")
   monitoringEnabled  Boolean         @default(true) @map("monitoring_enabled")
   inventoryStatus    InventoryStatus @default(in_stock) @map("inventory_status")
+  avgDailySales        Float?    @map("avg_daily_sales")
+  stockOutDays         Int?      @map("stock_out_days")
+  manualDailySales     Float?    @map("manual_daily_sales")
+  expectedRestockDate  DateTime? @map("expected_restock_date") @db.Timestamptz
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -97,7 +114,6 @@ model InventoryTracking {
 
   @@unique([shop, productId])
   @@index([shop])
-  @@index([shop, productId])
   @@index([shop, currentQuantity])
   @@index([shop, isHidden])
   @@index([lastCheckedAt])
@@ -146,6 +162,21 @@ model SetupProgress {
 
 
 
+
+// Per-shop sync progress — persisted so all web VMs see the same state.
+model SyncState {
+  shop          String    @id
+  running       Boolean   @default(false)
+  progress      Int       @default(0)
+  startedAt     DateTime  @map("started_at") @db.Timestamptz
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz
+  syncedCount   Int?      @map("synced_count")
+  error         String?
+  lastWebhookAt DateTime? @map("last_webhook_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("sync_state")
+}
 
 // Transient debounce buffer — rows are deleted after the alert fires.
 // No FK relation to Session so cascades don't interfere with rapid writes.
@@ -222,4 +253,21 @@ model ChatMessage {
   sentAt         DateTime         @default(now())
 
   @@map("chat_messages")
+}
+
+model BackInStockSubscriber {
+  id           String    @id @default(uuid()) @db.Uuid
+  shop         String
+  productId    BigInt    @map("product_id")
+  productTitle String?   @map("product_title") @db.VarChar(500)
+  email        String    @db.VarChar(255)
+  subscribedAt DateTime  @default(now()) @map("subscribed_at") @db.Timestamptz
+  notifiedAt   DateTime? @map("notified_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@unique([shop, productId, email])
+  @@index([shop])
+  @@index([shop, productId])
+  @@map("back_in_stock_subscribers")
 }

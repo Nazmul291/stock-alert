@@ -17,7 +17,7 @@ export async function enforcePlanLimits(shop: string, plan: string) {
   const toDeactivate = activeProducts.slice(maxProducts).map((p) => p.id);
   await prisma.inventoryTracking.updateMany({
     where: { id: { in: toDeactivate } },
-    data: { inventoryStatus: 'deactivated' },
+    data: { inventoryStatus: 'deactivated', monitoringEnabled: false },
   });
 
   return { deactivatedCount: toDeactivate.length, activeCount: maxProducts, maxAllowed: maxProducts };
