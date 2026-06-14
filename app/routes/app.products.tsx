@@ -967,8 +967,17 @@ export default function ProductsPage() {
                       style={{ cursor: selectableIds.length === 0 ? "not-allowed" : "pointer" }}
                     />
                   </th>
-                  {["Product", "SKU", "Quantity", "Status", "Days Left", "Reorder By", "Monitor Alert", "Action"].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
+                  {[
+                    { label: "Product" },
+                    { label: "SKU" },
+                    { label: "Quantity" },
+                    { label: "Status", width: 130 },
+                    { label: "Days Left" },
+                    { label: "Reorder By" },
+                    { label: "Monitor Alert" },
+                    { label: "Action" },
+                  ].map(({ label, width }) => (
+                    <th key={label} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap", ...(width ? { width, minWidth: width } : {}) }}>{label}</th>
                   ))}
                 </tr>
               </thead>
@@ -1005,8 +1014,8 @@ export default function ProductsPage() {
                       <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.currentQuantity <= 0 ? "#dc2626" : p.currentQuantity <= 5 ? "#d97706" : "#059669" }}>
                         {isNotTracked ? "—" : p.currentQuantity}
                       </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500 }}>
+                      <td style={{ padding: "10px 12px", width: 130, minWidth: 130 }}>
+                        <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
                           {s.label}
                         </span>
                       </td>
