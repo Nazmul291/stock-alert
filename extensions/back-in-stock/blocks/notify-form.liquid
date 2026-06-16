@@ -1,105 +1,656 @@
-{%- if product.available == false -%}
-<div
-  id="bis-wrapper-{{ product.id }}"
-  style="margin: {{ block.settings.margin_top }}px 0 {{ block.settings.margin_bottom }}px;"
->
-  <p style="font-size:14px;color:#374151;margin:0 0 8px;font-weight:600;">
-    {{ block.settings.heading }}
-  </p>
-  <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
-    {{ block.settings.subheading }}
-  </p>
+{% if product %}
+<style>
+  .bis-btn {
+    display: block;
+    width: 100%;
+    max-width: 500px;
+    padding: 14px 24px;
+    background: #111827;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: background 0.2s, opacity 0.2s;
+    text-align: center;
+    line-height: 1.4;
+    font-family: inherit;
+  }
+  .bis-btn:hover:not(:disabled) {
+    background: #1f2937;
+  }
+  .bis-btn--notified {
+    background: #059669 !important;
+    cursor: default;
+    opacity: 1 !important;
+  }
+  .bis-btn:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
 
-  <form id="bis-form-{{ product.id }}" style="display:flex;gap:8px;flex-wrap:wrap;">
-    <input
-      type="email"
-      name="email"
-      placeholder="{{ block.settings.email_placeholder }}"
-      required
-      style="flex:1;min-width:200px;border:1px solid #d1d5db;border-radius:6px;padding:9px 14px;font-size:14px;outline:none;"
-    />
-    <button
-      type="submit"
-      style="padding:9px 20px;background:{{ block.settings.button_color }};color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;"
-    >
-      {{ block.settings.button_label }}
-    </button>
-  </form>
+  /* Overlay */
+  .bis-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .bis-overlay--visible {
+    opacity: 1;
+  }
 
-  <div id="bis-msg-{{ product.id }}" style="display:none;margin-top:10px;font-size:14px;"></div>
-</div>
+  /* Modal card */
+  .bis-modal {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
+    width: 100%;
+    max-width: 480px;
+    padding: 32px;
+    position: relative;
+    transform: translateY(20px);
+    transition: transform 0.3s ease;
+    max-height: 90vh;
+    overflow-y: auto;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  }
+  .bis-overlay--visible .bis-modal {
+    transform: translateY(0);
+  }
 
-<script>
-(function() {
-  var APP_URL = {{ shop.metafields.stock_alert.app_url | json | default: '""' }};
-  // Fallback: read from script tag data attribute
-  var scripts = document.querySelectorAll('script[data-bis-app-url]');
-  if (!APP_URL && scripts.length) APP_URL = scripts[scripts.length - 1].getAttribute('data-bis-app-url');
+  /* Close button */
+  .bis-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: #f3f4f6;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #6b7280;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    transition: background 0.15s;
+    font-family: inherit;
+  }
+  .bis-close:hover {
+    background: #e5e7eb;
+    color: #111827;
+  }
 
-  var form = document.getElementById('bis-form-{{ product.id }}');
-  var msg = document.getElementById('bis-msg-{{ product.id }}');
-  if (!form) return;
+  /* Product info */
+  .bis-product-info {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+  .bis-product-image {
+    width: 80px;
+    height: 80px;
+    border-radius: 10px;
+    object-fit: cover;
+    border: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+  .bis-product-details {
+    flex: 1;
+    min-width: 0;
+  }
+  .bis-badge {
+    display: inline-block;
+    background: #fee2e2;
+    color: #b91c1c;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+  }
+  .bis-product-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.3;
+    margin-bottom: 4px;
+    word-break: break-word;
+  }
+  .bis-product-price {
+    font-size: 14px;
+    color: #6b7280;
+  }
 
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var email = form.querySelector('[name=email]').value;
-    var btn = form.querySelector('button[type=submit]');
+  /* Divider */
+  .bis-divider {
+    height: 1px;
+    background: #f3f4f6;
+    margin: 0 0 20px;
+  }
+
+  /* Heading */
+  .bis-heading {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0 0 6px;
+  }
+  .bis-subtext {
+    font-size: 13px;
+    color: #6b7280;
+    margin: 0 0 20px;
+    line-height: 1.5;
+  }
+
+  /* Form */
+  .bis-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .bis-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .bis-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .bis-field label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+  }
+  .bis-required {
+    color: #ef4444;
+  }
+  .bis-field input {
+    border: 1.5px solid #d1d5db;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: #111827;
+    background: #fff;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    font-family: inherit;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .bis-field input:focus {
+    border-color: #111827;
+    box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+  }
+  .bis-field input::placeholder {
+    color: #9ca3af;
+  }
+
+  /* Error */
+  .bis-error {
+    font-size: 13px;
+    color: #dc2626;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+
+  /* Submit */
+  .bis-submit {
+    background: #111827;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 13px 24px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, opacity 0.2s;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .bis-submit:hover:not(:disabled) {
+    background: #1f2937;
+  }
+  .bis-submit:disabled {
+    opacity: 0.65;
+    cursor: default;
+  }
+  .bis-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: bis-spin 0.7s linear infinite;
+    display: none;
+  }
+  @keyframes bis-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Success */
+  .bis-success {
+    text-align: center;
+    padding: 8px 0 4px;
+  }
+  .bis-success-icon {
+    width: 56px;
+    height: 56px;
+    background: #d1fae5;
+    color: #059669;
+    border-radius: 50%;
+    font-size: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 16px;
+  }
+  .bis-success-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0 0 8px;
+  }
+  .bis-success-msg {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 480px) {
+    .bis-modal {
+      padding: 24px 20px;
+    }
+    .bis-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div id="bis-data"
+  data-app-url="{{ shop.metafields.stock_alert.app_url | default: '' }}"
+  data-shop="{{ shop.permanent_domain }}"
+  data-product-id="{{ product.id }}"
+  data-product-title="{{ product.title | escape }}"
+  data-product-available="{{ product.available }}"
+  data-product-image="{{ product.featured_image | image_url: width: 160, height: 160, crop: 'center' | default: '' }}"
+  data-product-price="{{ product.price_min | money }}"
+  hidden></div>
+
+<script type="module">
+(function () {
+  var d = document.getElementById('bis-data');
+  if (!d) return;
+
+  var CFG = {
+    appUrl: d.getAttribute('data-app-url') || '',
+    shop: d.getAttribute('data-shop'),
+    productId: d.getAttribute('data-product-id'),
+    productTitle: d.getAttribute('data-product-title'),
+    productAvailable: d.getAttribute('data-product-available') === 'true',
+    productImage: d.getAttribute('data-product-image') || '',
+    productPrice: d.getAttribute('data-product-price') || '',
+  };
+
+  if (!CFG.productId || !CFG.shop) return;
+
+  var STORAGE_KEY = 'bis_notified';
+  var overlay, modal;
+  var injectedForms = [];
+
+  function getNotifiedSet() {
+    try {
+      return new Set((localStorage.getItem(STORAGE_KEY) || '').split(',').filter(Boolean));
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function markNotified() {
+    try {
+      var s = getNotifiedSet();
+      s.add(CFG.productId);
+      localStorage.setItem(STORAGE_KEY, Array.from(s).join(','));
+    } catch (e) {}
+  }
+
+  function isAlreadyNotified() {
+    return getNotifiedSet().has(CFG.productId);
+  }
+
+  /* ── Button ── */
+  function createButton(form) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bis-btn';
+    btn.setAttribute('data-bis-btn', CFG.productId);
+    btn.style.display = 'none';
+
+    if (isAlreadyNotified()) {
+      setNotifiedState(btn);
+    } else {
+      btn.textContent = 'Notify Me When Available';
+      btn.addEventListener('click', openModal);
+    }
+
+    // Insert immediately after the product-form in the DOM
+    form.parentNode.insertBefore(btn, form.nextSibling);
+    return btn;
+  }
+
+  function setNotifiedState(btn) {
+    btn.textContent = '✓ You\'re on the list';
     btn.disabled = true;
-    btn.textContent = '{{ block.settings.loading_label }}';
+    btn.classList.add('bis-btn--notified');
+    btn.removeEventListener('click', openModal);
+  }
 
-    fetch((APP_URL || '') + '/api/back-in-stock', {
+  /* ── Inject into all product-form elements ── */
+  function injectForms() {
+    var forms = document.querySelectorAll('product-form');
+    forms.forEach(function (form) {
+      if (form._bisInjected) return;
+      form._bisInjected = true;
+
+      var btn = createButton(form);
+      injectedForms.push({ btn: btn, form: form });
+
+      watchAndToggle(form, btn);
+    });
+  }
+
+  /* ── Watch product-form; hide it and show our button when sold out ── */
+  function watchAndToggle(form, ourBtn) {
+    var submitBtn = form.querySelector('[type="submit"]');
+
+    function isSoldOut() {
+      if (!submitBtn) return !CFG.productAvailable;
+      var text = (submitBtn.textContent || '').toLowerCase().trim();
+      return submitBtn.disabled
+        || submitBtn.classList.contains('disabled')
+        || text === 'sold out'
+        || text === 'unavailable'
+        || text === 'out of stock';
+    }
+
+    function sync() {
+      if (isAlreadyNotified()) {
+        form.style.display = 'none';
+        ourBtn.style.display = '';
+        return;
+      }
+      if (isSoldOut()) {
+        form.style.display = 'none';
+        ourBtn.style.display = '';
+      } else {
+        form.style.display = '';
+        ourBtn.style.display = 'none';
+      }
+    }
+
+    sync();
+
+    if (submitBtn) {
+      new MutationObserver(sync).observe(submitBtn, {
+        attributes: true,
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+  }
+
+  /* ── Modal ── */
+  function openModal() {
+    if (!overlay) buildModal();
+
+    // Reset form state
+    var form = modal.querySelector('#bis-form');
+    var success = modal.querySelector('#bis-modal-success');
+    if (form) form.style.display = '';
+    if (success) success.style.display = 'none';
+    var submitBtn = modal.querySelector('#bis-submit-btn');
+    var submitText = modal.querySelector('#bis-submit-text');
+    var spinner = modal.querySelector('#bis-spinner');
+    if (submitBtn) { submitBtn.disabled = false; }
+    if (submitText) { submitText.textContent = 'Notify Me'; }
+    if (spinner) { spinner.style.display = 'none'; }
+    hideError();
+
+    document.body.style.overflow = 'hidden';
+    overlay.style.display = 'flex';
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        overlay.classList.add('bis-overlay--visible');
+      });
+    });
+
+    var emailInput = modal.querySelector('#bis-email');
+    if (emailInput) setTimeout(function () { emailInput.focus(); }, 300);
+  }
+
+  function closeModal() {
+    overlay.classList.remove('bis-overlay--visible');
+    setTimeout(function () {
+      overlay.style.display = 'none';
+      document.body.style.overflow = '';
+    }, 280);
+  }
+
+  function showError(msg) {
+    var el = document.getElementById('bis-form-error');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function hideError() {
+    var el = document.getElementById('bis-form-error');
+    if (el) el.style.display = 'none';
+  }
+
+  function buildModal() {
+    overlay = document.createElement('div');
+    overlay.className = 'bis-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'bis-modal-heading');
+
+    modal = document.createElement('div');
+    modal.className = 'bis-modal';
+
+    var imageHtml = CFG.productImage
+      ? '<img class="bis-product-image" src="' + CFG.productImage + '" alt="' + CFG.productTitle + '" />'
+      : '';
+
+    modal.innerHTML = ''
+      + '<button class="bis-close" aria-label="Close dialog" type="button">&times;</button>'
+      + '<div class="bis-product-info">'
+      +   imageHtml
+      +   '<div class="bis-product-details">'
+      +     '<div class="bis-badge">Out of Stock</div>'
+      +     '<div class="bis-product-name">' + CFG.productTitle + '</div>'
+      +     (CFG.productPrice ? '<div class="bis-product-price">' + CFG.productPrice + '</div>' : '')
+      +   '</div>'
+      + '</div>'
+      + '<div class="bis-divider"></div>'
+      + '<h3 class="bis-heading" id="bis-modal-heading">Notify me when available</h3>'
+      + '<p class="bis-subtext">We\'ll send you one email as soon as this item is back in stock. No spam, ever.</p>'
+      + '<form id="bis-form" class="bis-form" novalidate>'
+      +   '<div class="bis-row">'
+      +     '<div class="bis-field">'
+      +       '<label for="bis-first-name">First name</label>'
+      +       '<input type="text" id="bis-first-name" name="firstName" placeholder="Jane" autocomplete="given-name" />'
+      +     '</div>'
+      +     '<div class="bis-field">'
+      +       '<label for="bis-last-name">Last name</label>'
+      +       '<input type="text" id="bis-last-name" name="lastName" placeholder="Doe" autocomplete="family-name" />'
+      +     '</div>'
+      +   '</div>'
+      +   '<div class="bis-field">'
+      +     '<label for="bis-email">Email address <span class="bis-required">*</span></label>'
+      +     '<input type="email" id="bis-email" name="email" placeholder="jane@example.com" required autocomplete="email" />'
+      +   '</div>'
+      +   '<div id="bis-form-error" class="bis-error" role="alert" style="display:none;"></div>'
+      +   '<button type="submit" class="bis-submit" id="bis-submit-btn">'
+      +     '<div id="bis-spinner" class="bis-spinner"></div>'
+      +     '<span id="bis-submit-text">Notify Me</span>'
+      +   '</button>'
+      + '</form>'
+      + '<div id="bis-modal-success" class="bis-success" style="display:none;">'
+      +   '<div class="bis-success-icon">&#10003;</div>'
+      +   '<p class="bis-success-title">You\'re on the list!</p>'
+      +   '<p class="bis-success-msg">We\'ll email you as soon as <strong>' + CFG.productTitle + '</strong> is back in stock.</p>'
+      + '</div>';
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Close on backdrop click
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeModal();
+    });
+
+    // Close button
+    modal.querySelector('.bis-close').addEventListener('click', closeModal);
+
+    // Escape key
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && overlay && overlay.style.display === 'flex') closeModal();
+    });
+
+    // Form submit
+    modal.querySelector('#bis-form').addEventListener('submit', handleSubmit);
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    hideError();
+
+    var form = e.currentTarget;
+    var email = (form.querySelector('[name=email]').value || '').trim();
+    var firstName = (form.querySelector('[name=firstName]').value || '').trim();
+    var lastName = (form.querySelector('[name=lastName]').value || '').trim();
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showError('Please enter a valid email address.');
+      form.querySelector('[name=email]').focus();
+      return;
+    }
+
+    var submitBtn = document.getElementById('bis-submit-btn');
+    var submitText = document.getElementById('bis-submit-text');
+    var spinner = document.getElementById('bis-spinner');
+    submitBtn.disabled = true;
+    submitText.textContent = 'Subscribing…';
+    if (spinner) spinner.style.display = 'block';
+
+    var payload = {
+      shop: CFG.shop,
+      productId: CFG.productId,
+      productTitle: CFG.productTitle,
+      email: email,
+    };
+    if (firstName) payload.firstName = firstName;
+    if (lastName) payload.lastName = lastName;
+
+    fetch((CFG.appUrl || '') + '/api/back-in-stock', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        shop: {{ shop.permanent_domain | json }},
-        productId: '{{ product.id }}',
-        productTitle: {{ product.title | json }},
-        email: email
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success) {
+          onSuccess();
+        } else {
+          onError(data.error || 'Something went wrong. Please try again.');
+          submitBtn.disabled = false;
+          submitText.textContent = 'Notify Me';
+          if (spinner) spinner.style.display = 'none';
+        }
       })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      form.style.display = 'none';
-      msg.style.display = 'block';
-      if (data.success) {
-        msg.style.color = '#059669';
-        msg.textContent = data.message || '{{ block.settings.success_message }}';
-      } else {
-        msg.style.color = '#dc2626';
-        msg.textContent = data.error || '{{ block.settings.error_message }}';
-        form.style.display = 'flex';
-        btn.disabled = false;
-        btn.textContent = '{{ block.settings.button_label }}';
-      }
-    })
-    .catch(function() {
-      msg.style.display = 'block';
-      msg.style.color = '#dc2626';
-      msg.textContent = '{{ block.settings.error_message }}';
-      form.style.display = 'flex';
-      btn.disabled = false;
-      btn.textContent = '{{ block.settings.button_label }}';
+      .catch(function () {
+        onError('Something went wrong. Please try again.');
+        submitBtn.disabled = false;
+        submitText.textContent = 'Notify Me';
+        if (spinner) spinner.style.display = 'none';
+      });
+  }
+
+  function onSuccess() {
+    // Show success in modal
+    var form = modal.querySelector('#bis-form');
+    var success = modal.querySelector('#bis-modal-success');
+    if (form) form.style.display = 'none';
+    if (success) success.style.display = 'block';
+
+    // Persist in localStorage
+    markNotified();
+
+    // Hide the product-form and show our notified button
+    injectedForms.forEach(function (ref) {
+      ref.form.style.display = 'none';
+      ref.btn.style.display = '';
+      setNotifiedState(ref.btn);
     });
-  });
+
+    // Auto-close after 3.5s
+    setTimeout(closeModal, 3500);
+  }
+
+  function onError(msg) {
+    showError(msg);
+  }
+
+  /* ── Boot ── */
+  function boot() {
+    injectForms();
+
+    // Re-run for themes that lazy-render product-form
+    new MutationObserver(function () {
+      injectForms();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState !== 'loading') {
+    boot();
+  } else {
+    document.addEventListener('DOMContentLoaded', boot);
+  }
 })();
 </script>
-{%- endif -%}
+
+{% endif %}
 
 {% schema %}
 {
   "name": "Back in Stock",
-  "target": "section",
-  "settings": [
-    { "type": "text", "id": "heading", "label": "Heading", "default": "Out of stock" },
-    { "type": "text", "id": "subheading", "label": "Subheading", "default": "Enter your email and we'll notify you when it's available again." },
-    { "type": "text", "id": "email_placeholder", "label": "Email placeholder", "default": "your@email.com" },
-    { "type": "text", "id": "button_label", "label": "Button label", "default": "Notify Me" },
-    { "type": "text", "id": "loading_label", "label": "Loading label", "default": "Subscribing…" },
-    { "type": "text", "id": "success_message", "label": "Success message", "default": "You're on the list! We'll email you when this is back." },
-    { "type": "text", "id": "error_message", "label": "Error message", "default": "Something went wrong. Please try again." },
-    { "type": "color", "id": "button_color", "label": "Button color", "default": "#111827" },
-    { "type": "range", "id": "margin_top", "label": "Margin top", "min": 0, "max": 48, "step": 4, "unit": "px", "default": 16 },
-    { "type": "range", "id": "margin_bottom", "label": "Margin bottom", "min": 0, "max": 48, "step": 4, "unit": "px", "default": 8 }
-  ]
+  "target": "head"
 }
 {% endschema %}

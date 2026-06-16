@@ -54,14 +54,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   if (isRateLimited(ip)) return json({ error: "Too many requests. Please try again later." }, 429);
 
-  let body: { shop?: string; productId?: string; productTitle?: string; email?: string };
+  let body: { shop?: string; productId?: string; productTitle?: string; email?: string; firstName?: string; lastName?: string };
   try {
     body = await request.json();
   } catch {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  const { shop, productId, productTitle, email } = body;
+  const { shop, productId, productTitle, email, firstName, lastName } = body;
 
   if (!shop || !productId || !email) {
     return json({ error: "Missing required fields: shop, productId, email" }, 400);
@@ -77,11 +77,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ error: "Shop not found" }, 404);
   }
 
+  const trimName = (v?: string) => v?.trim().slice(0, 100) || null;
+
   try {
     await prisma.backInStockSubscriber.upsert({
       where: { shop_productId_email: { shop, productId: BigInt(productId), email } },
-      update: { subscribedAt: new Date(), notifiedAt: null },
-      create: { shop, productId: BigInt(productId), productTitle: productTitle ?? null, email },
+      update: { subscribedAt: new Date(), notifiedAt: null, firstName: trimName(firstName), lastName: trimName(lastName) },
+      create: { shop, productId: BigInt(productId), productTitle: productTitle ?? null, email, firstName: trimName(firstName), lastName: trimName(lastName) },
     });
     return json({ success: true, message: "You'll be notified when this product is back in stock." });
   } catch {

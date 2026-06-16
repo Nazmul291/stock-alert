@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, Form, useNavigation, useFetcher } from "react-router";
+import { useLoaderData, Form, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -29,6 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackNotifications: settings.slackNotifications,
           notificationEmail: settings.notificationEmail ?? "",
           slackWebhookUrl: settings.slackWebhookUrl ?? "",
+          whatsappNotifications: settings.whatsappNotifications,
+          whatsappPhone: settings.whatsappPhone ?? "",
+          whatsappPhoneNumberId: settings.whatsappPhoneNumberId ?? "",
+          whatsappAccessToken: settings.whatsappAccessToken ?? "",
           digestEnabled: settings.digestEnabled,
           digestFrequency: settings.digestFrequency,
           brandLogoUrl: settings.brandLogoUrl ?? "",
@@ -48,6 +52,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackNotifications: false,
           notificationEmail: "",
           slackWebhookUrl: "",
+          whatsappNotifications: false,
+          whatsappPhone: "",
+          whatsappPhoneNumberId: "",
+          whatsappAccessToken: "",
           digestEnabled: true,
           digestFrequency: "weekly",
           brandLogoUrl: "",
@@ -91,19 +99,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         slackNotifications: settings.slackNotifications,
         notificationEmail: settings.notificationEmail,
         slackWebhookUrl: settings.slackWebhookUrl,
+        whatsappNotifications: settings.whatsappNotifications,
+        whatsappPhone: settings.whatsappPhone,
+        whatsappPhoneNumberId: settings.whatsappPhoneNumberId,
+        whatsappAccessToken: settings.whatsappAccessToken,
       },
     );
     return { intent: "test_notification", testResult };
   }
 
-  // Save settings — validate first
   const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
   const plan = storeSession?.plan ?? "basic";
+
+  const bool = (key: string) => form.get(key) === "true";
 
   const rawThreshold = parseInt(form.get("lowStockThreshold") as string);
   const rawEmail = ((form.get("notificationEmail") as string) ?? "").trim();
   const rawSlack = ((form.get("slackWebhookUrl") as string) ?? "").trim();
-  const emailEnabled = form.get("emailNotifications") === "true";
+  const rawWhatsappPhone = ((form.get("whatsappPhone") as string) ?? "").trim();
+  const rawWhatsappPhoneNumberId = ((form.get("whatsappPhoneNumberId") as string) ?? "").trim();
+  const rawWhatsappAccessToken = ((form.get("whatsappAccessToken") as string) ?? "").trim();
+  const emailEnabled = bool("emailNotifications");
+  const whatsappEnabled = bool("whatsappNotifications");
 
   const errors: Record<string, string> = {};
 
@@ -118,7 +135,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (bad) {
       errors.notificationEmail = `"${bad}" is not a valid email address.`;
     } else if (plan !== "pro" && addresses.length > 1) {
-      errors.notificationEmail = "Multiple recipients require the Professional plan. Upgrade to Pro or use a single address.";
+      errors.notificationEmail = "Multiple recipients require the Professional plan.";
     }
   }
 
@@ -134,14 +151,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
   const data = {
-    autoHideEnabled: form.get("autoHideEnabled") === "true",
-    autoRepublishEnabled: form.get("autoRepublishEnabled") === "true",
+    autoHideEnabled: bool("autoHideEnabled"),
+    autoRepublishEnabled: bool("autoRepublishEnabled"),
     lowStockThreshold: rawThreshold,
     emailNotifications: emailEnabled,
-    slackNotifications: form.get("slackNotifications") === "true",
+    slackNotifications: bool("slackNotifications"),
     notificationEmail: rawEmail || null,
     slackWebhookUrl: rawSlack || null,
-    digestEnabled: form.get("digestEnabled") === "true",
+    whatsappNotifications: whatsappEnabled,
+    whatsappPhone: rawWhatsappPhone || null,
+    whatsappPhoneNumberId: rawWhatsappPhoneNumberId || null,
+    whatsappAccessToken: rawWhatsappAccessToken || null,
+    digestEnabled: bool("digestEnabled"),
     digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
     monitoringFilter: (["all", "collection", "tags"] as const).includes(form.get("monitoringFilter") as any) ? form.get("monitoringFilter") as string : "all",
@@ -185,17 +206,53 @@ type TestResult = {
   error?: string;
   email?: { sent: boolean; to?: string; error?: string };
   slack?: { sent: boolean; error?: string };
+  whatsapp?: { sent: boolean; error?: string };
 };
 
 const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
 
+const inputStyle = (hasError = false): React.CSSProperties => ({
+  width: "100%",
+  border: `1.5px solid ${hasError ? "#fca5a5" : "#d1d5db"}`,
+  borderRadius: 8,
+  padding: "9px 12px",
+  fontSize: 14,
+  color: "#111827",
+  outline: "none",
+  boxSizing: "border-box",
+  background: "#fff",
+  transition: "border-color 0.15s",
+});
+
+const fieldLabel: React.CSSProperties = {
+  display: "block",
+  fontWeight: 600,
+  fontSize: 13,
+  color: "#374151",
+  marginBottom: 5,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+};
+
+const helpText: React.CSSProperties = {
+  fontSize: 12,
+  color: "#6b7280",
+  marginTop: 5,
+  lineHeight: 1.5,
+};
+
 export default function SettingsPage() {
   const { plan, storeEmail, settings } = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
-  const nav = useNavigation();
-  const saving = nav.state === "submitting";
+  const saveFetcher = useFetcher<typeof action>();
+  const saving = saveFetcher.state !== "idle";
+  const [autoHideEnabled, setAutoHideEnabled] = useState(settings.autoHideEnabled);
+  const [autoRepublishEnabled, setAutoRepublishEnabled] = useState(settings.autoRepublishEnabled);
   const [emailEnabled, setEmailEnabled] = useState(settings.emailNotifications);
   const [slackEnabled, setSlackEnabled] = useState(settings.slackNotifications);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(settings.whatsappNotifications);
+  const [whatsappPhone, setWhatsappPhone] = useState(settings.whatsappPhone);
+  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState(settings.whatsappPhoneNumberId);
+  const [whatsappAccessToken, setWhatsappAccessToken] = useState(settings.whatsappAccessToken);
   const [digestEnabled, setDigestEnabled] = useState(settings.digestEnabled);
   const [digestFrequency, setDigestFrequency] = useState(settings.digestFrequency);
   const [brandLogoUrl, setBrandLogoUrl] = useState(settings.brandLogoUrl);
@@ -208,670 +265,1059 @@ export default function SettingsPage() {
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
+  function handleDiscard() {
+    setAutoHideEnabled(settings.autoHideEnabled);
+    setAutoRepublishEnabled(settings.autoRepublishEnabled);
+    setEmailEnabled(settings.emailNotifications);
+    setSlackEnabled(settings.slackNotifications);
+    setWhatsappEnabled(settings.whatsappNotifications);
+    setWhatsappPhone(settings.whatsappPhone);
+    setWhatsappPhoneNumberId(settings.whatsappPhoneNumberId);
+    setWhatsappAccessToken(settings.whatsappAccessToken);
+    setDigestEnabled(settings.digestEnabled);
+    setDigestFrequency(settings.digestFrequency);
+    setBrandLogoUrl(settings.brandLogoUrl);
+    setBrandColor(settings.brandColor);
+    setBrandSenderName(settings.brandSenderName);
+    setOutboundWebhookUrl(settings.outboundWebhookUrl);
+    setMonitoringFilter(settings.monitoringFilter);
+    setMonitoringCollectionId(settings.monitoringCollectionId);
+    setMonitoringTags(settings.monitoringTags);
+    formRef.current?.reset();
+    setIsDirty(false);
+  }
+
   const testFetcher = useFetcher<typeof action>();
   const testing = testFetcher.state === "submitting";
-  const testData = testFetcher.data && "intent" in testFetcher.data && testFetcher.data.intent === "test_notification"
-    ? (testFetcher.data as { intent: string; testResult: TestResult }).testResult
-    : null;
+  const testData =
+    testFetcher.data && "intent" in testFetcher.data && testFetcher.data.intent === "test_notification"
+      ? (testFetcher.data as { intent: string; testResult: TestResult }).testResult
+      : null;
 
-  const saveErrors = actionData && "intent" in actionData && actionData.intent === "save" && !(actionData as any).success
-    ? (actionData as any).errors as Record<string, string>
-    : null;
+  const [toastResult, setToastResult] = useState<TestResult | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (actionData && "intent" in actionData && actionData.intent === "save" && (actionData as any).success) {
-      setIsDirty(false);
+    if (testData) {
+      setToastResult(testData);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToastResult(null), 5000);
     }
-  }, [actionData]);
+  }, [testData]);
 
-  const noChannelsConfigured = !emailEnabled && !(slackEnabled && plan === "pro");
-  const effectiveEmail = settings.notificationEmail || storeEmail;
+  const saveData = saveFetcher.data as any;
+
+  const saveErrors =
+    saveData && saveData.intent === "save" && !saveData.success
+      ? (saveData.errors as Record<string, string>)
+      : null;
+
+  const saveSuccess = saveData && saveData.intent === "save" && saveData.success;
+
+  useEffect(() => {
+    const data = saveFetcher.data as any;
+    if (data?.intent === "save" && data?.success) setIsDirty(false);
+  }, [saveFetcher.data]);
+
+  function handleSave() {
+    const fd = new FormData(formRef.current ?? undefined);
+    // Set all state-controlled values explicitly — do not rely on DOM serialization
+    fd.set("autoHideEnabled", autoHideEnabled ? "true" : "false");
+    fd.set("autoRepublishEnabled", autoRepublishEnabled ? "true" : "false");
+    fd.set("emailNotifications", emailEnabled ? "true" : "false");
+    fd.set("slackNotifications", slackEnabled ? "true" : "false");
+    fd.set("whatsappNotifications", whatsappEnabled ? "true" : "false");
+    fd.set("whatsappPhone", whatsappPhone);
+    fd.set("whatsappPhoneNumberId", whatsappPhoneNumberId);
+    fd.set("whatsappAccessToken", whatsappAccessToken);
+    fd.set("digestEnabled", digestEnabled ? "true" : "false");
+    fd.set("digestFrequency", digestFrequency);
+    fd.set("monitoringFilter", monitoringFilter);
+    fd.set("monitoringCollectionId", monitoringCollectionId);
+    fd.set("monitoringTags", monitoringTags);
+    fd.set("brandLogoUrl", brandLogoUrl);
+    fd.set("brandColor", brandColor || "#4f46e5");
+    fd.set("brandSenderName", brandSenderName);
+    fd.set("outboundWebhookUrl", outboundWebhookUrl);
+    saveFetcher.submit(fd, { method: "post" });
+  }
+
+  const isPro = plan === "pro";
+  const noChannelsConfigured = !emailEnabled && !(slackEnabled && isPro);
+
+  function markDirty() {
+    setIsDirty(true);
+  }
 
   return (
     <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
-      <s-button
-        slot="primary-action"
-        disabled={!isDirty || saving}
-        onClick={() => formRef.current?.requestSubmit()}
-      >
-        {saving ? "Saving…" : "Save Settings"}
-      </s-button>
+      {/* Toast-style success */}
+      {isDirty && <div style={{ height: 57 }} />}
 
-      {actionData && "intent" in actionData && actionData.intent === "save" && (actionData as any).success && (
-        <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "10px 14px", marginBottom: 16, color: "#065f46" }}>
-          {(actionData as any).message}
+      {saveSuccess && (
+        <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 8, padding: "12px 16px", marginBottom: 16, color: "#065f46", fontSize: 14, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 18 }}>✓</span>
+          {saveData?.message}
         </div>
       )}
 
       {saveErrors && Object.keys(saveErrors).length > 0 && (
-        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 16, color: "#991b1b", fontSize: 14 }}>
-          Please fix the following errors before saving:
+        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, padding: "12px 16px", marginBottom: 16, color: "#991b1b", fontSize: 14 }}>
+          <strong>Please fix the following before saving:</strong>
           <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
             {Object.values(saveErrors).map((msg, i) => <li key={i}>{msg}</li>)}
           </ul>
         </div>
       )}
 
-      {/* Plan summary */}
       <PlanCard plan={plan} />
 
-      <Form method="post" ref={formRef} onChange={() => setIsDirty(true)}>
+      <Form method="post" ref={formRef} onChange={markDirty}>
+
+        {/* ── Inventory Settings ── */}
         <s-section heading="Inventory Settings">
-          {plan !== "pro" && (
-            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
-              Some features require the Professional plan.{" "}
-              <s-link href="/app/billing">Upgrade to unlock all features →</s-link>
+          {!isPro && (
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span>Some features require the Professional plan.</span>
+              <s-link href="/app/billing">Upgrade to Pro →</s-link>
             </div>
           )}
 
-          <ToggleField
-            label="Auto-hide sold-out products"
-            name="autoHideEnabled"
-            checked={settings.autoHideEnabled}
-            helpText="Products with zero inventory are automatically unpublished from your store."
-          />
-
-          <ToggleField
-            label="Auto-republish when restocked"
-            name="autoRepublishEnabled"
-            checked={settings.autoRepublishEnabled && plan === "pro"}
-            disabled={plan !== "pro"}
-            helpText={plan !== "pro" ? "Requires Professional plan." : "Products are automatically republished when inventory is added."}
-          />
-
-          <div style={{ marginTop: 12 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-              Low stock threshold
-            </label>
-            <select
-              name="lowStockThreshold"
-              defaultValue={settings.lowStockThreshold}
-              aria-label="Low stock threshold"
-              style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            >
-              {THRESHOLD_OPTIONS.map((v) => (
-                <option key={v} value={v}>{v} {v === 1 ? "item" : "items"}</option>
-              ))}
-            </select>
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Alert when inventory falls below this amount.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            <Toggle
+              label="Auto-hide sold-out products"
+              description="Products with zero inventory are automatically unpublished from your store."
+              checked={autoHideEnabled}
+              onChange={(v) => { setAutoHideEnabled(v); markDirty(); }}
+            />
+            <Toggle
+              label="Auto-republish when restocked"
+              description={!isPro ? "Requires Professional plan." : "Products are automatically republished when inventory is restored."}
+              checked={autoRepublishEnabled && isPro}
+              disabled={!isPro}
+              onChange={(v) => { setAutoRepublishEnabled(v); markDirty(); }}
+            />
           </div>
 
-          <div style={{ marginTop: 12 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-              Supplier lead time
-            </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="number"
-                name="supplierLeadTimeDays"
-                defaultValue={settings.supplierLeadTimeDays}
-                min={1}
-                max={90}
-                style={{ width: 72, border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-              />
-              <span style={{ fontSize: 14, color: "#374151" }}>days</span>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
+            <div>
+              <label style={fieldLabel}>Low stock threshold</label>
+              <select
+                name="lowStockThreshold"
+                defaultValue={settings.lowStockThreshold}
+                style={{ ...inputStyle(!!saveErrors?.lowStockThreshold), width: "auto", minWidth: 120 }}
+              >
+                {THRESHOLD_OPTIONS.map((v) => (
+                  <option key={v} value={v}>{v} {v === 1 ? "item" : "items"}</option>
+                ))}
+              </select>
+              {saveErrors?.lowStockThreshold
+                ? <p style={{ ...helpText, color: "#dc2626" }}>{saveErrors.lowStockThreshold}</p>
+                : <p style={helpText}>Alert when inventory falls below this amount.</p>}
             </div>
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-              How long it takes your supplier to deliver. Used to calculate "Reorder By" dates on the Products page.
-            </p>
+
+            <div>
+              <label style={fieldLabel}>Supplier lead time</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="number"
+                  name="supplierLeadTimeDays"
+                  defaultValue={settings.supplierLeadTimeDays}
+                  min={1}
+                  max={90}
+                  style={{ ...inputStyle(), width: 80 }}
+                />
+                <span style={{ fontSize: 14, color: "#374151" }}>days</span>
+              </div>
+              <p style={helpText}>Used to calculate "Reorder By" dates on the Products page.</p>
+            </div>
           </div>
         </s-section>
 
+        {/* ── Notifications ── */}
         <div style={{ marginTop: 24 }}>
           <s-section heading="Notifications">
-            <ToggleField
-              label="Email notifications"
-              name="emailNotifications"
-              checked={emailEnabled}
-              onChange={setEmailEnabled}
-            />
+            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
+              Choose how you receive stock alerts. At least one channel must be enabled to receive notifications.
+            </p>
 
-            {emailEnabled && (
-              <div style={{ marginTop: 8 }}>
-                <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-                  Notification email{plan === "pro" ? " (multiple allowed)" : ""}
+            {/* Email channel card */}
+            <ChannelCard
+              icon="✉️"
+              title="Email"
+              badge={null}
+              enabled={emailEnabled}
+              onToggle={(v) => { setEmailEnabled(v); markDirty(); }}
+            >
+              <div>
+                <label style={fieldLabel}>
+                  Notification email{isPro ? " — multiple allowed" : ""}
                 </label>
                 <input
                   type="text"
                   name="notificationEmail"
                   defaultValue={settings.notificationEmail}
-                  placeholder={plan === "pro" ? "alerts@example.com, team@example.com" : "alerts@example.com"}
-                  style={{
-                    width: "100%", border: `1px solid ${saveErrors?.notificationEmail ? "#fca5a5" : "#d1d5db"}`,
-                    borderRadius: 6, padding: "6px 10px", fontSize: 14,
-                  }}
+                  placeholder={isPro ? "alerts@example.com, team@example.com" : "alerts@example.com"}
+                  style={inputStyle(!!saveErrors?.notificationEmail)}
                 />
-                {saveErrors?.notificationEmail ? (
-                  <p style={{ fontSize: 12, color: "#dc2626", marginTop: 4 }}>{saveErrors.notificationEmail}</p>
-                ) : (
-                  <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                    {plan === "pro"
-                      ? "Separate multiple addresses with commas."
-                      : effectiveEmail
-                      ? `Leave empty to use store owner email (${storeEmail}).`
-                      : "Leave empty to use the store owner email."}
-                  </p>
-                )}
+                {saveErrors?.notificationEmail
+                  ? <p style={{ ...helpText, color: "#dc2626" }}>{saveErrors.notificationEmail}</p>
+                  : <p style={helpText}>
+                      {isPro
+                        ? "Separate multiple addresses with commas."
+                        : storeEmail
+                        ? `Leave empty to use store email (${storeEmail}).`
+                        : "Leave empty to use the store owner email."}
+                    </p>}
               </div>
-            )}
+            </ChannelCard>
 
-            <ToggleField
-              label="Slack notifications"
-              name="slackNotifications"
-              checked={slackEnabled && plan === "pro"}
-              disabled={plan !== "pro"}
-              helpText={plan !== "pro" ? "Requires Professional plan." : undefined}
-              onChange={plan === "pro" ? setSlackEnabled : undefined}
-            />
-
-            {slackEnabled && plan === "pro" && (
-              <div style={{ marginTop: 8 }}>
+            {/* Slack channel card */}
+            <ChannelCard
+              icon="💬"
+              title="Slack"
+              badge={!isPro ? "Pro" : null}
+              enabled={slackEnabled && isPro}
+              onToggle={isPro ? (v) => { setSlackEnabled(v); markDirty(); } : undefined}
+              disabled={!isPro}
+            >
+              <div>
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
-                  <p style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 10 }}>How to create a Slack webhook</p>
-                  <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: "1.8" }}>
-                    <li>Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>api.slack.com/apps</a> and click <strong>Create New App</strong> → <strong>From scratch</strong>.</li>
-                    <li>Name your app (e.g. <em>Stock Alert</em>), select your workspace, then click <strong>Create App</strong>.</li>
-                    <li>Under <strong>Add features and functionality</strong>, click <strong>Incoming Webhooks</strong>.</li>
-                    <li>Toggle <strong>Activate Incoming Webhooks</strong> to <strong>On</strong>.</li>
-                    <li>Scroll down and click <strong>Add New Webhook to Workspace</strong>, then choose the channel to post alerts to.</li>
-                    <li>Click <strong>Allow</strong> — Slack generates a webhook URL starting with <code style={{ background: "#e5e7eb", borderRadius: 3, padding: "1px 4px", fontSize: 12 }}>https://hooks.slack.com/services/…</code></li>
-                    <li>Copy that URL and paste it below.</li>
+                  <p style={{ fontWeight: 600, fontSize: 13, color: "#374151", margin: "0 0 8px" }}>How to get a Slack webhook URL</p>
+                  <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: 1.8 }}>
+                    <li>Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>api.slack.com/apps</a> → <strong>Create New App → From scratch</strong></li>
+                    <li>Under <strong>Incoming Webhooks</strong>, toggle it <strong>On</strong></li>
+                    <li>Click <strong>Add New Webhook to Workspace</strong> and choose a channel</li>
+                    <li>Copy the generated URL and paste it below</li>
                   </ol>
                 </div>
-                <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Slack webhook URL</label>
+                <label style={fieldLabel}>Slack webhook URL</label>
                 <input
                   type="text"
                   name="slackWebhookUrl"
                   defaultValue={settings.slackWebhookUrl}
                   placeholder="https://hooks.slack.com/services/..."
-                  style={{
-                    width: "100%", border: `1px solid ${saveErrors?.slackWebhookUrl ? "#fca5a5" : "#d1d5db"}`,
-                    borderRadius: 6, padding: "6px 10px", fontSize: 14,
-                  }}
+                  disabled={!isPro}
+                  style={inputStyle(!!saveErrors?.slackWebhookUrl)}
                 />
-                {saveErrors?.slackWebhookUrl ? (
-                  <p style={{ fontSize: 12, color: "#dc2626", marginTop: 4 }}>{saveErrors.slackWebhookUrl}</p>
+                {saveErrors?.slackWebhookUrl
+                  ? <p style={{ ...helpText, color: "#dc2626" }}>{saveErrors.slackWebhookUrl}</p>
+                  : <p style={helpText}>Paste the webhook URL from your Slack app settings.</p>}
+              </div>
+            </ChannelCard>
+
+            {/* WhatsApp channel card */}
+            <ChannelCard
+              icon="💬"
+              title="WhatsApp"
+              badge="Coming Soon"
+              badgeColor="#6b7280"
+              enabled={false}
+              disabled={true}
+              onToggle={undefined}
+            >
+              <div>
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
+                  <p style={{ fontWeight: 600, fontSize: 13, color: "#166534", margin: "0 0 8px" }}>How to set up WhatsApp Business API</p>
+                  <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: 1.8 }}>
+                    <li>Go to <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>developers.facebook.com</a> → create an app</li>
+                    <li>Add the <strong>WhatsApp</strong> product to your app</li>
+                    <li>Copy your <strong>Phone Number ID</strong> and generate a <strong>permanent access token</strong></li>
+                    <li>Enter the number you want alerts sent to below (include country code, e.g. 14155552671)</li>
+                  </ol>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={fieldLabel}>Phone Number ID</label>
+                    <input
+                      type="text"
+                      value={whatsappPhoneNumberId}
+                      onChange={(e) => { setWhatsappPhoneNumberId(e.target.value); markDirty(); }}
+                      placeholder="123456789012345"
+                      style={inputStyle()}
+                    />
+                    <p style={helpText}>From Meta Developer Console → WhatsApp → API Setup.</p>
+                  </div>
+                  <div>
+                    <label style={fieldLabel}>Recipient phone</label>
+                    <input
+                      type="text"
+                      value={whatsappPhone}
+                      onChange={(e) => { setWhatsappPhone(e.target.value); markDirty(); }}
+                      placeholder="14155552671"
+                      style={inputStyle()}
+                    />
+                    <p style={helpText}>Your WhatsApp number with country code, no +.</p>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={fieldLabel}>Access token</label>
+                  <input
+                    type="password"
+                    value={whatsappAccessToken}
+                    onChange={(e) => { setWhatsappAccessToken(e.target.value); markDirty(); }}
+                    placeholder="EAAxxxxx…"
+                    style={inputStyle()}
+                  />
+                  <p style={helpText}>Permanent token from Meta System User or Developer Console.</p>
+                </div>
+              </div>
+            </ChannelCard>
+
+            {/* Test notification — plain button to avoid nested-form issue */}
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                disabled={testing || noChannelsConfigured || isDirty}
+                onClick={() => testFetcher.submit({ intent: "test_notification" }, { method: "post" })}
+                title={
+                  isDirty ? "Save your settings before testing"
+                  : noChannelsConfigured ? "Enable at least one notification channel"
+                  : undefined
+                }
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: 8,
+                  border: "1.5px solid #d1d5db",
+                  background: "#fff",
+                  color: noChannelsConfigured || isDirty ? "#9ca3af" : "#374151",
+                  cursor: testing || noChannelsConfigured || isDirty ? "not-allowed" : "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {testing ? "Sending…" : "Send Test Notification"}
+              </button>
+              {isDirty && <span style={{ fontSize: 12, color: "#9ca3af" }}>Save first to test.</span>}
+            </div>
+          </s-section>
+        </div>
+
+        {/* ── Digest Emails ── */}
+        <div style={{ marginTop: 24 }}>
+          <s-section heading="Digest Emails">
+            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
+              A periodic summary of at-risk and out-of-stock products sent to your notification email.{" "}
+              {isPro ? "Pro plan: choose daily or weekly." : "Basic plan: weekly every Monday."}
+            </p>
+
+            <Toggle
+              label="Enable digest emails"
+              description="Only sent when at-risk products exist — no empty reports."
+              checked={digestEnabled}
+              onChange={(v) => { setDigestEnabled(v); markDirty(); }}
+            />
+
+            {digestEnabled && (
+              <div style={{ marginTop: 16, marginLeft: 0 }}>
+                <label style={fieldLabel}>Frequency</label>
+                {isPro ? (
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {(["daily", "weekly"] as const).map((freq) => (
+                      <label
+                        key={freq}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                          padding: "10px 18px", borderRadius: 8,
+                          border: `1.5px solid ${digestFrequency === freq ? "#4f46e5" : "#e5e7eb"}`,
+                          background: digestFrequency === freq ? "#eef2ff" : "#fff",
+                          fontSize: 14, fontWeight: 500, color: digestFrequency === freq ? "#4338ca" : "#374151",
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="digestFrequency"
+                          value={freq}
+                          checked={digestFrequency === freq}
+                          onChange={() => { setDigestFrequency(freq); markDirty(); }}
+                          style={{ display: "none" }}
+                        />
+                        {freq === "daily" ? "Daily" : "Weekly"}
+                        {freq === "weekly" && <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 4 }}>every Monday</span>}
+                      </label>
+                    ))}
+                  </div>
                 ) : (
-                  <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Paste the webhook URL generated from your Slack app.</p>
+                  <>
+                    <input type="hidden" name="digestFrequency" value="weekly" />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#f9fafb", width: "fit-content" }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>Weekly</span>
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>every Monday · Upgrade to Pro for daily</span>
+                    </div>
+                  </>
                 )}
+                <p style={helpText}>Digest is sent at 8:00 AM UTC.</p>
               </div>
             )}
+          </s-section>
+        </div>
 
-            {/* Test notification */}
-            <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #f3f4f6" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <testFetcher.Form method="post">
-                  <input type="hidden" name="intent" value="test_notification" />
-                  <button
-                    type="submit"
-                    disabled={testing || noChannelsConfigured || isDirty}
-                    title={isDirty ? "Save your settings before testing" : noChannelsConfigured ? "Enable at least one notification channel" : undefined}
-                    style={{
-                      padding: "7px 16px",
-                      borderRadius: 6,
-                      border: "1px solid #d1d5db",
-                      background: testing ? "#f3f4f6" : "#fff",
-                      color: noChannelsConfigured || isDirty ? "#9ca3af" : "#374151",
-                      cursor: testing || noChannelsConfigured || isDirty ? "not-allowed" : "pointer",
-                      fontSize: 13,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {testing ? "Sending…" : "Send Test Notification"}
-                  </button>
-                </testFetcher.Form>
-                {isDirty && (
-                  <span style={{ fontSize: 12, color: "#9ca3af" }}>Save settings first to test.</span>
-                )}
+        {/* ── Email Branding ── */}
+        <div style={{ marginTop: 24 }}>
+          <s-section heading="Email Branding">
+            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
+              Customize how outgoing alert emails look. Applied to all notifications.{" "}
+              {!isPro && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
+            </p>
+
+            <div style={{ opacity: isPro ? 1 : 0.45, pointerEvents: isPro ? "auto" : "none" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                <div>
+                  <label style={fieldLabel}>Sender name</label>
+                  <input
+                    type="text"
+                    name="brandSenderName"
+                    value={brandSenderName}
+                    onChange={(e) => { setBrandSenderName(e.target.value); markDirty(); }}
+                    placeholder="Stock Alert"
+                    disabled={!isPro}
+                    style={inputStyle()}
+                  />
+                  <p style={helpText}>Shown as "From" name in email clients.</p>
+                </div>
+                <div>
+                  <label style={fieldLabel}>Brand color</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <input
+                      type="color"
+                      value={brandColor || "#4f46e5"}
+                      onChange={(e) => { setBrandColor(e.target.value); markDirty(); }}
+                      disabled={!isPro}
+                      style={{ width: 40, height: 38, border: "1.5px solid #d1d5db", borderRadius: 8, cursor: isPro ? "pointer" : "not-allowed", padding: 2, flexShrink: 0 }}
+                    />
+                    <input
+                      type="text"
+                      name="brandColor"
+                      value={brandColor || "#4f46e5"}
+                      onChange={(e) => { setBrandColor(e.target.value); markDirty(); }}
+                      placeholder="#4f46e5"
+                      disabled={!isPro}
+                      style={{ ...inputStyle(), width: 110, fontFamily: "monospace" }}
+                    />
+                    <div style={{ width: 38, height: 38, borderRadius: 8, background: brandColor || "#4f46e5", border: "1px solid #e5e7eb", flexShrink: 0 }} />
+                  </div>
+                  <p style={helpText}>Used for email header and CTA button color.</p>
+                </div>
               </div>
 
-              {testData && (
-                <TestResultBanner result={testData} />
+              <LogoUrlField
+                value={brandLogoUrl}
+                brandColor={brandColor}
+                disabled={!isPro}
+                onChange={(v) => { setBrandLogoUrl(v); markDirty(); }}
+              />
+            </div>
+          </s-section>
+        </div>
+
+        {/* ── Outbound Webhook ── */}
+        <div style={{ marginTop: 24 }}>
+          <s-section heading="Outbound Webhook">
+            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
+              Fire a JSON POST to any URL on every stock event. Connect Zapier, Make, or your own ERP.{" "}
+              {!isPro && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
+            </p>
+
+            <div style={{ opacity: isPro ? 1 : 0.45, pointerEvents: isPro ? "auto" : "none" }}>
+              <label style={fieldLabel}>Webhook URL</label>
+              <input
+                type="url"
+                name="outboundWebhookUrl"
+                value={outboundWebhookUrl}
+                onChange={(e) => { setOutboundWebhookUrl(e.target.value); markDirty(); }}
+                placeholder="https://hooks.zapier.com/hooks/catch/..."
+                disabled={!isPro}
+                style={inputStyle()}
+              />
+              <p style={helpText}>Stock Alert will POST a JSON payload to this URL whenever an alert is triggered.</p>
+
+              {isPro && outboundWebhookUrl && (
+                <div style={{ marginTop: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", margin: "0 0 6px" }}>Example payload</p>
+                  <pre style={{ fontSize: 11, color: "#4b5563", margin: 0, overflow: "auto" }}>{JSON.stringify({
+                    event: "low_stock",
+                    shop: "your-store.myshopify.com",
+                    productId: "1234567890",
+                    productTitle: "Blue T-Shirt",
+                    sku: "BTS-001",
+                    currentQuantity: 3,
+                    threshold: 5,
+                    timestamp: new Date().toISOString(),
+                  }, null, 2)}</pre>
+                </div>
               )}
             </div>
           </s-section>
         </div>
 
-        <DigestSection
-          plan={plan}
-          digestEnabled={digestEnabled}
-          digestFrequency={digestFrequency}
-          onDigestEnabledChange={setDigestEnabled}
-          onDigestFrequencyChange={setDigestFrequency}
-        />
+        {/* ── Monitoring Scope ── */}
+        <div style={{ marginTop: 24 }}>
+          <s-section heading="Monitoring Scope">
+            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
+              Choose which products Stock Alert tracks. Changes take effect on the next sync.
+            </p>
 
-        <BrandingSection
-          plan={plan}
-          brandLogoUrl={brandLogoUrl}
-          brandColor={brandColor}
-          brandSenderName={brandSenderName}
-          onLogoUrlChange={setBrandLogoUrl}
-          onColorChange={setBrandColor}
-          onSenderNameChange={setBrandSenderName}
-        />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {[
+                { value: "all",        label: "All products",        desc: "Monitor every product in your store." },
+                { value: "collection", label: "Specific collection", desc: "Only products in a chosen collection." },
+                { value: "tags",       label: "Product tags",        desc: "Only products with specific tags." },
+              ].map((opt) => (
+                <label
+                  key={opt.value}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12, cursor: "pointer",
+                    padding: "12px 14px", borderRadius: 8,
+                    border: `1.5px solid ${monitoringFilter === opt.value ? "#4f46e5" : "#e5e7eb"}`,
+                    background: monitoringFilter === opt.value ? "#eef2ff" : "#fff",
+                    transition: "border-color 0.15s, background 0.15s",
+                  }}
+                >
+                  <div style={{
+                    width: 18, height: 18, borderRadius: "50%",
+                    border: `2px solid ${monitoringFilter === opt.value ? "#4f46e5" : "#d1d5db"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  }}>
+                    {monitoringFilter === opt.value && (
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#4f46e5" }} />
+                    )}
+                  </div>
+                  <input
+                    type="radio"
+                    name="_monitoringFilterRadio"
+                    value={opt.value}
+                    checked={monitoringFilter === opt.value}
+                    onChange={() => { setMonitoringFilter(opt.value); markDirty(); }}
+                    style={{ display: "none" }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: monitoringFilter === opt.value ? "#4338ca" : "#111827" }}>{opt.label}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>{opt.desc}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
 
-        <OutboundWebhookSection
-          plan={plan}
-          url={outboundWebhookUrl}
-          onUrlChange={setOutboundWebhookUrl}
-        />
+            {monitoringFilter === "collection" && (
+              <div>
+                <label style={fieldLabel}>Collection ID</label>
+                <input
+                  type="text"
+                  name="monitoringCollectionId"
+                  value={monitoringCollectionId}
+                  onChange={(e) => { setMonitoringCollectionId(e.target.value); markDirty(); }}
+                  placeholder="e.g. 123456789"
+                  style={inputStyle()}
+                />
+                <p style={helpText}>Find the ID in your Shopify admin URL: <code>/collections/[ID]</code></p>
+              </div>
+            )}
 
-        <MonitoringScopeSection
-          filter={monitoringFilter}
-          collectionId={monitoringCollectionId}
-          tags={monitoringTags}
-          onFilterChange={setMonitoringFilter}
-          onCollectionIdChange={setMonitoringCollectionId}
-          onTagsChange={setMonitoringTags}
-        />
+            {monitoringFilter === "tags" && (
+              <div>
+                <label style={fieldLabel}>Tags (comma-separated)</label>
+                <input
+                  type="text"
+                  name="monitoringTags"
+                  value={monitoringTags}
+                  onChange={(e) => { setMonitoringTags(e.target.value); markDirty(); }}
+                  placeholder="e.g. featured, sale, new-arrivals"
+                  style={inputStyle()}
+                />
+                <p style={helpText}>Products with <em>any</em> of these tags will be monitored.</p>
+              </div>
+            )}
+
+            {monitoringFilter !== "all" && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, fontSize: 13, color: "#92400e" }}>
+                Save settings and run <strong>Sync Products</strong> on the Products page to apply the new scope.
+              </div>
+            )}
+          </s-section>
+        </div>
       </Form>
 
+      {/* ── Danger Zone ── */}
       <div style={{ marginTop: 24 }}>
         <s-section heading="Danger Zone">
-          <s-paragraph>
-            Reset all synced product data and alert history for this store. Your notification settings are kept. This cannot be undone.
-          </s-paragraph>
-          <Form method="post" onSubmit={(e) => { if (!confirm("Reset all product data? This cannot be undone.")) e.preventDefault(); }}>
-            <input type="hidden" name="intent" value="reset" />
-            <button
-              type="submit"
-              disabled={saving}
-              style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fee2e2", color: "#991b1b", cursor: "pointer", fontSize: 14, fontWeight: 600 }}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: "#111827", marginBottom: 2 }}>Reset all product data</div>
+              <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>
+                Clears synced inventory and alert history. Your notification settings are kept. This cannot be undone.
+              </p>
+            </div>
+            <Form
+              method="post"
+              onSubmit={(e) => { if (!confirm("Reset all product data? This cannot be undone.")) e.preventDefault(); }}
             >
-              {saving ? "Resetting…" : "Reset All Product Data"}
-            </button>
-          </Form>
+              <input type="hidden" name="intent" value="reset" />
+              <button
+                type="submit"
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #fca5a5", background: "#fee2e2", color: "#991b1b", cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}
+              >
+                Reset Product Data
+              </button>
+            </Form>
+          </div>
         </s-section>
       </div>
+
+      {/* ── Test notification toast ── */}
+      {toastResult && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 2000,
+          display: "flex", flexDirection: "column", gap: 8,
+          maxWidth: 360, width: "calc(100% - 48px)",
+        }}>
+          <TestResultBanner result={toastResult} onDismiss={() => setToastResult(null)} />
+        </div>
+      )}
+
+      {/* ── Sticky unsaved changes bar ── */}
+      {isDirty && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0,
+          background: "#fff", borderBottom: "1px solid #e5e7eb",
+          padding: "12px 24px",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+          zIndex: 1000, boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+        }}>
+          <span style={{ fontSize: 14, color: "#6b7280" }}>You have unsaved changes</span>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              type="button"
+              onClick={handleDiscard}
+              style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}
+            >
+              {saving ? "Saving…" : "Save Settings"}
+            </button>
+          </div>
+        </div>
+      )}
     </s-page>
   );
 }
 
-function DigestSection({
-  plan,
-  digestEnabled,
-  digestFrequency,
-  onDigestEnabledChange,
-  onDigestFrequencyChange,
+/* ── Toggle switch — purely visual, form value is a hidden input in the parent Form ── */
+function Toggle({
+  label, description, checked, disabled, onChange,
 }: {
-  plan: string;
-  digestEnabled: boolean;
-  digestFrequency: string;
-  onDigestEnabledChange: (val: boolean) => void;
-  onDigestFrequencyChange: (val: string) => void;
+  label: string;
+  description?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange?: (val: boolean) => void;
 }) {
-  const isPro = plan === "pro";
   return (
-    <div style={{ marginTop: 24 }}>
-      <s-section heading="Digest Emails">
-        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
-          A summary of at-risk products sent to your notification email.{" "}
-          {isPro ? "Pro plan: choose daily or weekly." : "Basic plan: weekly digest every Monday."}
-        </p>
-
-        <ToggleField
-          label="Enable digest emails"
-          name="digestEnabled"
-          checked={digestEnabled}
-          onChange={onDigestEnabledChange}
-        />
-
-        {digestEnabled && (
-          <div style={{ marginTop: 8, marginLeft: 24 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>
-              Frequency
-            </label>
-            {isPro ? (
-              <div style={{ display: "flex", gap: 12 }}>
-                {(["daily", "weekly"] as const).map((freq) => (
-                  <label
-                    key={freq}
-                    style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 14 }}
-                  >
-                    <input
-                      type="radio"
-                      name="digestFrequency"
-                      value={freq}
-                      checked={digestFrequency === freq}
-                      onChange={() => onDigestFrequencyChange(freq)}
-                    />
-                    {freq.charAt(0).toUpperCase() + freq.slice(1)}
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <>
-                <input type="hidden" name="digestFrequency" value="weekly" />
-                <span style={{ fontSize: 14, color: "#6b7280" }}>
-                  Weekly{" "}
-                  <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                    (every Monday — upgrade to Pro for daily)
-                  </span>
-                </span>
-              </>
-            )}
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-              Digest is sent at 8:00 AM UTC only when at-risk products exist.
-            </p>
-          </div>
-        )}
-      </s-section>
-    </div>
-  );
-}
-
-function MonitoringScopeSection({
-  filter, collectionId, tags, onFilterChange, onCollectionIdChange, onTagsChange,
-}: {
-  filter: string;
-  collectionId: string;
-  tags: string;
-  onFilterChange: (v: string) => void;
-  onCollectionIdChange: (v: string) => void;
-  onTagsChange: (v: string) => void;
-}) {
-  const options = [
-    { value: "all",        label: "All products",         desc: "Monitor every product in your store." },
-    { value: "collection", label: "Specific collection",  desc: "Only monitor products in a chosen collection." },
-    { value: "tags",       label: "Product tags",         desc: "Only monitor products that have specific tags." },
-  ];
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <s-section heading="Monitoring Scope">
-        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
-          Choose which products Stock Alert tracks. Changes take effect on the next sync.
-        </p>
-
-        <input type="hidden" name="monitoringFilter" value={filter} />
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-          {options.map((opt) => (
-            <label
-              key={opt.value}
-              style={{
-                display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
-                padding: "10px 12px", borderRadius: 8,
-                border: `1px solid ${filter === opt.value ? "#4f46e5" : "#e5e7eb"}`,
-                background: filter === opt.value ? "#eef2ff" : "#fff",
-              }}
-            >
-              <input
-                type="radio"
-                name="_monitoringFilterRadio"
-                value={opt.value}
-                checked={filter === opt.value}
-                onChange={() => onFilterChange(opt.value)}
-                style={{ marginTop: 2 }}
-              />
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{opt.label}</div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>{opt.desc}</div>
-              </div>
-            </label>
-          ))}
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+      padding: "12px 0", borderBottom: "1px solid #f3f4f6",
+      opacity: disabled ? 0.5 : 1,
+    }}>
+      <div>
+        <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{label}</div>
+        {description && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{description}</div>}
+      </div>
+      <div
+        role="switch"
+        aria-checked={checked}
+        onClick={() => !disabled && onChange?.(!checked)}
+        style={{ cursor: disabled ? "not-allowed" : "pointer", flexShrink: 0 }}
+      >
+        <div style={{
+          width: 44, height: 24, borderRadius: 12,
+          background: checked && !disabled ? "#4f46e5" : "#d1d5db",
+          position: "relative", transition: "background 0.2s",
+        }}>
+          <div style={{
+            position: "absolute", top: 2,
+            left: checked && !disabled ? 22 : 2,
+            width: 20, height: 20, borderRadius: 10,
+            background: "#fff", transition: "left 0.2s",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+          }} />
         </div>
-
-        {filter === "collection" && (
-          <div style={{ marginTop: 4 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-              Collection ID
-            </label>
-            <input
-              type="text"
-              name="monitoringCollectionId"
-              value={collectionId}
-              onChange={(e) => onCollectionIdChange(e.target.value)}
-              placeholder="e.g. 123456789"
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            />
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-              Find the ID in your Shopify admin URL when viewing a collection: <code>/collections/[ID]</code>. Then click <strong>Sync Products</strong> to apply.
-            </p>
-          </div>
-        )}
-
-        {filter === "tags" && (
-          <div style={{ marginTop: 4 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-              Tags (comma-separated)
-            </label>
-            <input
-              type="text"
-              name="monitoringTags"
-              value={tags}
-              onChange={(e) => onTagsChange(e.target.value)}
-              placeholder="e.g. featured, sale, new-arrivals"
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            />
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-              Only products with <em>any</em> of these tags will be synced and monitored. Then click <strong>Sync Products</strong> to apply.
-            </p>
-          </div>
-        )}
-
-        {filter !== "all" && (
-          <div style={{ marginTop: 10, padding: "10px 14px", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, fontSize: 13, color: "#92400e" }}>
-            Save settings and run a <strong>Sync Products</strong> from the Products page to apply the new scope. Products outside the filter will stop being tracked.
-          </div>
-        )}
-      </s-section>
+      </div>
     </div>
   );
 }
 
-function OutboundWebhookSection({
-  plan, url, onUrlChange,
+/* ── Notification channel card ── */
+function ChannelCard({
+  icon, title, badge, badgeColor, enabled, onToggle, disabled, children,
 }: {
-  plan: string;
-  url: string;
-  onUrlChange: (v: string) => void;
+  icon: string;
+  title: string;
+  badge: string | null;
+  badgeColor?: string;
+  enabled: boolean;
+  onToggle?: (v: boolean) => void;
+  disabled?: boolean;
+  children: React.ReactNode;
 }) {
-  const isPro = plan === "pro";
   return (
-    <div style={{ marginTop: 24 }}>
-      <s-section heading="Outbound Webhook">
-        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
-          Fire a JSON POST to any URL on every stock event (low stock, out of stock, restock). Use it to connect Zapier, Make, Slack workflows, or your own ERP.{" "}
-          {!isPro && (
-            <span style={{ color: "#9ca3af" }}>
-              Requires Professional plan.{" "}
-              <s-link href="/app/billing">Upgrade →</s-link>
+    <div style={{
+      border: `1.5px solid ${enabled && !disabled ? "#4f46e5" : "#e5e7eb"}`,
+      borderRadius: 10, marginBottom: 12, overflow: "hidden",
+      transition: "border-color 0.2s",
+    }}>
+      {/* Card header */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "14px 16px",
+        background: enabled && !disabled ? "#fafafe" : "#f9fafb",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 20 }}>{icon}</span>
+          <span style={{ fontWeight: 700, fontSize: 15, color: "#111827" }}>{title}</span>
+          {badge && (
+            <span style={{ fontSize: 11, fontWeight: 700, background: badgeColor ?? "#4f46e5", color: "#fff", padding: "2px 8px", borderRadius: 20 }}>
+              {badge}
             </span>
           )}
-        </p>
+        </div>
+        <div
+          role="switch"
+          aria-checked={enabled}
+          onClick={() => !disabled && onToggle?.(!enabled)}
+          style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}
+        >
+          <div style={{
+            width: 44, height: 24, borderRadius: 12,
+            background: enabled && !disabled ? "#4f46e5" : "#d1d5db",
+            position: "relative", transition: "background 0.2s",
+          }}>
+            <div style={{
+              position: "absolute", top: 2,
+              left: enabled ? 22 : 2,
+              width: 20, height: 20, borderRadius: 10,
+              background: "#fff", transition: "left 0.2s",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+            }} />
+          </div>
+        </div>
+      </div>
 
-        <div style={{ opacity: isPro ? 1 : 0.5, pointerEvents: isPro ? "auto" : "none" }}>
-          <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-            Webhook URL
-          </label>
+      {/* Card body — only shown when enabled */}
+      {enabled && !disabled && (
+        <div style={{ padding: "16px 16px" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Shopify file picker modal ── */
+type ShopifyFile = { id: string; url: string; width: number | null; height: number | null; altText: string; mimeType: string };
+
+function ShopifyFilePicker({
+  onSelect, onClose,
+}: {
+  onSelect: (url: string) => void;
+  onClose: () => void;
+}) {
+  const fetcher = useFetcher<{ files: ShopifyFile[]; hasNextPage: boolean; endCursor: string | null }>();
+  const [search, setSearch] = useState("");
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [allFiles, setAllFiles] = useState<ShopifyFile[]>([]);
+  const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function load(q: string, cur: string | null, append = false) {
+    const params = new URLSearchParams({ search: q });
+    if (cur) params.set("cursor", cur);
+    fetcher.load(`/app/api/shopify-files?${params}`);
+    if (!append) setAllFiles([]);
+    setCursor(cur);
+  }
+
+  // Initial load
+  useEffect(() => { load("", null); }, []);
+
+  // Merge pages
+  useEffect(() => {
+    if (fetcher.data?.files) {
+      setAllFiles((prev) => cursor ? [...prev, ...fetcher.data!.files] : fetcher.data!.files);
+    }
+  }, [fetcher.data]);
+
+  function handleSearch(q: string) {
+    setSearch(q);
+    if (searchRef.current) clearTimeout(searchRef.current);
+    searchRef.current = setTimeout(() => load(q, null), 400);
+  }
+
+  const loading = fetcher.state === "loading";
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(3px)",
+      zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 14, width: "100%", maxWidth: 680, maxHeight: "85vh",
+        display: "flex", flexDirection: "column", boxShadow: "0 24px 64px rgba(0,0,0,0.18)",
+      }}>
+        {/* Header */}
+        <div style={{ padding: "18px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: "#111827" }}>Choose a logo from Shopify Files</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>PNG, JPG, SVG and WebP only</div>
+          </div>
+          <button
+            type="button" onClick={onClose}
+            style={{ background: "#f3f4f6", border: "none", borderRadius: "50%", width: 32, height: 32, fontSize: 18, cursor: "pointer", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Search */}
+        <div style={{ padding: "12px 20px", borderBottom: "1px solid #f3f4f6" }}>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search by filename…"
+            style={{ ...inputStyle(), maxWidth: 320 }}
+            autoFocus
+          />
+        </div>
+
+        {/* Grid */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+          {loading && allFiles.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>Loading files…</div>
+          ) : allFiles.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
+              {search ? `No images matching "${search}"` : "No image files found in your Shopify Files."}
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
+              {allFiles.map((file) => (
+                <button
+                  key={file.id}
+                  type="button"
+                  onClick={() => { onSelect(file.url); onClose(); }}
+                  style={{
+                    border: "1.5px solid #e5e7eb", borderRadius: 8, background: "#f9fafb",
+                    padding: 8, cursor: "pointer", display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 6, transition: "border-color 0.15s, background 0.15s",
+                    textAlign: "center",
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.borderColor = "#4f46e5"; e.currentTarget.style.background = "#eef2ff"; }}
+                  onMouseOut={(e) => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.background = "#f9fafb"; }}
+                >
+                  <img
+                    src={file.url}
+                    alt={file.altText || ""}
+                    style={{ width: "100%", height: 80, objectFit: "contain", borderRadius: 4 }}
+                    loading="lazy"
+                  />
+                  {file.width && file.height && (
+                    <span style={{ fontSize: 10, color: "#9ca3af" }}>{file.width}×{file.height}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {fetcher.data?.hasNextPage && (
+            <div style={{ textAlign: "center", marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={() => load(search, fetcher.data!.endCursor, true)}
+                disabled={loading}
+                style={{ padding: "8px 20px", borderRadius: 8, border: "1.5px solid #d1d5db", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#374151" }}
+              >
+                {loading ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Logo URL field with Shopify file picker + live email preview ── */
+function LogoUrlField({
+  value, brandColor, disabled, onChange,
+}: {
+  value: string;
+  brandColor: string;
+  disabled: boolean;
+  onChange: (v: string) => void;
+}) {
+  const [imgStatus, setImgStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [debouncedUrl, setDebouncedUrl] = useState(value);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!value) { setImgStatus("idle"); setDebouncedUrl(""); return; }
+    setImgStatus("loading");
+    const t = setTimeout(() => setDebouncedUrl(value), 500);
+    return () => clearTimeout(t);
+  }, [value]);
+
+  const isValidUrl = (u: string) => { try { return Boolean(new URL(u)); } catch { return false; } };
+  const showPreview = value && isValidUrl(value);
+  const color = brandColor || "#4f46e5";
+
+  return (
+    <div>
+      <label style={fieldLabel}>Logo URL</label>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ position: "relative", flex: 1 }}>
           <input
             type="url"
-            name="outboundWebhookUrl"
-            value={url}
-            onChange={(e) => onUrlChange(e.target.value)}
-            placeholder="https://hooks.zapier.com/hooks/catch/..."
-            disabled={!isPro}
-            style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
+            name="brandLogoUrl"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="https://yourstore.com/logo.png"
+            disabled={disabled}
+            style={{ ...inputStyle(), paddingRight: value ? 36 : 12 }}
           />
-          <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-            Stock Alert will POST a JSON payload to this URL whenever an alert is triggered.
-          </p>
-
-          {isPro && url && (
-            <div style={{ marginTop: 10, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Example payload</p>
-              <pre style={{ fontSize: 11, color: "#4b5563", margin: 0, overflow: "auto" }}>{JSON.stringify({
-                event: "low_stock",
-                shop: "your-store.myshopify.com",
-                productId: "1234567890",
-                productTitle: "Blue T-Shirt",
-                sku: "BTS-001",
-                currentQuantity: 3,
-                threshold: 5,
-                timestamp: new Date().toISOString(),
-              }, null, 2)}</pre>
-            </div>
+          {value && !disabled && (
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              aria-label="Clear logo URL"
+              style={{
+                position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+                background: "#f3f4f6", border: "none", borderRadius: "50%",
+                width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", color: "#6b7280", fontSize: 14, lineHeight: 1,
+              }}
+            >×</button>
           )}
         </div>
-      </s-section>
-    </div>
-  );
-}
+        {!disabled && (
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            style={{
+              padding: "9px 14px", borderRadius: 8, border: "1.5px solid #d1d5db",
+              background: "#fff", color: "#374151", fontSize: 13, fontWeight: 600,
+              cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            Browse Files
+          </button>
+        )}
+      </div>
 
-function BrandingSection({
-  plan,
-  brandLogoUrl,
-  brandColor,
-  brandSenderName,
-  onLogoUrlChange,
-  onColorChange,
-  onSenderNameChange,
-}: {
-  plan: string;
-  brandLogoUrl: string;
-  brandColor: string;
-  brandSenderName: string;
-  onLogoUrlChange: (v: string) => void;
-  onColorChange: (v: string) => void;
-  onSenderNameChange: (v: string) => void;
-}) {
-  const isPro = plan === "pro";
+      <p style={helpText}>PNG, JPG, SVG or WebP only — max 400px wide. Shown at the top of every alert email.</p>
 
-  return (
-    <div style={{ marginTop: 24 }}>
-      <s-section heading="Email Branding">
-        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 12 }}>
-          Customize how your outgoing alert emails look. Applied to all email notifications sent from your store.{" "}
-          {!isPro && (
-            <span style={{ color: "#9ca3af" }}>
-              Requires Professional plan.{" "}
-              <s-link href="/app/billing">Upgrade →</s-link>
-            </span>
-          )}
-        </p>
-
-        <div style={{ opacity: isPro ? 1 : 0.5, pointerEvents: isPro ? "auto" : "none" }}>
-          {/* Sender name */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-              Sender name
-            </label>
-            <input
-              type="text"
-              name="brandSenderName"
-              value={brandSenderName}
-              onChange={(e) => onSenderNameChange(e.target.value)}
-              placeholder="Stock Alert"
-              disabled={!isPro}
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            />
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-              Shown as the "From" name in email clients. Defaults to "Stock Alert".
-            </p>
+      {showPreview ? (
+        <div style={{ marginTop: 16, maxWidth: 480 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em" }}>Email preview</span>
+            {imgStatus === "ok" && <span style={{ fontSize: 11, fontWeight: 600, color: "#059669" }}>✓ Logo loaded</span>}
+            {imgStatus === "error" && <span style={{ fontSize: 11, fontWeight: 600, color: "#dc2626" }}>✗ Can't load image</span>}
           </div>
 
-          {/* Brand color */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-              Brand color
-            </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input
-                type="color"
-                value={brandColor || "#4f46e5"}
-                onChange={(e) => onColorChange(e.target.value)}
-                disabled={!isPro}
-                style={{ width: 40, height: 36, border: "1px solid #d1d5db", borderRadius: 6, cursor: isPro ? "pointer" : "not-allowed", padding: 2 }}
+          <div style={{ background: color, padding: "20px 28px", borderRadius: 10, display: "flex", alignItems: "center" }}>
+            {imgStatus === "error" ? (
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontStyle: "italic" }}>Logo failed to load</span>
+            ) : debouncedUrl ? (
+              <img
+                key={debouncedUrl}
+                src={debouncedUrl}
+                alt="Logo"
+                style={{ display: "block", width: "auto", maxHeight: 80, objectFit: "contain" }}
+                onLoad={() => setImgStatus("ok")}
+                onError={() => setImgStatus("error")}
               />
-              <input
-                type="text"
-                name="brandColor"
-                value={brandColor || "#4f46e5"}
-                onChange={(e) => onColorChange(e.target.value)}
-                placeholder="#4f46e5"
-                disabled={!isPro}
-                style={{ width: 120, border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14, fontFamily: "monospace" }}
-              />
-              <div style={{ width: 80, height: 36, borderRadius: 6, background: brandColor || "#4f46e5", border: "1px solid #e5e7eb" }} />
-            </div>
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-              Used for email headers, CTA buttons, and footer accents. Must be a valid 6-digit hex color.
-            </p>
-          </div>
-
-          {/* Logo URL */}
-          <div style={{ marginBottom: 4 }}>
-            <label style={{ display: "block", fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-              Logo URL
-            </label>
-            <input
-              type="url"
-              name="brandLogoUrl"
-              value={brandLogoUrl}
-              onChange={(e) => onLogoUrlChange(e.target.value)}
-              placeholder="https://yourstore.com/logo.png"
-              disabled={!isPro}
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            />
-            <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-              Public URL to your store logo (PNG or SVG recommended, max 400px wide). Displayed at the top of every email.
-            </p>
-            {isPro && brandLogoUrl && (
-              <div style={{ marginTop: 10, padding: "10px 14px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, display: "inline-block" }}>
-                <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Preview</p>
-                <img
-                  src={brandLogoUrl}
-                  alt="Brand logo preview"
-                  style={{ maxWidth: 200, maxHeight: 60, objectFit: "contain", display: "block" }}
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                />
-              </div>
+            ) : (
+              <div style={{ height: 40, width: 130, background: "rgba(255,255,255,0.18)", borderRadius: 6 }} />
             )}
           </div>
+
+          {imgStatus === "error" && (
+            <div style={{ marginTop: 8, padding: "10px 14px", background: "#fee2e2", fontSize: 12, color: "#991b1b", borderRadius: 8, border: "1px solid #fecaca" }}>
+              Could not load image — make sure the URL is publicly accessible and links directly to an image file.
+            </div>
+          )}
         </div>
-      </s-section>
+      ) : (
+        !disabled && !value && (
+          <div
+            style={{ marginTop: 12, border: "2px dashed #e5e7eb", borderRadius: 10, padding: "24px 20px", textAlign: "center", background: "#f9fafb", maxWidth: 480, cursor: "pointer" }}
+            onClick={() => setPickerOpen(true)}
+          >
+            <div style={{ fontSize: 28, marginBottom: 8 }}>🖼️</div>
+            <p style={{ fontSize: 13, color: "#4f46e5", margin: 0, fontWeight: 600 }}>Browse Shopify Files</p>
+            <p style={{ fontSize: 12, color: "#9ca3af", margin: "4px 0 0" }}>or paste a URL above</p>
+          </div>
+        )
+      )}
+
+      {pickerOpen && (
+        <ShopifyFilePicker
+          onSelect={(url) => { onChange(url); }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
+/* ── Plan card ── */
 function PlanCard({ plan }: { plan: string }) {
   const isPro = plan === "pro";
   const features = [
-    { label: "Email alerts",                     pro: false },
-    { label: "Inventory monitoring",              pro: false },
-    { label: "Auto-hide out-of-stock products",   pro: false },
-    { label: `Up to ${isPro ? "10,000" : "1,000"} products tracked`, pro: false },
-    { label: "Slack notifications",               pro: true  },
-    { label: "Multiple email recipients",         pro: true  },
-    { label: "Auto-republish on restock",         pro: true  },
-    { label: "Per-product custom thresholds",     pro: true  },
-    { label: "Outbound webhook / Zapier",         pro: true  },
-    { label: "Email branding",                    pro: true  },
+    { label: "Email alerts",                   pro: false },
+    { label: "Inventory monitoring",            pro: false },
+    { label: "Auto-hide out-of-stock",          pro: false },
+    { label: `Up to ${isPro ? "10,000" : "1,000"} products`, pro: false },
+    { label: "Slack notifications",             pro: true  },
+    { label: "Multiple email recipients",       pro: true  },
+    { label: "Auto-republish on restock",       pro: true  },
+    { label: "Per-product thresholds",          pro: true  },
+    { label: "Outbound webhook / Zapier",       pro: true  },
+    { label: "Email branding",                  pro: true  },
   ];
 
   return (
-    <div style={{ marginBottom: 24, padding: "16px 20px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+    <div style={{ marginBottom: 24, padding: "16px 20px", background: isPro ? "#fafafe" : "#f9fafb", border: `1px solid ${isPro ? "#c7d2fe" : "#e5e7eb"}`, borderRadius: 10 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>Current Plan</span>
           <span style={{
-            padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+            padding: "3px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
             background: isPro ? "#4f46e5" : "#6b7280", color: "#fff",
           }}>
             {isPro ? "Professional" : "Basic"}
           </span>
         </div>
-        {!isPro && (
-          <s-link href="/app/billing">Upgrade to Pro →</s-link>
-        )}
+        {!isPro && <s-link href="/app/billing">Upgrade to Pro →</s-link>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "6px 16px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "6px 12px" }}>
         {features.map((f) => {
           const active = !f.pro || isPro;
           return (
             <div key={f.label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: active ? "#374151" : "#9ca3af" }}>
-              <span style={{ fontSize: 14, flexShrink: 0 }}>{active ? "✅" : "🔒"}</span>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>{active ? "✓" : "🔒"}</span>
               {f.label}
             </div>
           );
@@ -881,77 +1327,38 @@ function PlanCard({ plan }: { plan: string }) {
   );
 }
 
-function TestResultBanner({ result }: { result: TestResult }) {
+/* ── Test result toast ── */
+function TestResultBanner({ result, onDismiss }: { result: TestResult; onDismiss?: () => void }) {
+  const rows: { ok: boolean; text: string }[] = [];
+
   if (result.error) {
-    return (
-      <div style={{ marginTop: 12, background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", fontSize: 13, color: "#991b1b" }}>
-        {result.error}
-      </div>
-    );
+    rows.push({ ok: false, text: result.error });
+  } else {
+    if (result.email) rows.push({ ok: result.email.sent, text: result.email.sent ? `Email sent to ${result.email.to}` : `Email failed: ${result.email.error}` });
+    if (result.slack) rows.push({ ok: result.slack.sent, text: result.slack.sent ? "Slack message sent" : `Slack failed: ${result.slack.error}` });
+    if (result.whatsapp) rows.push({ ok: result.whatsapp.sent, text: result.whatsapp.sent ? "WhatsApp message sent" : `WhatsApp failed: ${result.whatsapp.error}` });
+    if (!result.email && !result.slack && !result.whatsapp) rows.push({ ok: false, text: "No notification channels enabled." });
   }
 
   return (
-    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-      {result.email && (
-        <div style={{
-          background: result.email.sent ? "#d1fae5" : "#fee2e2",
-          border: `1px solid ${result.email.sent ? "#a7f3d0" : "#fca5a5"}`,
-          borderRadius: 6, padding: "8px 12px", fontSize: 13,
-          color: result.email.sent ? "#065f46" : "#991b1b",
-        }}>
-          {result.email.sent
-            ? `Email sent to ${result.email.to}`
-            : `Email failed: ${result.email.error}`}
-        </div>
-      )}
-      {result.slack && (
-        <div style={{
-          background: result.slack.sent ? "#d1fae5" : "#fee2e2",
-          border: `1px solid ${result.slack.sent ? "#a7f3d0" : "#fca5a5"}`,
-          borderRadius: 6, padding: "8px 12px", fontSize: 13,
-          color: result.slack.sent ? "#065f46" : "#991b1b",
-        }}>
-          {result.slack.sent
-            ? "Slack message sent successfully"
-            : `Slack failed: ${result.slack.error}`}
-        </div>
-      )}
-      {!result.email && !result.slack && (
-        <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", fontSize: 13, color: "#92400e" }}>
-          No notification channels are enabled. Turn on Email or Slack notifications above.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ToggleField({
-  label, name, checked, disabled, helpText, onChange,
-}: {
-  label: string;
-  name: string;
-  checked: boolean;
-  disabled?: boolean;
-  helpText?: string;
-  onChange?: (val: boolean) => void;
-}) {
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}>
-        <input type="hidden" name={name} value="false" />
-        <input
-          type="checkbox"
-          name={name}
-          value="true"
-          disabled={disabled}
-          {...(onChange
-            ? { checked, onChange: (e) => onChange(e.target.checked) }
-            : { defaultChecked: checked })}
-          style={{ width: 16, height: 16 }}
-        />
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{label}</span>
-      </label>
-      {helpText && <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2, marginLeft: 24 }}>{helpText}</p>}
+    <div style={{
+      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.12)", overflow: "hidden",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid #f3f4f6" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>Test Notification</span>
+        {onDismiss && (
+          <button type="button" onClick={onDismiss} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 18, lineHeight: 1, padding: 0 }}>×</button>
+        )}
+      </div>
+      <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: r.ok ? "#065f46" : "#991b1b" }}>
+            <span style={{ flexShrink: 0, marginTop: 1 }}>{r.ok ? "✓" : "✗"}</span>
+            <span>{r.text}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
