@@ -215,10 +215,12 @@ export interface BackInStockCustomerData {
   productUrl?: string | null;
   imageUrl?: string | null;
   unsubscribeUrl: string;
+  firstName?: string | null;
 }
 
 export function getBackInStockCustomerTemplate(data: BackInStockCustomerData, brand: BrandConfig = {}): { subject: string; html: string } {
   const productUrl = data.productUrl ?? `https://${data.shopDomain}/products/${data.productId}`;
+  const greeting = data.firstName ? `Hi ${esc(data.firstName)},` : 'Good news!';
   return {
     subject: `🎉 Back in stock: ${data.productTitle}`,
     html: shell(
@@ -226,6 +228,7 @@ export function getBackInStockCustomerTemplate(data: BackInStockCustomerData, br
       `${header('🎉', 'Back in Stock!', `${data.productTitle} is available again at ${data.storeName}`, brand)}
       <tr>
         <td style="padding:28px 32px 20px;">
+          <div style="font-size:18px;font-weight:600;color:#111827;margin-bottom:16px;">${greeting}</div>
           ${data.imageUrl ? `
           <div style="text-align:center;margin-bottom:20px;">
             <img src="${esc(data.imageUrl)}" alt="${esc(data.productTitle)}" width="180" height="180"
