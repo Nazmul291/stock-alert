@@ -78,8 +78,12 @@ model StoreSettings {
   supplierLeadTimeDays Int       @default(7) @map("supplier_lead_time_days")
   monitoringFilter     String    @default("all") @map("monitoring_filter")
   monitoringCollectionId String? @map("monitoring_collection_id") @db.VarChar(50)
-  monitoringTags       String?   @map("monitoring_tags") @db.VarChar(500)
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  monitoringTags         String?  @map("monitoring_tags") @db.VarChar(500)
+  whatsappNotifications  Boolean  @default(false) @map("whatsapp_notifications")
+  whatsappPhone          String?  @map("whatsapp_phone") @db.VarChar(30)
+  whatsappPhoneNumberId  String?  @map("whatsapp_phone_number_id") @db.VarChar(50)
+  whatsappAccessToken    String?  @map("whatsapp_access_token") @db.VarChar(500)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)

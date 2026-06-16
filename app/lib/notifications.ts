@@ -32,6 +32,23 @@ interface SettingsContext {
   brandLogoUrl?: string | null;
   brandColor?: string | null;
   brandSenderName?: string | null;
+  whatsappNotifications?: boolean;
+  whatsappPhone?: string | null;
+  whatsappPhoneNumberId?: string | null;
+  whatsappAccessToken?: string | null;
+}
+
+async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, body: string): Promise<void> {
+  const phone = to.replace(/\D/g, "");
+  const res = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", to: phone, type: "text", text: { body } }),
+  });
+  if (!res.ok) {
+    const err: any = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `WhatsApp API error ${res.status}`);
+  }
 }
 
 function fromAddress(settings: SettingsContext): { name: string; address: string } {
@@ -165,6 +182,21 @@ export async function sendLowStockAlert(
     }
   }
 
+  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await sendWhatsAppMessage(
+        settings.whatsappPhoneNumberId,
+        settings.whatsappAccessToken,
+        settings.whatsappPhone,
+        `⚠️ Low Stock Alert\n\n${product.title}${variantSuffix} has only *${currentQuantity} units* left (threshold: ${threshold}).\n\nhttps://${store.shop}/admin/products/${productId}`,
+      );
+      console.log(`[Notifications] Low stock WhatsApp sent for ${product.title}`);
+    } catch (err) {
+      console.error('[Notifications] Low stock WhatsApp failed:', err);
+    }
+  }
+
   if (sentToEmail || sentToSlack) {
     await logAlert(store.shop, productId, product.title, 'low_stock', currentQuantity, threshold, sentToEmail, sentToSlack);
   }
@@ -240,6 +272,20 @@ export async function sendOutOfStockAlert(
     }
   }
 
+  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await sendWhatsAppMessage(
+        settings.whatsappPhoneNumberId,
+        settings.whatsappAccessToken,
+        settings.whatsappPhone,
+        `❌ Out of Stock\n\n${product.title}${variantSuffix} is now *sold out*.\n\nhttps://${store.shop}/admin/products/${productId}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Out of stock WhatsApp failed:', err);
+    }
+  }
+
   if (sentToEmail || sentToSlack) {
     await logAlert(store.shop, productId, product.title, 'out_of_stock', 0, null, sentToEmail, sentToSlack);
   }
@@ -248,8 +294,8 @@ export async function sendOutOfStockAlert(
 export async function sendTestNotification(
   store: StoreContext,
   settings: SettingsContext,
-): Promise<{ email?: { sent: boolean; to?: string; error?: string }; slack?: { sent: boolean; error?: string } }> {
-  const result: { email?: { sent: boolean; to?: string; error?: string }; slack?: { sent: boolean; error?: string } } = {};
+): Promise<{ email?: { sent: boolean; to?: string; error?: string }; slack?: { sent: boolean; error?: string }; whatsapp?: { sent: boolean; error?: string } }> {
+  const result: { email?: { sent: boolean; to?: string; error?: string }; slack?: { sent: boolean; error?: string }; whatsapp?: { sent: boolean; error?: string } } = {};
   const storeName = store.shop.replace('.myshopify.com', '');
 
   if (settings.emailNotifications) {
@@ -311,6 +357,20 @@ export async function sendTestNotification(
       result.slack = { sent: true };
     } catch (err) {
       result.slack = { sent: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  }
+
+  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+    try {
+      await sendWhatsAppMessage(
+        settings.whatsappPhoneNumberId,
+        settings.whatsappAccessToken,
+        settings.whatsappPhone,
+        `✅ Test — Stock Alert is connected for *${storeName}*. You'll receive WhatsApp alerts when inventory thresholds are triggered.`,
+      );
+      result.whatsapp = { sent: true };
+    } catch (err) {
+      result.whatsapp = { sent: false, error: err instanceof Error ? err.message : 'Unknown error' };
     }
   }
 
@@ -386,6 +446,20 @@ export async function sendRestockAlert(
       sentToSlack = true;
     } catch (err) {
       console.error('[Notifications] Restock Slack failed:', err);
+    }
+  }
+
+  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await sendWhatsAppMessage(
+        settings.whatsappPhoneNumberId,
+        settings.whatsappAccessToken,
+        settings.whatsappPhone,
+        `🎉 Back in Stock\n\n${product.title}${variantSuffix} is back with *${currentQuantity} units*.\n\nhttps://${store.shop}/admin/products/${productId}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Restock WhatsApp failed:', err);
     }
   }
 

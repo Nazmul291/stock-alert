@@ -29,6 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackNotifications: settings.slackNotifications,
           notificationEmail: settings.notificationEmail ?? "",
           slackWebhookUrl: settings.slackWebhookUrl ?? "",
+          whatsappNotifications: settings.whatsappNotifications,
+          whatsappPhone: settings.whatsappPhone ?? "",
+          whatsappPhoneNumberId: settings.whatsappPhoneNumberId ?? "",
+          whatsappAccessToken: settings.whatsappAccessToken ?? "",
           digestEnabled: settings.digestEnabled,
           digestFrequency: settings.digestFrequency,
           brandLogoUrl: settings.brandLogoUrl ?? "",
@@ -48,6 +52,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           slackNotifications: false,
           notificationEmail: "",
           slackWebhookUrl: "",
+          whatsappNotifications: false,
+          whatsappPhone: "",
+          whatsappPhoneNumberId: "",
+          whatsappAccessToken: "",
           digestEnabled: true,
           digestFrequency: "weekly",
           brandLogoUrl: "",
@@ -91,6 +99,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         slackNotifications: settings.slackNotifications,
         notificationEmail: settings.notificationEmail,
         slackWebhookUrl: settings.slackWebhookUrl,
+        whatsappNotifications: settings.whatsappNotifications,
+        whatsappPhone: settings.whatsappPhone,
+        whatsappPhoneNumberId: settings.whatsappPhoneNumberId,
+        whatsappAccessToken: settings.whatsappAccessToken,
       },
     );
     return { intent: "test_notification", testResult };
@@ -104,7 +116,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const rawThreshold = parseInt(form.get("lowStockThreshold") as string);
   const rawEmail = ((form.get("notificationEmail") as string) ?? "").trim();
   const rawSlack = ((form.get("slackWebhookUrl") as string) ?? "").trim();
+  const rawWhatsappPhone = ((form.get("whatsappPhone") as string) ?? "").trim();
+  const rawWhatsappPhoneNumberId = ((form.get("whatsappPhoneNumberId") as string) ?? "").trim();
+  const rawWhatsappAccessToken = ((form.get("whatsappAccessToken") as string) ?? "").trim();
   const emailEnabled = bool("emailNotifications");
+  const whatsappEnabled = bool("whatsappNotifications");
 
   const errors: Record<string, string> = {};
 
@@ -142,6 +158,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     slackNotifications: bool("slackNotifications"),
     notificationEmail: rawEmail || null,
     slackWebhookUrl: rawSlack || null,
+    whatsappNotifications: whatsappEnabled,
+    whatsappPhone: rawWhatsappPhone || null,
+    whatsappPhoneNumberId: rawWhatsappPhoneNumberId || null,
+    whatsappAccessToken: rawWhatsappAccessToken || null,
     digestEnabled: bool("digestEnabled"),
     digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
@@ -186,6 +206,7 @@ type TestResult = {
   error?: string;
   email?: { sent: boolean; to?: string; error?: string };
   slack?: { sent: boolean; error?: string };
+  whatsapp?: { sent: boolean; error?: string };
 };
 
 const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
@@ -228,6 +249,10 @@ export default function SettingsPage() {
   const [autoRepublishEnabled, setAutoRepublishEnabled] = useState(settings.autoRepublishEnabled);
   const [emailEnabled, setEmailEnabled] = useState(settings.emailNotifications);
   const [slackEnabled, setSlackEnabled] = useState(settings.slackNotifications);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(settings.whatsappNotifications);
+  const [whatsappPhone, setWhatsappPhone] = useState(settings.whatsappPhone);
+  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState(settings.whatsappPhoneNumberId);
+  const [whatsappAccessToken, setWhatsappAccessToken] = useState(settings.whatsappAccessToken);
   const [digestEnabled, setDigestEnabled] = useState(settings.digestEnabled);
   const [digestFrequency, setDigestFrequency] = useState(settings.digestFrequency);
   const [brandLogoUrl, setBrandLogoUrl] = useState(settings.brandLogoUrl);
@@ -245,6 +270,10 @@ export default function SettingsPage() {
     setAutoRepublishEnabled(settings.autoRepublishEnabled);
     setEmailEnabled(settings.emailNotifications);
     setSlackEnabled(settings.slackNotifications);
+    setWhatsappEnabled(settings.whatsappNotifications);
+    setWhatsappPhone(settings.whatsappPhone);
+    setWhatsappPhoneNumberId(settings.whatsappPhoneNumberId);
+    setWhatsappAccessToken(settings.whatsappAccessToken);
     setDigestEnabled(settings.digestEnabled);
     setDigestFrequency(settings.digestFrequency);
     setBrandLogoUrl(settings.brandLogoUrl);
@@ -285,6 +314,10 @@ export default function SettingsPage() {
     fd.set("autoRepublishEnabled", autoRepublishEnabled ? "true" : "false");
     fd.set("emailNotifications", emailEnabled ? "true" : "false");
     fd.set("slackNotifications", slackEnabled ? "true" : "false");
+    fd.set("whatsappNotifications", whatsappEnabled ? "true" : "false");
+    fd.set("whatsappPhone", whatsappPhone);
+    fd.set("whatsappPhoneNumberId", whatsappPhoneNumberId);
+    fd.set("whatsappAccessToken", whatsappAccessToken);
     fd.set("digestEnabled", digestEnabled ? "true" : "false");
     fd.set("digestFrequency", digestFrequency);
     fd.set("monitoringFilter", monitoringFilter);
@@ -297,8 +330,8 @@ export default function SettingsPage() {
     saveFetcher.submit(fd, { method: "post" });
   }
 
-  const noChannelsConfigured = !emailEnabled && !(slackEnabled && plan === "pro");
   const isPro = plan === "pro";
+  const noChannelsConfigured = !emailEnabled && !(slackEnabled && isPro) && !whatsappEnabled;
 
   function markDirty() {
     setIsDirty(true);
@@ -458,6 +491,64 @@ export default function SettingsPage() {
                 {saveErrors?.slackWebhookUrl
                   ? <p style={{ ...helpText, color: "#dc2626" }}>{saveErrors.slackWebhookUrl}</p>
                   : <p style={helpText}>Paste the webhook URL from your Slack app settings.</p>}
+              </div>
+            </ChannelCard>
+
+            {/* WhatsApp channel card */}
+            <ChannelCard
+              icon="💬"
+              title="WhatsApp"
+              badge={null}
+              enabled={whatsappEnabled}
+              onToggle={(v) => { setWhatsappEnabled(v); markDirty(); }}
+            >
+              <div>
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
+                  <p style={{ fontWeight: 600, fontSize: 13, color: "#166534", margin: "0 0 8px" }}>How to set up WhatsApp Business API</p>
+                  <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: 1.8 }}>
+                    <li>Go to <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>developers.facebook.com</a> → create an app</li>
+                    <li>Add the <strong>WhatsApp</strong> product to your app</li>
+                    <li>Copy your <strong>Phone Number ID</strong> and generate a <strong>permanent access token</strong></li>
+                    <li>Enter the number you want alerts sent to below (include country code, e.g. 14155552671)</li>
+                  </ol>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={fieldLabel}>Phone Number ID</label>
+                    <input
+                      type="text"
+                      value={whatsappPhoneNumberId}
+                      onChange={(e) => { setWhatsappPhoneNumberId(e.target.value); markDirty(); }}
+                      placeholder="123456789012345"
+                      style={inputStyle()}
+                    />
+                    <p style={helpText}>From Meta Developer Console → WhatsApp → API Setup.</p>
+                  </div>
+                  <div>
+                    <label style={fieldLabel}>Recipient phone</label>
+                    <input
+                      type="text"
+                      value={whatsappPhone}
+                      onChange={(e) => { setWhatsappPhone(e.target.value); markDirty(); }}
+                      placeholder="14155552671"
+                      style={inputStyle()}
+                    />
+                    <p style={helpText}>Your WhatsApp number with country code, no +.</p>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={fieldLabel}>Access token</label>
+                  <input
+                    type="password"
+                    value={whatsappAccessToken}
+                    onChange={(e) => { setWhatsappAccessToken(e.target.value); markDirty(); }}
+                    placeholder="EAAxxxxx…"
+                    style={inputStyle()}
+                  />
+                  <p style={helpText}>Permanent token from Meta System User or Developer Console.</p>
+                </div>
               </div>
             </ChannelCard>
 
@@ -1244,7 +1335,17 @@ function TestResultBanner({ result }: { result: TestResult }) {
           {result.slack.sent ? "✓ Slack message sent" : `Slack failed: ${result.slack.error}`}
         </div>
       )}
-      {!result.email && !result.slack && (
+      {result.whatsapp && (
+        <div style={{
+          background: result.whatsapp.sent ? "#d1fae5" : "#fee2e2",
+          border: `1px solid ${result.whatsapp.sent ? "#a7f3d0" : "#fca5a5"}`,
+          borderRadius: 8, padding: "8px 12px", fontSize: 13,
+          color: result.whatsapp.sent ? "#065f46" : "#991b1b",
+        }}>
+          {result.whatsapp.sent ? "✓ WhatsApp message sent" : `WhatsApp failed: ${result.whatsapp.error}`}
+        </div>
+      )}
+      {!result.email && !result.slack && !result.whatsapp && (
         <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px", fontSize: 13, color: "#92400e" }}>
           No notification channels enabled.
         </div>
