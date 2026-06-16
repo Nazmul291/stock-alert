@@ -294,6 +294,17 @@ export default function SettingsPage() {
       ? (testFetcher.data as { intent: string; testResult: TestResult }).testResult
       : null;
 
+  const [toastResult, setToastResult] = useState<TestResult | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (testData) {
+      setToastResult(testData);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToastResult(null), 5000);
+    }
+  }, [testData]);
+
   const saveData = saveFetcher.data as any;
 
   const saveErrors =
@@ -304,8 +315,9 @@ export default function SettingsPage() {
   const saveSuccess = saveData && saveData.intent === "save" && saveData.success;
 
   useEffect(() => {
-    if (saveSuccess) setIsDirty(false);
-  }, [saveSuccess]);
+    const data = saveFetcher.data as any;
+    if (data?.intent === "save" && data?.success) setIsDirty(false);
+  }, [saveFetcher.data]);
 
   function handleSave() {
     const fd = new FormData(formRef.current ?? undefined);
@@ -552,37 +564,34 @@ export default function SettingsPage() {
               </div>
             </ChannelCard>
 
-            {/* Test notification */}
+            {/* Test notification — plain button to avoid nested-form issue */}
             <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <testFetcher.Form method="post">
-                <input type="hidden" name="intent" value="test_notification" />
-                <button
-                  type="submit"
-                  disabled={testing || noChannelsConfigured || isDirty}
-                  title={
-                    isDirty ? "Save your settings before testing"
-                    : noChannelsConfigured ? "Enable at least one notification channel"
-                    : undefined
-                  }
-                  style={{
-                    padding: "8px 18px",
-                    borderRadius: 8,
-                    border: "1.5px solid #d1d5db",
-                    background: "#fff",
-                    color: noChannelsConfigured || isDirty ? "#9ca3af" : "#374151",
-                    cursor: testing || noChannelsConfigured || isDirty ? "not-allowed" : "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {testing ? "Sending…" : "Send Test Notification"}
-                </button>
-              </testFetcher.Form>
+              <button
+                type="button"
+                disabled={testing || noChannelsConfigured || isDirty}
+                onClick={() => testFetcher.submit({ intent: "test_notification" }, { method: "post" })}
+                title={
+                  isDirty ? "Save your settings before testing"
+                  : noChannelsConfigured ? "Enable at least one notification channel"
+                  : undefined
+                }
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: 8,
+                  border: "1.5px solid #d1d5db",
+                  background: "#fff",
+                  color: noChannelsConfigured || isDirty ? "#9ca3af" : "#374151",
+                  cursor: testing || noChannelsConfigured || isDirty ? "not-allowed" : "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {testing ? "Sending…" : "Send Test Notification"}
+              </button>
               {isDirty && <span style={{ fontSize: 12, color: "#9ca3af" }}>Save first to test.</span>}
-              {testData && <TestResultBanner result={testData} />}
             </div>
           </s-section>
         </div>
@@ -856,6 +865,17 @@ export default function SettingsPage() {
           </div>
         </s-section>
       </div>
+
+      {/* ── Test notification toast ── */}
+      {toastResult && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 2000,
+          display: "flex", flexDirection: "column", gap: 8,
+          maxWidth: 360, width: "calc(100% - 48px)",
+        }}>
+          <TestResultBanner result={toastResult} onDismiss={() => setToastResult(null)} />
+        </div>
+      )}
 
       {/* ── Sticky unsaved changes bar ── */}
       {isDirty && (
@@ -1304,52 +1324,38 @@ function PlanCard({ plan }: { plan: string }) {
   );
 }
 
-/* ── Test result banner ── */
-function TestResultBanner({ result }: { result: TestResult }) {
+/* ── Test result toast ── */
+function TestResultBanner({ result, onDismiss }: { result: TestResult; onDismiss?: () => void }) {
+  const rows: { ok: boolean; text: string }[] = [];
+
   if (result.error) {
-    return (
-      <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#991b1b" }}>
-        {result.error}
-      </div>
-    );
+    rows.push({ ok: false, text: result.error });
+  } else {
+    if (result.email) rows.push({ ok: result.email.sent, text: result.email.sent ? `Email sent to ${result.email.to}` : `Email failed: ${result.email.error}` });
+    if (result.slack) rows.push({ ok: result.slack.sent, text: result.slack.sent ? "Slack message sent" : `Slack failed: ${result.slack.error}` });
+    if (result.whatsapp) rows.push({ ok: result.whatsapp.sent, text: result.whatsapp.sent ? "WhatsApp message sent" : `WhatsApp failed: ${result.whatsapp.error}` });
+    if (!result.email && !result.slack && !result.whatsapp) rows.push({ ok: false, text: "No notification channels enabled." });
   }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {result.email && (
-        <div style={{
-          background: result.email.sent ? "#d1fae5" : "#fee2e2",
-          border: `1px solid ${result.email.sent ? "#a7f3d0" : "#fca5a5"}`,
-          borderRadius: 8, padding: "8px 12px", fontSize: 13,
-          color: result.email.sent ? "#065f46" : "#991b1b",
-        }}>
-          {result.email.sent ? `✓ Email sent to ${result.email.to}` : `Email failed: ${result.email.error}`}
-        </div>
-      )}
-      {result.slack && (
-        <div style={{
-          background: result.slack.sent ? "#d1fae5" : "#fee2e2",
-          border: `1px solid ${result.slack.sent ? "#a7f3d0" : "#fca5a5"}`,
-          borderRadius: 8, padding: "8px 12px", fontSize: 13,
-          color: result.slack.sent ? "#065f46" : "#991b1b",
-        }}>
-          {result.slack.sent ? "✓ Slack message sent" : `Slack failed: ${result.slack.error}`}
-        </div>
-      )}
-      {result.whatsapp && (
-        <div style={{
-          background: result.whatsapp.sent ? "#d1fae5" : "#fee2e2",
-          border: `1px solid ${result.whatsapp.sent ? "#a7f3d0" : "#fca5a5"}`,
-          borderRadius: 8, padding: "8px 12px", fontSize: 13,
-          color: result.whatsapp.sent ? "#065f46" : "#991b1b",
-        }}>
-          {result.whatsapp.sent ? "✓ WhatsApp message sent" : `WhatsApp failed: ${result.whatsapp.error}`}
-        </div>
-      )}
-      {!result.email && !result.slack && !result.whatsapp && (
-        <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px", fontSize: 13, color: "#92400e" }}>
-          No notification channels enabled.
-        </div>
-      )}
+    <div style={{
+      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.12)", overflow: "hidden",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid #f3f4f6" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>Test Notification</span>
+        {onDismiss && (
+          <button type="button" onClick={onDismiss} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 18, lineHeight: 1, padding: 0 }}>×</button>
+        )}
+      </div>
+      <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: r.ok ? "#065f46" : "#991b1b" }}>
+            <span style={{ flexShrink: 0, marginTop: 1 }}>{r.ok ? "✓" : "✗"}</span>
+            <span>{r.text}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

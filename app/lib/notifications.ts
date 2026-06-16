@@ -362,16 +362,21 @@ export async function sendTestNotification(
 
   if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
     try {
+      console.log(`[Notifications] Sending WhatsApp test to ${settings.whatsappPhone} via Phone Number ID ${settings.whatsappPhoneNumberId}`);
       await sendWhatsAppMessage(
         settings.whatsappPhoneNumberId,
         settings.whatsappAccessToken,
         settings.whatsappPhone,
         `✅ Test — Stock Alert is connected for *${storeName}*. You'll receive WhatsApp alerts when inventory thresholds are triggered.`,
       );
+      console.log(`[Notifications] WhatsApp test sent OK`);
       result.whatsapp = { sent: true };
     } catch (err) {
+      console.error(`[Notifications] WhatsApp test failed:`, err);
       result.whatsapp = { sent: false, error: err instanceof Error ? err.message : 'Unknown error' };
     }
+  } else {
+    console.log(`[Notifications] WhatsApp test skipped — enabled:${settings.whatsappNotifications} phone:${!!settings.whatsappPhone} phoneNumberId:${!!settings.whatsappPhoneNumberId} token:${!!settings.whatsappAccessToken}`);
   }
 
   return result;
