@@ -343,7 +343,7 @@ export default function SettingsPage() {
   }
 
   const isPro = plan === "pro";
-  const noChannelsConfigured = !emailEnabled && !(slackEnabled && isPro) && !whatsappEnabled;
+  const noChannelsConfigured = !emailEnabled && !(slackEnabled && isPro);
 
   function markDirty() {
     setIsDirty(true);
@@ -510,9 +510,11 @@ export default function SettingsPage() {
             <ChannelCard
               icon="💬"
               title="WhatsApp"
-              badge={null}
-              enabled={whatsappEnabled}
-              onToggle={(v) => { setWhatsappEnabled(v); markDirty(); }}
+              badge="Coming Soon"
+              badgeColor="#6b7280"
+              enabled={false}
+              disabled={true}
+              onToggle={undefined}
             >
               <div>
                 <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
@@ -956,11 +958,12 @@ function Toggle({
 
 /* ── Notification channel card ── */
 function ChannelCard({
-  icon, title, badge, enabled, onToggle, disabled, children,
+  icon, title, badge, badgeColor, enabled, onToggle, disabled, children,
 }: {
   icon: string;
   title: string;
   badge: string | null;
+  badgeColor?: string;
   enabled: boolean;
   onToggle?: (v: boolean) => void;
   disabled?: boolean;
@@ -982,7 +985,7 @@ function ChannelCard({
           <span style={{ fontSize: 20 }}>{icon}</span>
           <span style={{ fontWeight: 700, fontSize: 15, color: "#111827" }}>{title}</span>
           {badge && (
-            <span style={{ fontSize: 11, fontWeight: 700, background: "#4f46e5", color: "#fff", padding: "2px 8px", borderRadius: 20 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, background: badgeColor ?? "#4f46e5", color: "#fff", padding: "2px 8px", borderRadius: 20 }}>
               {badge}
             </span>
           )}
