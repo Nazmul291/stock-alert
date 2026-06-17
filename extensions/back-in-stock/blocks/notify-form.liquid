@@ -293,7 +293,6 @@
 </style>
 
 <div id="bis-data"
-  data-app-url="{{ shop.metafields.stock_alert.app_url | default: '' }}"
   data-shop="{{ shop.permanent_domain }}"
   data-product-id="{{ product.id }}"
   data-product-title="{{ product.title | escape }}"
@@ -308,7 +307,6 @@
   if (!d) return;
 
   var CFG = {
-    appUrl: d.getAttribute('data-app-url') || '',
     shop: d.getAttribute('data-shop'),
     productId: d.getAttribute('data-product-id'),
     productTitle: d.getAttribute('data-product-title'),
@@ -579,7 +577,7 @@
     if (firstName) payload.firstName = firstName;
     if (lastName) payload.lastName = lastName;
 
-    fetch((CFG.appUrl || '') + '/api/back-in-stock', {
+    fetch('/apps/stock-alert/back-in-stock', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
