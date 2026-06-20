@@ -131,6 +131,10 @@ async function processInventoryUpdate(
     console.log(`[Webhook] Product ${productId} not tracked in DB for ${shop} — skipping`);
     return;
   }
+  if (!storeSession?.plan) {
+    console.log(`[Webhook] No active plan for ${shop} — skipping`);
+    return;
+  }
   if (!settings) {
     console.warn(`[Webhook] No store settings found for ${shop} — skipping`);
     return;

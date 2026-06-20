@@ -1,7 +1,7 @@
 import prisma from '../db.server';
 import { getMaxProducts } from './plan-limits';
 
-export async function enforcePlanLimits(shop: string, plan: string) {
+export async function enforcePlanLimits(shop: string, plan: string | null) {
   const maxProducts = getMaxProducts(plan);
 
   const activeProducts = await prisma.inventoryTracking.findMany({
@@ -27,7 +27,7 @@ export async function canAddProduct(shop: string): Promise<{ canAdd: boolean; re
   const session = await prisma.session.findFirst({ where: { shop, isOnline: false } });
   if (!session) return { canAdd: false, reason: 'Store not found' };
 
-  const maxProducts = getMaxProducts(session.plan ?? 'basic');
+  const maxProducts = getMaxProducts(session.plan);
   const activeCount = await prisma.inventoryTracking.count({
     where: { shop, inventoryStatus: { not: 'deactivated' } },
   });
