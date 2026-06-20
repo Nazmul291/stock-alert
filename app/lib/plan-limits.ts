@@ -1,4 +1,16 @@
 export const PLAN_LIMITS = {
+  none: {
+    name: 'None',
+    price: null,
+    maxProducts: 0,
+    features: [],
+    restrictions: {
+      slackNotifications: false,
+      perProductThresholds: false,
+      autoRepublish: false,
+      advancedRules: false,
+    },
+  },
   basic: {
     name: 'Basic',
     price: '$3.99/month',
@@ -44,24 +56,24 @@ export const PLAN_LIMITS = {
 
 export type PlanType = keyof typeof PLAN_LIMITS;
 
-export function getPlanLimits(plan: string = 'basic') {
-  const planType = (plan === 'pro' ? 'pro' : 'basic') as PlanType;
+export function getPlanLimits(plan?: string | null) {
+  const planType = (plan === 'pro' ? 'pro' : plan === 'basic' ? 'basic' : 'none') as PlanType;
   return PLAN_LIMITS[planType];
 }
 
-export function getMaxProducts(plan: string = 'basic'): number {
+export function getMaxProducts(plan?: string | null): number {
   return getPlanLimits(plan).maxProducts;
 }
 
 export function canUseFeature(
-  plan: string = 'basic',
+  plan: string | null | undefined,
   feature: keyof typeof PLAN_LIMITS.basic.restrictions,
 ): boolean {
   return getPlanLimits(plan).restrictions[feature];
 }
 
 export function validateProductLimit(
-  plan: string = 'basic',
+  plan: string | null | undefined,
   currentProductCount: number,
 ): { canAdd: boolean; currentCount: number; maxProducts: number; message: string } {
   const limits = getPlanLimits(plan);
@@ -72,6 +84,8 @@ export function validateProductLimit(
     maxProducts: limits.maxProducts,
     message: canAdd
       ? `You can track ${limits.maxProducts - currentProductCount} more products on the ${limits.name} plan`
+      : limits.maxProducts === 0
+      ? `Select a plan to start tracking products.`
       : `You've reached the ${limits.maxProducts} product limit on the ${limits.name} plan. Upgrade to Professional to track up to 10,000 products.`,
   };
 }

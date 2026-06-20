@@ -29,18 +29,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     invalidateShopCache(shop);
     console.log(`[Billing] Plan updated to ${plan} for ${shop} (subscription ${status})`);
   } else if (["DECLINED", "EXPIRED", "CANCELLED", "FROZEN"].includes(status)) {
-    // Subscription lapsed — downgrade to basic so Pro features are revoked promptly.
+    // Subscription lapsed — clear the plan entirely. Basic is a paid tier too,
+    // so a lapsed subscriber has no plan at all, not a "free" Basic fallback.
     await prisma.session.updateMany({
       where: { shop, isOnline: false },
-      data: { plan: "basic" },
+      data: { plan: null },
     });
     invalidateShopCache(shop);
-    console.log(`[Billing] Subscription ${status} — downgraded ${shop} to basic`);
-    // Enforce the Basic product limit immediately so merchants can't keep benefiting
-    // from Pro-tier tracking after their subscription lapses.
-    const enforcement = await enforcePlanLimits(shop, "basic");
+    console.log(`[Billing] Subscription ${status} — cleared plan for ${shop}`);
+    // Deactivate all tracked products immediately so merchants can't keep
+    // benefiting from monitoring/alerts after their subscription lapses.
+    const enforcement = await enforcePlanLimits(shop, null);
     if (enforcement.deactivatedCount > 0) {
-      console.log(`[Billing] Enforced Basic limit for ${shop}: deactivated ${enforcement.deactivatedCount} products over the ${enforcement.maxAllowed} cap`);
+      console.log(`[Billing] No active plan for ${shop}: deactivated ${enforcement.deactivatedCount} products`);
     }
   }
 
