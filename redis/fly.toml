@@ -1,0 +1,12 @@
+app = "nco-stock-alert-redis"
+primary_region = "iad"
+
+[build]
+
+[[mounts]]
+  source      = "redis_data"
+  destination = "/data"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"
