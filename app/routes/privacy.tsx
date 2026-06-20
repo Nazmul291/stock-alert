@@ -1,5 +1,5 @@
 export default function PrivacyPolicy() {
-  const appUrl = "https://nco-stock-alert.fly.dev";
+  const appUrl = "https://stock-alert.nazmulcodes.org";
   const contactEmail = "nazmul291@gmail.com";
   const lastUpdated = "June 14, 2026";
 
