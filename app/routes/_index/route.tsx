@@ -5,7 +5,7 @@ import { PLAN_LIMITS } from "../../lib/plan-limits";
 import styles from "./styles.module.css";
 
 const APP_NAME = "Stock Alert";
-const APP_STORE_URL = "https://apps.shopify.com/stock-alert";
+const APP_STORE_URL = "https://apps.shopify.com/stock-alert-4";
 const TITLE = "Stock Alert — Low Stock & Back in Stock Alerts for Shopify";
 const DESCRIPTION =
   "Stock Alert monitors your Shopify inventory in real time and sends instant email and Slack alerts the moment a product runs low or sells out — plus automatic back-in-stock notifications for your customers.";
