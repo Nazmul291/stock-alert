@@ -1,73 +1,328 @@
-.index {
+.page {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #111827;
+  background: #fff;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+
+.header {
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 10;
+}
+
+.headerInner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  display: flex;
   align-items: center;
+  gap: 32px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 17px;
+  color: #111827;
+}
+
+.brandLogo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.nav {
+  display: flex;
+  gap: 24px;
+  flex: 1;
+}
+
+.nav a {
+  color: #374151;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.nav a:hover {
+  color: #4f46e5;
+}
+
+.headerCta {
+  background: #111827;
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.headerCta:hover {
+  background: #312e81;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+
+.hero {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 88px 24px 64px;
+  text-align: center;
+}
+
+.heroHeading {
+  font-size: 44px;
+  line-height: 1.15;
+  font-weight: 800;
+  margin: 0 0 20px;
+  color: #111827;
+  letter-spacing: -0.02em;
+}
+
+.heroText {
+  font-size: 18px;
+  line-height: 1.6;
+  color: #4b5563;
+  margin: 0 0 32px;
+}
+
+.heroActions {
   display: flex;
   justify-content: center;
-  height: 100%;
-  width: 100%;
-  text-align: center;
-  padding: 1rem;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
-.heading,
-.text {
-  padding: 0;
+.heroNote {
+  margin: 20px 0 0;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.primaryButton {
+  display: inline-block;
+  background: #4f46e5;
+  color: #fff;
+  padding: 13px 26px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.primaryButton:hover {
+  background: #4338ca;
+}
+
+.secondaryButton {
+  display: inline-block;
+  background: #fff;
+  color: #111827;
+  padding: 13px 26px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid #d1d5db;
+  white-space: nowrap;
+}
+
+.secondaryButton:hover {
+  border-color: #9ca3af;
+}
+
+/* ── Shared section heading ──────────────────────────────────────────── */
+
+.sectionHeading {
+  font-size: 30px;
+  font-weight: 800;
+  text-align: center;
+  margin: 0 0 12px;
+  color: #111827;
+  letter-spacing: -0.01em;
+}
+
+.sectionSub {
+  text-align: center;
+  color: #6b7280;
+  font-size: 15px;
+  margin: 0 0 40px;
+}
+
+/* ── Features ─────────────────────────────────────────────────────────── */
+
+.features {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 64px 24px;
+}
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-top: 40px;
+}
+
+.featureCard {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.featureCard h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: #111827;
+}
+
+.featureCard p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #6b7280;
   margin: 0;
 }
 
-.text {
-  font-size: 1.2rem;
-  padding-bottom: 2rem;
-}
+/* ── Pricing ──────────────────────────────────────────────────────────── */
 
-.content {
-  display: grid;
-  gap: 2rem;
-}
-
-.form {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
+.pricing {
+  max-width: 900px;
   margin: 0 auto;
-  gap: 1rem;
+  padding: 64px 24px;
 }
 
-.label {
+.pricingGrid {
   display: grid;
-  gap: 0.2rem;
-  max-width: 20rem;
-  text-align: left;
-  font-size: 1rem;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  margin-top: 16px;
 }
 
-.input {
-  padding: 0.4rem;
+.pricingCard {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
 }
 
-.button {
-  padding: 0.4rem;
+.pricingCardHighlight {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 1px #4f46e5;
 }
 
-.list {
+.pricingCard h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  color: #111827;
+}
+
+.price {
+  font-size: 26px;
+  font-weight: 800;
+  color: #111827;
+  margin: 0 0 20px;
+}
+
+.pricingCard ul {
   list-style: none;
   padding: 0;
-  padding-top: 3rem;
-  margin: 0;
+  margin: 0 0 28px;
+  flex: 1;
+}
+
+.pricingCard li {
+  font-size: 14px;
+  color: #374151;
+  padding: 6px 0;
+  border-top: 1px solid #f3f4f6;
+}
+
+.pricingCard li:first-child {
+  border-top: none;
+}
+
+.pricingCard a {
+  text-align: center;
+}
+
+/* ── Final CTA ────────────────────────────────────────────────────────── */
+
+.finalCta {
+  background: #111827;
+  text-align: center;
+  padding: 72px 24px;
+}
+
+.finalCta h2 {
+  color: #fff;
+  font-size: 28px;
+  font-weight: 800;
+  margin: 0 0 28px;
+}
+
+.finalCta .primaryButton {
+  background: #fff;
+  color: #111827;
+}
+
+.finalCta .primaryButton:hover {
+  background: #e5e7eb;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+
+.footer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
   display: flex;
-  gap: 2rem;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+  font-size: 13px;
+  color: #9ca3af;
 }
 
-.list > li {
-  max-width: 20rem;
-  text-align: left;
+.footer a {
+  color: #6b7280;
+  text-decoration: none;
 }
 
-@media only screen and (max-width: 50rem) {
-  .list {
-    display: block;
+.footer a:hover {
+  color: #4f46e5;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+
+@media only screen and (max-width: 760px) {
+  .nav {
+    display: none;
   }
 
-  .list > li {
-    padding-bottom: 1rem;
+  .heroHeading {
+    font-size: 32px;
+  }
+
+  .featureGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricingGrid {
+    grid-template-columns: 1fr;
   }
 }

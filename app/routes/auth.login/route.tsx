@@ -37,7 +37,7 @@ export default function Auth() {
             </p>
             <s-button
               variant="primary"
-              href="https://apps.shopify.com/stock-alert"
+              href="https://apps.shopify.com/stock-alert-4"
               target="_blank"
             >
               Go to App Store listing
