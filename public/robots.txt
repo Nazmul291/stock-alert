@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Allow: /privacy
+Allow: /terms
+Disallow: /app
+Disallow: /admin
+Disallow: /api
+Disallow: /auth
+Disallow: /webhooks
+
+Sitemap: https://stock-alert.nazmulcodes.org/sitemap.xml
