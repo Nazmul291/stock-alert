@@ -333,6 +333,7 @@ function SetupChecklist({
   syncSubmitting: boolean;
   onSync: () => void;
 }) {
+  const navigate = useNavigate();
   const steps = [
     {
       done: progress.appInstalled,
@@ -421,16 +422,17 @@ function SetupChecklist({
               </button>
             )}
             {!step.done && step.action && (
-              <a
-                href={step.action.href}
+              <button
+                type="button"
+                onClick={() => navigate(step.action!.href)}
                 style={{
                   flexShrink: 0, padding: "6px 14px", borderRadius: 6, border: "1px solid #667eea",
                   background: "#667eea", color: "#fff", fontSize: 13, fontWeight: 600,
-                  textDecoration: "none", whiteSpace: "nowrap",
+                  cursor: "pointer", whiteSpace: "nowrap",
                 }}
               >
                 {step.action.label}
-              </a>
+              </button>
             )}
           </div>
         ))}
