@@ -40,7 +40,10 @@ const FEATURES = [
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
-  if (url.searchParams.get("shop")) {
+  // Shopify's embedded admin often loads this URL with only `host` (the shop is
+  // encoded inside it) and no `shop` param — especially via admin.shopify.com —
+  // so check both, or the iframe falls through to the public marketing page.
+  if (url.searchParams.get("shop") || url.searchParams.get("host")) {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
