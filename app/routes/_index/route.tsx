@@ -40,10 +40,13 @@ const FEATURES = [
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
-  // Shopify's embedded admin often loads this URL with only `host` (the shop is
-  // encoded inside it) and no `shop` param — especially via admin.shopify.com —
-  // so check both, or the iframe falls through to the public marketing page.
-  if (url.searchParams.get("shop") || url.searchParams.get("host")) {
+  // Shopify's embedded admin doesn't consistently send the same params on every
+  // load path (sometimes shop, sometimes only host, sometimes other tracking
+  // params alongside). `embedded=1` is the one marker it always sends when
+  // rendering this URL inside the admin iframe, so treat any of these as "this
+  // is an embedded load" rather than requiring a specific param to be present.
+  const isEmbeddedLoad = ["shop", "host", "embedded", "appLoadId"].some((key) => url.searchParams.has(key));
+  if (isEmbeddedLoad) {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
