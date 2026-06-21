@@ -1,16 +1,54 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, Form, useFetcher } from "react-router";
+import { useLoaderData, Form, useFetcher, Await } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendTestNotification } from "../lib/notifications";
 import { invalidateShopCache } from "../lib/shop-cache.server";
+import { SkeletonBlock } from "../components/Skeleton";
 
+type SettingsValues = {
+  autoHideEnabled: boolean;
+  autoRepublishEnabled: boolean;
+  lowStockThreshold: number;
+  emailNotifications: boolean;
+  slackNotifications: boolean;
+  notificationEmail: string;
+  slackWebhookUrl: string;
+  whatsappNotifications: boolean;
+  whatsappPhone: string;
+  whatsappPhoneNumberId: string;
+  whatsappAccessToken: string;
+  digestEnabled: boolean;
+  digestFrequency: string;
+  brandLogoUrl: string;
+  brandColor: string;
+  brandSenderName: string;
+  outboundWebhookUrl: string;
+  supplierLeadTimeDays: number;
+  monitoringFilter: string;
+  monitoringCollectionId: string;
+  monitoringTags: string;
+};
+
+type SettingsData = {
+  shop: string;
+  plan: string;
+  storeEmail: string | null;
+  settings: SettingsValues;
+};
+
+// Only the auth check blocks the response — the two settings/session lookups
+// are kicked off but not awaited, so the page shell (plan card + form
+// skeleton) streams immediately while the real form fills in once ready.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
+  return { settingsData: loadSettingsData(shop) };
+};
 
+async function loadSettingsData(shop: string): Promise<SettingsData> {
   const [settings, storeSession] = await Promise.all([
     prisma.storeSettings.findUnique({ where: { shop } }),
     prisma.session.findFirst({ where: { shop, isOnline: false } }),
@@ -68,7 +106,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           monitoringTags: "",
         },
   };
-};
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -242,7 +280,45 @@ const helpText: React.CSSProperties = {
 };
 
 export default function SettingsPage() {
-  const { plan, storeEmail, settings } = useLoaderData<typeof loader>();
+  const { settingsData } = useLoaderData<typeof loader>();
+
+  return (
+    <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
+      <Suspense fallback={<SettingsSkeleton />}>
+        <Await resolve={settingsData}>{(data) => <SettingsContent data={data} />}</Await>
+      </Suspense>
+
+      {/* ── Danger Zone — static, doesn't depend on loaded settings ── */}
+      <div style={{ marginTop: 24 }}>
+        <s-section heading="Danger Zone">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: "#111827", marginBottom: 2 }}>Reset all product data</div>
+              <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>
+                Clears synced inventory and alert history. Your notification settings are kept. This cannot be undone.
+              </p>
+            </div>
+            <Form
+              method="post"
+              onSubmit={(e) => { if (!confirm("Reset all product data? This cannot be undone.")) e.preventDefault(); }}
+            >
+              <input type="hidden" name="intent" value="reset" />
+              <button
+                type="submit"
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #fca5a5", background: "#fee2e2", color: "#991b1b", cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}
+              >
+                Reset Product Data
+              </button>
+            </Form>
+          </div>
+        </s-section>
+      </div>
+    </s-page>
+  );
+}
+
+function SettingsContent({ data }: { data: SettingsData }) {
+  const { plan, storeEmail, settings } = data;
   const saveFetcher = useFetcher<typeof action>();
   const saving = saveFetcher.state !== "idle";
   const [autoHideEnabled, setAutoHideEnabled] = useState(settings.autoHideEnabled);
@@ -350,7 +426,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
+    <>
       {/* Toast-style success */}
       {isDirty && <div style={{ height: 57 }} />}
 
@@ -842,32 +918,6 @@ export default function SettingsPage() {
         </div>
       </Form>
 
-      {/* ── Danger Zone ── */}
-      <div style={{ marginTop: 24 }}>
-        <s-section heading="Danger Zone">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#111827", marginBottom: 2 }}>Reset all product data</div>
-              <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>
-                Clears synced inventory and alert history. Your notification settings are kept. This cannot be undone.
-              </p>
-            </div>
-            <Form
-              method="post"
-              onSubmit={(e) => { if (!confirm("Reset all product data? This cannot be undone.")) e.preventDefault(); }}
-            >
-              <input type="hidden" name="intent" value="reset" />
-              <button
-                type="submit"
-                style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #fca5a5", background: "#fee2e2", color: "#991b1b", cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}
-              >
-                Reset Product Data
-              </button>
-            </Form>
-          </div>
-        </s-section>
-      </div>
-
       {/* ── Test notification toast ── */}
       {toastResult && (
         <div style={{
@@ -908,7 +958,80 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
-    </s-page>
+    </>
+  );
+}
+
+function SettingsSkeleton() {
+  return (
+    <>
+      <div style={{ marginBottom: 24, padding: "16px 20px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <SkeletonBlock width={90} height={16} />
+          <SkeletonBlock width={80} height={20} borderRadius={20} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "8px 12px" }}>
+          {Array.from({ length: 8 }, (_, i) => <SkeletonBlock key={i} width="80%" height={13} />)}
+        </div>
+      </div>
+
+      <s-section heading="Inventory Settings">
+        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+          {Array.from({ length: 2 }, (_, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid #f3f4f6" }}>
+              <SkeletonBlock width={220} height={14} />
+              <SkeletonBlock width={44} height={24} borderRadius={12} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
+          <SkeletonBlock width={120} height={36} borderRadius={8} />
+          <SkeletonBlock width={120} height={36} borderRadius={8} />
+        </div>
+      </s-section>
+
+      <div style={{ marginTop: 24 }}>
+        <s-section heading="Notifications">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} style={{ border: "1.5px solid #e5e7eb", borderRadius: 10, marginBottom: 12, padding: "14px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <SkeletonBlock width={120} height={16} />
+                <SkeletonBlock width={44} height={24} borderRadius={12} />
+              </div>
+            </div>
+          ))}
+        </s-section>
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <s-section heading="Digest Emails">
+          <SkeletonBlock width="100%" height={40} borderRadius={8} />
+        </s-section>
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <s-section heading="Email Branding">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <SkeletonBlock width="100%" height={36} borderRadius={8} />
+            <SkeletonBlock width="100%" height={36} borderRadius={8} />
+          </div>
+        </s-section>
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <s-section heading="Outbound Webhook">
+          <SkeletonBlock width="100%" height={36} borderRadius={8} />
+        </s-section>
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <s-section heading="Monitoring Scope">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Array.from({ length: 3 }, (_, i) => <SkeletonBlock key={i} width="100%" height={56} borderRadius={8} />)}
+          </div>
+        </s-section>
+      </div>
+    </>
   );
 }
 

@@ -26,6 +26,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const isPublicRoute = pathname.startsWith("/app/billing") || pathname.startsWith("/app/onboarding");
 
+  // Runs concurrently with the billing check below instead of after it — it
+  // doesn't depend on that result, so there's no reason to block on it first.
+  const alertsTodayPromise = prisma.alertHistory.count({
+    where: { shop, sentAt: { gte: todayUTC() } },
+  });
+  // Suppress the "unhandled rejection" warning if a redirect below abandons
+  // this promise before it's awaited; the real await further down still throws.
+  alertsTodayPromise.catch(() => {});
+
   if (!isPublicRoute) {
     try {
       const isTest = await getIsTestStore(admin, shop);
@@ -45,9 +54,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  const alertsToday = await prisma.alertHistory.count({
-    where: { shop, sentAt: { gte: todayUTC() } },
-  });
+  const alertsToday = await alertsTodayPromise;
 
   // Non-blocking — re-registers any missing Shopify webhook subscriptions once per hour.
   ensureWebhooks(admin, shop, process.env.SHOPIFY_APP_URL || "").catch(() => {});

@@ -1,13 +1,34 @@
+import { Suspense } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, Await } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { SkeletonBlock } from "../components/Skeleton";
 
+type AnalyticsData = {
+  totalThisMonth: number;
+  totalLastMonth: number;
+  avgPerDay: number;
+  busiest: { day: string; count: number };
+  daily30: { day: string; count: number }[];
+  typeBreakdown: { type: string; count: number }[];
+  topProducts: { title: string; count: number }[];
+  channel: { email: number; slack: number };
+  stockHealth: { inStock: number; lowStock: number; outOfStock: number; deactivated: number };
+};
+
+// Only the auth check blocks the response — every query below is kicked off
+// but not awaited, so the page shell streams immediately and each chart
+// section fills in independently (via its own Suspense boundary) once the
+// shared analytics fetch resolves.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
+  return { data: loadAnalyticsData(shop) };
+};
 
+async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const sixtyDaysAgo  = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
@@ -108,76 +129,133 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       deactivated: stockMap.get("deactivated") ?? 0,
     },
   };
-};
+}
 
 export default function AnalyticsPage() {
-  const { totalThisMonth, totalLastMonth, avgPerDay, busiest, daily30, typeBreakdown, topProducts, channel, stockHealth } =
-    useLoaderData<typeof loader>();
-
-  const pctChange = totalLastMonth === 0
-    ? null
-    : Math.round(((totalThisMonth - totalLastMonth) / totalLastMonth) * 100);
+  const { data } = useLoaderData<typeof loader>();
 
   return (
     <s-page heading="Analytics" sub-heading="Alert trends and inventory health over the last 30 days">
 
       {/* Summary stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 12, marginBottom: 24 }}>
-        <StatCard label="Alerts (30 days)" value={totalThisMonth} color="#4f46e5" />
-        <StatCard
-          label="vs Previous 30 days"
-          value={pctChange === null ? "—" : `${pctChange >= 0 ? "+" : ""}${pctChange}%`}
-          color={pctChange === null ? "#9ca3af" : pctChange > 0 ? "#dc2626" : "#059669"}
-          sub={`${totalLastMonth} last period`}
-        />
-        <StatCard label="Avg alerts / day" value={avgPerDay.toFixed(1)} color="#374151" />
-        <StatCard
-          label="Busiest day"
-          value={busiest.count === 0 ? "—" : busiest.count}
-          color="#d97706"
-          sub={busiest.day ? new Date(busiest.day).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : ""}
-        />
-      </div>
+      <Suspense fallback={<StatCardsSkeleton />}>
+        <Await resolve={data}>{(d) => <StatCards data={d} />}</Await>
+      </Suspense>
 
       {/* Row 2: Type breakdown + Channel */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <s-section heading="Alert Types">
-          <AlertTypeBreakdown data={typeBreakdown} total={totalThisMonth} />
+          <Suspense fallback={<DonutSkeleton />}>
+            <Await resolve={data}>{(d) => <AlertTypeBreakdown data={d.typeBreakdown} total={d.totalThisMonth} />}</Await>
+          </Suspense>
         </s-section>
         <s-section heading="Notification Channels">
-          <ChannelBreakdown email={channel.email} slack={channel.slack} />
+          <Suspense fallback={<ChannelSkeleton />}>
+            <Await resolve={data}>{(d) => <ChannelBreakdown email={d.channel.email} slack={d.channel.slack} />}</Await>
+          </Suspense>
         </s-section>
       </div>
 
       {/* Daily volume chart */}
       <s-section heading="Daily Alert Volume — Last 30 Days">
-        <DailyBarChart data={daily30} />
+        <Suspense fallback={<SkeletonBlock width="100%" height={82} />}>
+          <Await resolve={data}>{(d) => <DailyBarChart data={d.daily30} />}</Await>
+        </Suspense>
       </s-section>
 
       {/* Top products */}
-      {topProducts.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <s-section heading="Most Alerted Products">
-            <TopProductsChart data={topProducts} />
-          </s-section>
-        </div>
-      )}
+      <Suspense fallback={null}>
+        <Await resolve={data}>{(d) => d.topProducts.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <s-section heading="Most Alerted Products">
+              <TopProductsChart data={d.topProducts} />
+            </s-section>
+          </div>
+        )}</Await>
+      </Suspense>
 
       {/* Stock health */}
       <div style={{ marginTop: 16 }}>
         <s-section heading="Current Stock Health">
-          <StockHealthBar health={stockHealth} />
+          <Suspense fallback={<SkeletonBlock width="100%" height={20} borderRadius={6} />}>
+            <Await resolve={data}>{(d) => <StockHealthBar health={d.stockHealth} />}</Await>
+          </Suspense>
         </s-section>
       </div>
 
-      {totalThisMonth === 0 && (
-        <div style={{ marginTop: 24, padding: "32px", textAlign: "center", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10 }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-          <p style={{ fontWeight: 600, color: "#374151", marginBottom: 6 }}>No alerts yet</p>
-          <p style={{ fontSize: 14, color: "#6b7280" }}>Analytics will appear once Stock Alert starts firing notifications.</p>
-        </div>
-      )}
+      <Suspense fallback={null}>
+        <Await resolve={data}>{(d) => d.totalThisMonth === 0 && (
+          <div style={{ marginTop: 24, padding: "32px", textAlign: "center", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
+            <p style={{ fontWeight: 600, color: "#374151", marginBottom: 6 }}>No alerts yet</p>
+            <p style={{ fontSize: 14, color: "#6b7280" }}>Analytics will appear once Stock Alert starts firing notifications.</p>
+          </div>
+        )}</Await>
+      </Suspense>
     </s-page>
+  );
+}
+
+function StatCards({ data }: { data: AnalyticsData }) {
+  const { totalThisMonth, totalLastMonth, avgPerDay, busiest } = data;
+  const pctChange = totalLastMonth === 0
+    ? null
+    : Math.round(((totalThisMonth - totalLastMonth) / totalLastMonth) * 100);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 12, marginBottom: 24 }}>
+      <StatCard label="Alerts (30 days)" value={totalThisMonth} color="#4f46e5" />
+      <StatCard
+        label="vs Previous 30 days"
+        value={pctChange === null ? "—" : `${pctChange >= 0 ? "+" : ""}${pctChange}%`}
+        color={pctChange === null ? "#9ca3af" : pctChange > 0 ? "#dc2626" : "#059669"}
+        sub={`${totalLastMonth} last period`}
+      />
+      <StatCard label="Avg alerts / day" value={avgPerDay.toFixed(1)} color="#374151" />
+      <StatCard
+        label="Busiest day"
+        value={busiest.count === 0 ? "—" : busiest.count}
+        color="#d97706"
+        sub={busiest.day ? new Date(busiest.day).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : ""}
+      />
+    </div>
+  );
+}
+
+function StatCardsSkeleton() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 12, marginBottom: 24 }}>
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, padding: "16px 18px" }}>
+          <SkeletonBlock width={56} height={28} style={{ marginBottom: 8 }} />
+          <SkeletonBlock width={100} height={13} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DonutSkeleton() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+      <SkeletonBlock width={112} height={112} borderRadius={56} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {Array.from({ length: 3 }, (_, i) => <SkeletonBlock key={i} width={120} height={14} />)}
+      </div>
+    </div>
+  );
+}
+
+function ChannelSkeleton() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {Array.from({ length: 2 }, (_, i) => (
+        <div key={i}>
+          <SkeletonBlock width="100%" height={13} style={{ marginBottom: 6 }} />
+          <SkeletonBlock width="100%" height={8} borderRadius={4} />
+        </div>
+      ))}
+    </div>
   );
 }
 

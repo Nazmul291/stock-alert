@@ -1,6 +1,6 @@
-import React, { useEffect } from "react";
+import React, { Suspense, useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
+import { useLoaderData, useFetcher, Await } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -9,11 +9,48 @@ import { format } from "date-fns";
 import { syncState } from "../lib/sync-state.server";
 import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
+import { SkeletonBlock } from "../components/Skeleton";
 
+type DashboardData = {
+  plan: string;
+  stats: {
+    totalProducts: number;
+    outOfStock: number;
+    lowStock: number;
+    inStock: number;
+    hidden: number;
+    deactivated: number;
+  };
+  setupProgress: {
+    appInstalled: boolean;
+    globalSettingsConfigured: boolean;
+    notificationsConfigured: boolean;
+    firstProductTracked: boolean;
+  };
+  progressPct: number;
+  syncRunning: boolean;
+  lastSyncCompletedAt: string | null;
+  lastSyncCount: number | null;
+  lastWebhookAt: string | null;
+  recentAlerts: { id: string; productTitle: string | null; alertType: string | null; sentAt: string }[];
+  notificationEmail: string | null;
+  alertsToday: number;
+  spark7: number[];
+  stockOutSoonCount: number;
+  atRiskProducts: { productId: string; productTitle: string | null; sku: string | null; currentQuantity: number; inventoryStatus: string }[];
+};
+
+// Only the auth check blocks the response — everything else is fetched here but
+// NOT awaited, so the shell (page chrome + skeletons) streams to the browser
+// immediately while this keeps resolving on the server and streams in via
+// <Suspense>/<Await> the moment it's ready.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
+  return { shop, dashboardData: loadDashboardData(shop) };
+};
 
+async function loadDashboardData(shop: string): Promise<DashboardData> {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
 
@@ -77,7 +114,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   return {
-    shop,
     plan: storeSession?.plan ?? "basic",
     stats,
     setupProgress: {
@@ -109,7 +145,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       inventoryStatus: p.inventoryStatus as string,
     })),
   };
-};
+}
 
 function timeAgo(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -122,8 +158,26 @@ function timeAgo(iso: string): string {
 }
 
 export default function Dashboard() {
-  const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts, stockOutSoonCount } =
-    useLoaderData<typeof loader>();
+  const { shop, dashboardData } = useLoaderData<typeof loader>();
+
+  return (
+    <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
+      <s-button slot="primary-action" variant="primary" href="/app/products">
+        Manage Products
+      </s-button>
+
+      <Suspense fallback={<DashboardSkeleton />}>
+        <Await resolve={dashboardData}>{(data) => <DashboardContent shop={shop} data={data} />}</Await>
+      </Suspense>
+    </s-page>
+  );
+}
+
+function DashboardContent({ shop, data }: { shop: string; data: DashboardData }) {
+  const {
+    plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount,
+    lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts, stockOutSoonCount,
+  } = data;
 
   const navigate = useShopAwareNavigate();
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
@@ -137,11 +191,7 @@ export default function Dashboard() {
   const syncError = syncStreamError ?? syncActionError;
 
   return (
-    <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
-      <s-button slot="primary-action" href="/app/products">
-        Manage Products
-      </s-button>
-
+    <>
       {/* Setup checklist */}
       {progressPct < 100 && (
         <SetupChecklist
@@ -317,7 +367,48 @@ export default function Dashboard() {
           {plan !== "pro" && <s-button href="/app/billing">Upgrade to Pro</s-button>}
         </s-stack>
       </s-section>
-    </s-page>
+    </>
+  );
+}
+
+// ── Skeleton (shown while dashboardData is still resolving) ──────────────────
+// Mirrors the real layout section-by-section so each piece of the page has its
+// own loading shape instead of one generic spinner — and so there's minimal
+// layout shift once the real content swaps in.
+
+function DashboardSkeleton() {
+  return (
+    <>
+      <s-section heading="Inventory Overview">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 12, margin: "8px 0" }}>
+          {Array.from({ length: 8 }, (_, i) => (
+            <div key={i} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, textAlign: "center" }}>
+              <SkeletonBlock width={48} height={28} style={{ margin: "0 auto 8px" }} />
+              <SkeletonBlock width={70} height={13} style={{ margin: "0 auto" }} />
+            </div>
+          ))}
+        </div>
+        <SkeletonBlock width="100%" height={60} style={{ marginTop: 16 }} />
+        <SkeletonBlock width="100%" height={24} style={{ marginTop: 12, borderRadius: 20 }} />
+      </s-section>
+
+      <s-section heading="Recent Alerts">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {Array.from({ length: 3 }, (_, i) => (
+            <SkeletonBlock key={i} width="100%" height={48} borderRadius={6} />
+          ))}
+        </div>
+      </s-section>
+
+      <s-section heading="Store Information" slot="aside">
+        <SkeletonBlock width="80%" height={16} style={{ marginBottom: 8 }} />
+        <SkeletonBlock width="60%" height={16} />
+      </s-section>
+
+      <s-section heading="Quick Actions" slot="aside">
+        <SkeletonBlock width="100%" height={36} borderRadius={8} />
+      </s-section>
+    </>
   );
 }
 

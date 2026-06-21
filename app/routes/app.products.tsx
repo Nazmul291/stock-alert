@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher } from "react-router";
+import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher, Await } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -13,6 +13,7 @@ import { calcSalesVelocity, computeStockOutDays } from "../lib/velocity.server";
 import { ProductEditModal } from "../components/ProductEditModal";
 import type { ProductRow } from "../components/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/InventorySection";
+import { SkeletonBlock } from "../components/Skeleton";
 
 const PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String, $query: String) {
@@ -20,7 +21,7 @@ const PRODUCTS_GRAPHQL = `
       edges {
         node {
           id title status
-          featuredImage { url altText }
+          featuredMedia { preview { image { url altText } } }
           variants(first: 100) {
             edges {
               node {
@@ -76,8 +77,8 @@ const INVENTORY_ITEM_UPDATE_MUTATION = `
 `;
 
 const PRODUCT_UPDATE_MUTATION = `
-  mutation productUpdate($input: ProductInput!) {
-    productUpdate(input: $input) {
+  mutation productUpdate($product: ProductUpdateInput!) {
+    productUpdate(product: $product) {
       product { id status }
       userErrors { field message }
     }
@@ -125,20 +126,43 @@ const METAFIELDS_SET_MUTATION = `
   }
 `;
 
-const METAFIELD_DELETE_MUTATION = `
-  mutation metafieldDelete($input: MetafieldDeleteInput!) {
-    metafieldDelete(input: $input) {
-      deletedId
+const METAFIELDS_DELETE_MUTATION = `
+  mutation metafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
+    metafieldsDelete(metafields: $metafields) {
+      deletedMetafields { key namespace ownerId }
       userErrors { field message }
     }
   }
 `;
+
+type ProductsData = {
+  shop: string;
+  plan: string;
+  maxProducts: number;
+  trackedCount: number;
+  threshold: number;
+  products: ProductRow[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  syncRunning: boolean;
+  lastSyncCompletedAt: string | null;
+  lastSyncCount: number | null;
+  autoHideEnabled: boolean;
+  autoRepublishEnabled: boolean;
+  supplierLeadTimeDays: number;
+  monitoringFilter: string;
+  monitoringCollectionId: string | null;
+  monitoringTags: string | null;
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const url = new URL(request.url);
 
+  // The intents below are resource-route-style sub-requests (CSV export, the
+  // collection picker, the edit modal's inventory/settings fetchers) — they're
+  // not the main page render, so they stay fully synchronous/awaited exactly
+  // as before.
   if (url.searchParams.get("intent") === "export_csv") {
     const csvFilter = url.searchParams.get("filter") ?? "all";
     const statusFilter: string[] =
@@ -269,6 +293,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const after = url.searchParams.get("after") ?? null;
   const prev = url.searchParams.get("prev") ?? "";
   const filter = url.searchParams.get("filter") ?? "all";
+
+  // This is the actual page render. The Shopify product fetch + DB lookups are
+  // kicked off but not awaited — the page shell (including the disabled-look
+  // sync button and the skeleton table) streams immediately, and the real
+  // table/banners stream in once this resolves.
+  return {
+    search, filter, after, prev,
+    productsData: loadProductsData({ admin, shop, search, after, filter }),
+  };
+};
+
+async function loadProductsData({ admin, shop, search, after, filter }: {
+  admin: any; shop: string; search: string; after: string | null; filter: string;
+}): Promise<ProductsData> {
   const pageSize = 50;
 
   const [storeSession, settings, shopSyncState] = await Promise.all([
@@ -330,8 +368,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (v.sku) skus.push(v.sku);
     }
 
-    const imageUrl: string | null = p.featuredImage?.url ?? null;
-    const imageAlt: string = p.featuredImage?.altText ?? (p.title as string);
+    const imageUrl: string | null = p.featuredMedia?.preview?.image?.url ?? null;
+    const imageAlt: string = p.featuredMedia?.preview?.image?.altText ?? (p.title as string);
     const shopifyStatus: string = p.status;
 
     if (allVariantsUntracked) {
@@ -399,7 +437,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : allProducts;
 
   return {
-    shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, prev,
+    shop, plan, maxProducts, trackedCount, threshold, products: products as ProductRow[], pageInfo,
     syncRunning: shopSyncState?.running ?? false,
     lastSyncCompletedAt: shopSyncState?.completedAt?.toISOString() ?? null,
     lastSyncCount: shopSyncState?.syncedCount ?? null,
@@ -410,7 +448,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     monitoringCollectionId: settings?.monitoringCollectionId ?? null,
     monitoringTags: settings?.monitoringTags ?? null,
   };
-};
+}
 
 async function runProductSync({ admin, shop, plan, maxProducts, threshold, monitoringFilter, monitoringCollectionId, monitoringTags }: {
   admin: any; shop: string; plan: string; maxProducts: number; threshold: number;
@@ -585,7 +623,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     try {
       const res = await admin.graphql(PRODUCT_UPDATE_MUTATION, {
-        variables: { input: { id: `gid://shopify/Product/${productId}`, status: shopifyStatus } },
+        variables: { product: { id: `gid://shopify/Product/${productId}`, status: shopifyStatus } },
       });
       const json: any = await res.json();
       const errs = json.data?.productUpdate?.userErrors ?? [];
@@ -681,7 +719,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       if (customThresholdRaw === "" && customThresholdMetafieldId) {
         try {
-          await admin.graphql(METAFIELD_DELETE_MUTATION, { variables: { input: { id: customThresholdMetafieldId } } });
+          await admin.graphql(METAFIELDS_DELETE_MUTATION, {
+            variables: { metafields: [{ ownerId, namespace: "stock_alert", key: "custom_threshold" }] },
+          });
         } catch {
           // Non-critical
         }
@@ -778,8 +818,27 @@ const FILTER_TABS = [
 ];
 
 export default function ProductsPage() {
-  const loaderData = useLoaderData<typeof loader>() as any;
-  const { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, search, filter, after, prev, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled, supplierLeadTimeDays } = loaderData;
+  const { search, filter, after, prev, productsData } = useLoaderData<typeof loader>() as any;
+
+  return (
+    <s-page heading="Products" sub-heading="Monitor and manage your tracked inventory">
+      <Suspense fallback={<ProductsPageSkeleton />}>
+        <Await resolve={productsData}>
+          {(data) => <ProductsPageContent data={data} search={search} filter={filter} after={after} prev={prev} />}
+        </Await>
+      </Suspense>
+    </s-page>
+  );
+}
+
+function ProductsPageContent({ data, search, filter, after, prev }: {
+  data: ProductsData;
+  search: string;
+  filter: string;
+  after: string | null;
+  prev: string;
+}) {
+  const { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled, supplierLeadTimeDays } = data;
 
   const nav = useNavigation();
   const submit = useSubmit();
@@ -841,7 +900,7 @@ export default function ProductsPage() {
   const nextPagePrev = [prev, after].filter(Boolean).join(",") || null;
 
   return (
-    <s-page heading="Products" sub-heading={`${trackedCount} of ${maxProducts} products tracked · ${plan === "pro" ? "Professional" : "Basic"} plan`}>
+    <>
       <SyncButton
         slot="primary-action"
         pct={syncPct}
@@ -876,7 +935,7 @@ export default function ProductsPage() {
 
       {plan !== "pro" && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
-          Basic plan: monitoring up to {maxProducts} products.{" "}
+          Basic plan: monitoring up to {maxProducts} products. {trackedCount} of {maxProducts} tracked.{" "}
           <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}
@@ -1000,7 +1059,7 @@ export default function ProductsPage() {
                       <td style={{ padding: "10px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           {p.imageUrl ? (
-                            <img src={p.imageUrl} alt={p.imageAlt} width={40} height={40}
+                            <img src={p.imageUrl} alt={p.imageAlt} width={40} height={40} loading="lazy"
                               style={{ borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
                           ) : (
                             <div style={{ width: 40, height: 40, borderRadius: 6, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 18 }}>
@@ -1134,7 +1193,28 @@ export default function ProductsPage() {
           onClose={() => setEditProduct(null)}
         />
       )}
-    </s-page>
+    </>
+  );
+}
+
+function ProductsPageSkeleton() {
+  return (
+    <>
+      <s-button slot="primary-action" disabled>Sync Products</s-button>
+      <s-section heading="">
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <SkeletonBlock width="100%" height={32} borderRadius={6} />
+        </div>
+        <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+          {Array.from({ length: 5 }, (_, i) => <SkeletonBlock key={i} width={90} height={20} />)}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {Array.from({ length: 8 }, (_, i) => (
+            <SkeletonBlock key={i} width="100%" height={56} borderRadius={6} />
+          ))}
+        </div>
+      </s-section>
+    </>
   );
 }
 
