@@ -575,14 +575,14 @@
       email: email,
     };
     if (firstName) payload.firstName = firstName;
-    if (lastName) payload.lastName = lastName;
-
+    if (lastName) payload.lastName = lastName
     fetch('/apps/stock-alert/back-in-stock', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.json(); })
       .then(function (data) {
         if (data.success) {
           onSuccess();
