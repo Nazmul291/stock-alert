@@ -17,7 +17,6 @@ const SUBSCRIPTIONS_QUERY = `
       edges {
         node {
           topic
-          endpoint { ... on WebhookHttpEndpoint { callbackUrl } }
         }
       }
     }
@@ -53,7 +52,7 @@ export async function ensureWebhooks(admin: any, shop: string, appUrl: string): 
         const createRes = await admin.graphql(CREATE_MUTATION, {
           variables: {
             topic,
-            webhookSubscription: { callbackUrl: `${appUrl}${path}`, format: "JSON" },
+            webhookSubscription: { uri: `${appUrl}${path}`, format: "JSON" },
           },
         });
         const createJson: any = await createRes.json();

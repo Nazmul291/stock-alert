@@ -21,7 +21,7 @@ const INVENTORY_ITEM_QUERY = `
       variant {
         product {
           legacyResourceId
-          featuredImage { url }
+          featuredMedia { preview { image { url } } }
           variants(first: 100) {
             edges { node { inventoryQuantity } }
           }
@@ -100,7 +100,7 @@ async function processInventoryUpdate(
   const invJson: any = await invRes.json();
   const product = invJson.data?.inventoryItem?.variant?.product;
   const productId: string | undefined = product?.legacyResourceId;
-  const productImageUrl: string | null = product?.featuredImage?.url ?? null;
+  const productImageUrl: string | null = product?.featuredMedia?.preview?.image?.url ?? null;
 
   if (!productId) {
     console.warn(
@@ -323,8 +323,8 @@ async function processInventoryUpdate(
     !existingTracking.isHidden
   ) {
     const res = await admin.graphql(
-      `mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`,
-      { variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } } },
+      `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
+      { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } } },
     );
     const json: any = await res.json();
     const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
@@ -346,8 +346,8 @@ async function processInventoryUpdate(
     existingTracking.isHidden
   ) {
     const res = await admin.graphql(
-      `mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { userErrors { message } } }`,
-      { variables: { input: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } } },
+      `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
+      { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } } },
     );
     const json: any = await res.json();
     const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
