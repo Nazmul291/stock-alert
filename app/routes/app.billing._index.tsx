@@ -9,7 +9,7 @@ import { invalidateShopCache } from "../lib/shop-cache.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { billing, admin, session } = await authenticate.admin(request);
   const shop = session.shop;
-  const isTest = await getIsTestStore(admin);
+  const isTest = await getIsTestStore(admin, shop);
 
   let activePlan: "basic" | "pro" | null = null;
   try {
@@ -39,7 +39,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { billing, admin, session } = await authenticate.admin(request);
-  const isTest = await getIsTestStore(admin);
+  const isTest = await getIsTestStore(admin, session.shop);
   const form = await request.formData();
   const targetPlan = form.get("plan") as string;
   const storeSlug = session.shop.replace(".myshopify.com", "");

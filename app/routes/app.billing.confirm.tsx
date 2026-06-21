@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useFetcher, useNavigate } from "react-router";
+import { useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
 import { getIsTestStore } from "../services/billing.server";
 import { invalidateShopCache } from "../lib/shop-cache.server";
+import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -15,7 +16,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { billing, admin, session } = await authenticate.admin(request);
   const shop = session.shop;
-  const isTest = await getIsTestStore(admin);
+  const isTest = await getIsTestStore(admin, shop);
 
   try {
     const { appSubscriptions } = await billing.check({
@@ -49,7 +50,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function BillingConfirmPage() {
   const fetcher = useFetcher<typeof action>();
-  const navigate = useNavigate();
+  const navigate = useShopAwareNavigate();
 
   // Auto-submit on mount to verify the subscription
   useEffect(() => {

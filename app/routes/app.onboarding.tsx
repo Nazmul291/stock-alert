@@ -5,11 +5,12 @@ import { authenticate } from "../shopify.server";
 import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../lib/billing-plans";
 import prisma from "../db.server";
 import { getIsTestStore } from "../services/billing.server";
+import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
-  const isTest = await getIsTestStore(admin);
+  const isTest = await getIsTestStore(admin, shop);
 
   // Already subscribed — skip onboarding
   try {
@@ -17,7 +18,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
       isTest,
     });
-    if (hasActivePayment) throw redirect("/app");
+    if (hasActivePayment) throw redirect(embeddedRedirectPath(request, "/app", shop));
   } catch (err) {
     if (err instanceof Response) throw err;
   }
@@ -32,14 +33,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     setupProgress?.globalSettingsConfigured &&
     setupProgress?.notificationsConfigured;
   if (allStepsDone) {
-    const params = new URLSearchParams();
-    const host = url.searchParams.get("host");
-    const shopParam = url.searchParams.get("shop");
-    const embedded = url.searchParams.get("embedded") ?? "1";
-    if (host) params.set("host", host);
-    if (shopParam) params.set("shop", shopParam);
-    params.set("embedded", embedded);
-    throw redirect(`/app/billing?${params.toString()}`);
+    throw redirect(embeddedRedirectPath(request, "/app/billing", shop));
   }
 
   // Fetch shop info
@@ -69,17 +63,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const shop = session.shop;
   const form = await request.formData();
   const intent = form.get("intent") as string;
-  const url = new URL(request.url);
-  const host = url.searchParams.get("host");
-  const shopParam = url.searchParams.get("shop");
-  const embedded = url.searchParams.get("embedded") ?? "1";
-
-  const buildParams = (extra: Record<string, string> = {}) => {
-    const p = new URLSearchParams({ embedded, ...extra });
-    if (host) p.set("host", host);
-    if (shopParam) p.set("shop", shopParam);
-    return p.toString();
-  };
 
   if (intent === "confirm_install") {
     await prisma.setupProgress.upsert({
@@ -94,7 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         firstProductTracked: false,
       },
     });
-    return redirect(`/app/onboarding?${buildParams({ step: "2" })}`);
+    return redirect(embeddedRedirectPath(request, "/app/onboarding", shop, { step: "2" }));
   }
 
   if (intent === "save_settings") {
@@ -131,7 +114,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         firstProductTracked: false,
       },
     });
-    return redirect(`/app/billing?${buildParams()}`);
+    return redirect(embeddedRedirectPath(request, "/app/billing", shop));
   }
 
   return null;

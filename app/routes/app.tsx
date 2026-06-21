@@ -1,13 +1,16 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Outlet, redirect, useLoaderData, useRouteError, useNavigation } from "react-router";
+import { useEffect } from "react";
 import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
-import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
+import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getIsTestStore } from "../services/billing.server";
+import { getCachedHasActivePayment, getIsTestStore } from "../services/billing.server";
 import { ensureWebhooks } from "../lib/webhook-health.server";
+import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
+import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 
 const todayUTC = () => {
   const d = new Date();
@@ -25,26 +28,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (!isPublicRoute) {
     try {
-      const isTest = await getIsTestStore(admin);
-      const { hasActivePayment } = await billing.check({
-        plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-        isTest,
-      });
+      const isTest = await getIsTestStore(admin, shop);
+      const hasActivePayment = await getCachedHasActivePayment(shop, isTest, billing);
       if (!hasActivePayment) {
-        // Preserve embedded/host/shop so App Bridge can detect the iframe context
-        // and escape it properly before any redirect to admin.shopify.com
-        const params = new URLSearchParams();
-        const host = url.searchParams.get("host");
-        const embedded = url.searchParams.get("embedded") ?? "1";
-        if (host) params.set("host", host);
-        if (shop) params.set("shop", shop);
-        params.set("embedded", embedded);
-
         // If setup is not yet complete, go through onboarding first
         const setupProgress = await prisma.setupProgress.findUnique({ where: { shop: session.shop } });
         const setupDone = setupProgress?.appInstalled && setupProgress?.globalSettingsConfigured && setupProgress?.notificationsConfigured;
         const dest = setupDone ? "/app/billing" : "/app/onboarding";
-        throw redirect(`${dest}?${params.toString()}`);
+        // Preserve embedded/host/shop so App Bridge can detect the iframe context
+        // and escape it properly before any redirect to admin.shopify.com
+        throw redirect(embeddedRedirectPath(request, dest, shop));
       }
     } catch (err) {
       if (err instanceof Response) throw err;
@@ -59,7 +52,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Non-blocking — re-registers any missing Shopify webhook subscriptions once per hour.
   ensureWebhooks(admin, shop, process.env.SHOPIFY_APP_URL || "").catch(() => {});
 
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", shop, alertsToday };
+  return { shop, alertsToday };
 };
 
 
@@ -100,13 +93,26 @@ function NavigationLoadingOverlay() {
 }
 
 export default function App() {
-  const { apiKey, shop, alertsToday } = useLoaderData<typeof loader>();
+  const { shop, alertsToday } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const isNavigating = navigation.state === "loading";
 
+  // App Bridge (loaded once in app/root.tsx's <head>) dispatches this event when
+  // s-link / s-app-nav components are clicked, so React Router can navigate
+  // client-side instead of doing a full page reload.
+  const navigate = useShopAwareNavigate();
+  useEffect(() => {
+    const handleNavigate = (event: Event) => {
+      const href = (event.target as HTMLElement | null)?.getAttribute("href");
+      if (href) navigate(href);
+    };
+    document.addEventListener("shopify:navigate", handleNavigate);
+    return () => document.removeEventListener("shopify:navigate", handleNavigate);
+  }, [navigate]);
+
   return (
-    <AppProvider embedded apiKey={apiKey}>
+    <AppProvider embedded={false}>
       <GlobalStyles />
       {isNavigating && <NavigationLoadingOverlay />}
       <s-app-nav>

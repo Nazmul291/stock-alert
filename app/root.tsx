@@ -1,8 +1,15 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation } from "react-router";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData, useLocation } from "react-router";
+
+export const loader = () => {
+  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+};
 
 export default function App() {
+  const { apiKey } = useLoaderData<typeof loader>();
   const { pathname } = useLocation();
-  const isEmbeddedAdmin = pathname.startsWith("/app") || pathname.startsWith("/admin") || pathname.startsWith("/auth");
+  // /admin and /auth are not rendered inside the Shopify admin iframe — only /app is.
+  const isShopifyEmbedded = pathname.startsWith("/app");
+  const wantsShopifyFont = isShopifyEmbedded || pathname.startsWith("/admin") || pathname.startsWith("/auth");
 
   return (
     <html lang="en">
@@ -10,7 +17,13 @@ export default function App() {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <meta name="google-site-verification" content="5-9_d1tv8yexXd1d5-AHSJAx99eflFWtIh_7XJ6BoIM" />
-        {isEmbeddedAdmin && (
+        {isShopifyEmbedded && (
+          <>
+            <meta name="shopify-api-key" content={apiKey} />
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+          </>
+        )}
+        {wantsShopifyFont && (
           <>
             <link rel="preconnect" href="https://cdn.shopify.com/" />
             <link
