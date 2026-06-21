@@ -2,7 +2,11 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { redirect, useLoaderData } from "react-router";
 
 import { PLAN_LIMITS } from "../../lib/plan-limits";
-import styles from "./styles.module.css";
+import logoMark from "../../assets/logo-mark.png";
+// Inlined as a <style> tag below instead of a <link rel="stylesheet"> so this
+// page has zero render-blocking network requests — the CSS ships in the same
+// response as the HTML.
+import inlineCss from "./styles.css?raw";
 
 const APP_NAME = "Stock Alert";
 const APP_STORE_URL = "https://apps.shopify.com/stock-alert-4";
@@ -94,25 +98,27 @@ export default function LandingPage() {
   };
 
   return (
-    <div className={styles.page}>
+    <div className="sa-page">
+      {/* eslint-disable-next-line react/no-danger */}
+      <style dangerouslySetInnerHTML={{ __html: inlineCss }} />
       <script
         type="application/ld+json"
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <header className={styles.header}>
-        <div className={styles.headerInner}>
-          <div className={styles.brand}>
-            <img src="/logo.png" alt="" className={styles.brandLogo} />
+      <header className="sa-header">
+        <div className="sa-headerInner">
+          <div className="sa-brand">
+            <img src={logoMark} alt="" className="sa-brandLogo" />
             <span>{APP_NAME}</span>
           </div>
-          <nav className={styles.nav}>
+          <nav className="sa-nav">
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
           </nav>
           <a
-            className={styles.headerCta}
+            className="sa-headerCta"
             href={APP_STORE_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -123,32 +129,32 @@ export default function LandingPage() {
       </header>
 
       <main>
-        <section className={styles.hero}>
-          <h1 className={styles.heroHeading}>Never Lose a Sale to a Stockout</h1>
-          <p className={styles.heroText}>{DESCRIPTION}</p>
-          <div className={styles.heroActions}>
+        <section className="sa-hero">
+          <h1 className="sa-heroHeading">Never Lose a Sale to a Stockout</h1>
+          <p className="sa-heroText">{DESCRIPTION}</p>
+          <div className="sa-heroActions">
             <a
-              className={styles.primaryButton}
+              className="sa-primaryButton"
               href={APP_STORE_URL}
               target="_blank"
               rel="noopener noreferrer"
             >
               Add to Shopify — Free 30-day trial
             </a>
-            <a className={styles.secondaryButton} href="#features">
+            <a className="sa-secondaryButton" href="#features">
               See how it works
             </a>
           </div>
-          <p className={styles.heroNote}>
+          <p className="sa-heroNote">
             Installs in under 2 minutes · No credit card required to start your trial
           </p>
         </section>
 
-        <section id="features" className={styles.features}>
-          <h2 className={styles.sectionHeading}>Everything you need to stop stockouts</h2>
-          <div className={styles.featureGrid}>
+        <section id="features" className="sa-features">
+          <h2 className="sa-sectionHeading">Everything you need to stop stockouts</h2>
+          <div className="sa-featureGrid">
             {FEATURES.map((f) => (
-              <div key={f.title} className={styles.featureCard}>
+              <div key={f.title} className="sa-featureCard">
                 <h3>{f.title}</h3>
                 <p>{f.body}</p>
               </div>
@@ -156,26 +162,26 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="pricing" className={styles.pricing}>
-          <h2 className={styles.sectionHeading}>Simple, transparent pricing</h2>
-          <p className={styles.sectionSub}>Every plan includes a 30-day free trial.</p>
-          <div className={styles.pricingGrid}>
+        <section id="pricing" className="sa-pricing">
+          <h2 className="sa-sectionHeading">Simple, transparent pricing</h2>
+          <p className="sa-sectionSub">Every plan includes a 30-day free trial.</p>
+          <div className="sa-pricingGrid">
             {(["basic", "pro"] as const).map((key) => {
               const plan = PLAN_LIMITS[key];
               return (
                 <div
                   key={key}
-                  className={key === "pro" ? `${styles.pricingCard} ${styles.pricingCardHighlight}` : styles.pricingCard}
+                  className={key === "pro" ? "sa-pricingCard sa-pricingCardHighlight" : "sa-pricingCard"}
                 >
                   <h3>{plan.name}</h3>
-                  <p className={styles.price}>{plan.price}</p>
+                  <p className="sa-price">{plan.price}</p>
                   <ul>
                     {plan.features.map((feat) => (
                       <li key={feat}>{feat}</li>
                     ))}
                   </ul>
                   <a
-                    className={key === "pro" ? styles.primaryButton : styles.secondaryButton}
+                    className={key === "pro" ? "sa-primaryButton" : "sa-secondaryButton"}
                     href={APP_STORE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -188,10 +194,10 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className={styles.finalCta}>
+        <section className="sa-finalCta">
           <h2>Ready to stop losing sales to stockouts?</h2>
           <a
-            className={styles.primaryButton}
+            className="sa-primaryButton"
             href={APP_STORE_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -201,7 +207,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className={styles.footer}>
+      <footer className="sa-footer">
         <span>© {year} {APP_NAME}</span>
         <a href="/privacy">Privacy Policy</a>
         <a href="/terms">Terms of Service</a>
