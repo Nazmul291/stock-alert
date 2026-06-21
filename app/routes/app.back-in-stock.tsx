@@ -144,7 +144,7 @@ export default function BackInStockPage() {
         <Await resolve={data}>{(d) => (
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
             {statCard("Total Subscribers", d.total, "#111827")}
-            {statCard("Pending", d.pendingCount, "#d97706")}
+            {statCard("Waiting", d.pendingCount, "#d97706")}
             {statCard("Notified", d.notifiedCount, "#059669")}
             {statCard("Products Watched", d.productGroups.length, "#4f46e5")}
           </div>
@@ -345,7 +345,7 @@ function SubscriberList({ data, page }: { data: BackInStockData; page: number })
                               fontWeight: 500,
                             }}
                           >
-                            Pending
+                            Waiting
                           </span>
                     )}
                       </td>
