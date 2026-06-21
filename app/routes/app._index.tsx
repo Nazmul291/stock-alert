@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher, useNavigate } from "react-router";
+import { useLoaderData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -8,6 +8,7 @@ import prisma from "../db.server";
 import { format } from "date-fns";
 import { syncState } from "../lib/sync-state.server";
 import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
+import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -124,7 +125,7 @@ export default function Dashboard() {
   const { shop, plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount, lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts, stockOutSoonCount } =
     useLoaderData<typeof loader>();
 
-  const navigate = useNavigate();
+  const navigate = useShopAwareNavigate();
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
   const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop, syncRunning);
 
@@ -333,7 +334,7 @@ function SetupChecklist({
   syncSubmitting: boolean;
   onSync: () => void;
 }) {
-  const navigate = useNavigate();
+  const navigate = useShopAwareNavigate();
   const steps = [
     {
       done: progress.appInstalled,

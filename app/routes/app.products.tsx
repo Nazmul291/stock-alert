@@ -601,7 +601,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             input: {
               name: "available",
               reason: "correction",
-              quantities: inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
+              ignoreCompareQuantity: true,
+              quantities: inventoryUpdates,
             },
           },
         });
