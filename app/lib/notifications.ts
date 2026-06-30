@@ -480,8 +480,12 @@ export async function sendBackInStockNotifications(
   shopDomain: string,
   appUrl: string,
   brand: BrandConfig = {},
+  productHandle?: string | null,
 ): Promise<number> {
   const storeName = (brand.senderName) || shopDomain.replace('.myshopify.com', '');
+  const productUrl = productHandle
+    ? `https://${shopDomain}/products/${productHandle}`
+    : undefined;
   const subscribers = await prisma.backInStockSubscriber.findMany({
     where: { shop, productId: BigInt(productId), notifiedAt: null },
     select: { id: true, email: true, firstName: true },
@@ -497,6 +501,7 @@ export async function sendBackInStockNotifications(
       shopDomain,
       productTitle,
       productId,
+      productUrl,
       unsubscribeUrl,
       firstName: sub.firstName ?? null,
     }, brand);
