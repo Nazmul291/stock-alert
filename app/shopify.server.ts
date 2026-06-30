@@ -92,7 +92,14 @@ export const authenticate: typeof shopify.authenticate = {
     _adminAuthCache.set(request, promise);
     if (shop) {
       _inflightByShop.set(shop, promise);
-      promise.finally(() => _inflightByShop.delete(shop));
+      // Clean up the in-flight entry on both success and failure.
+      // Using .then(fn, fn) rather than .finally(fn).catch() avoids creating
+      // an extra derived Promise that would become an unhandled rejection when
+      // authenticate.admin rejects with a Response (its redirect signal).
+      promise.then(
+        () => _inflightByShop.delete(shop),
+        () => _inflightByShop.delete(shop),
+      );
     }
     return promise;
   },
