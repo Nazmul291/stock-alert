@@ -59,20 +59,41 @@ export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const sessionStorage = shopify.sessionStorage;
 
-// React Router v7 passes the same Request object to all concurrent loaders in
-// a single page load (layout + child routes). Without deduplication, each
-// loader that calls authenticate.admin() independently triggers its own token
-// exchange when the session is missing or expired — resulting in duplicate DB
-// writes and redundant Shopify API calls. Memoizing on the Request reference
-// ensures the exchange runs exactly once per page load regardless of how many
-// loaders participate.
+// Two layers of deduplication prevent duplicate token exchanges:
+//
+// 1. WeakMap keyed on Request — React Router v7 passes the same Request object
+//    to all concurrent loaders within one page load (layout + child routes), so
+//    the exchange runs once per HTTP request regardless of how many loaders call
+//    authenticate.admin(). WeakMap entries are GC'd with the Request object.
+//
+// 2. In-flight Map keyed on shop — covers truly separate HTTP requests that
+//    arrive at the same time (e.g., iframe load + Shopify prefetch probe). The
+//    second request awaits the same Promise as the first; when it resolves the
+//    entry is removed so the next legitimate auth cycle works normally.
+
 const _adminAuthCache = new WeakMap<Request, ReturnType<typeof shopify.authenticate.admin>>();
+const _inflightByShop = new Map<string, ReturnType<typeof shopify.authenticate.admin>>();
+
 export const authenticate: typeof shopify.authenticate = {
   ...shopify.authenticate,
   admin: (request: Request) => {
-    if (!_adminAuthCache.has(request)) {
-      _adminAuthCache.set(request, shopify.authenticate.admin(request));
+    // Layer 1: same Request object (same HTTP request, multiple loaders)
+    if (_adminAuthCache.has(request)) return _adminAuthCache.get(request)!;
+
+    // Layer 2: different Request objects but same shop (two concurrent requests)
+    const shop = new URL(request.url).searchParams.get("shop") ?? "";
+    if (shop && _inflightByShop.has(shop)) {
+      const shared = _inflightByShop.get(shop)!;
+      _adminAuthCache.set(request, shared);
+      return shared;
     }
-    return _adminAuthCache.get(request)!;
+
+    const promise = shopify.authenticate.admin(request);
+    _adminAuthCache.set(request, promise);
+    if (shop) {
+      _inflightByShop.set(shop, promise);
+      promise.finally(() => _inflightByShop.delete(shop));
+    }
+    return promise;
   },
 };
