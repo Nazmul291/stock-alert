@@ -30,19 +30,10 @@ export default function App() {
         {isShopifyEmbedded && (
           <>
             <meta name="shopify-api-key" content={apiKey} />
-            {/* defer moves App Bridge off the critical rendering path.
-                Authentication is handled server-side; App Bridge only needs to
-                run before merchants interact with UI components (toast, modal,
-                navigation), not before the page first paints.
-                The style block below gives <s-*> Polaris web components a
-                block display so layout is correct while the definition is
-                still pending. */}
-            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" defer />
-            <style dangerouslySetInnerHTML={{ __html:
-              "s-page,s-section,s-card,s-header,s-footer,s-button,s-banner," +
-              "s-badge,s-text,s-box,s-tabs,s-tab,s-tab-panel,s-paragraph," +
-              "s-layout,s-layout-section{display:block}"
-            }} />
+            {/* App Bridge must be synchronous: it defines the <s-*> Polaris web
+                components and handles the auth session-token bounce, both of
+                which must complete before any content renders. */}
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
           </>
         )}
         {wantsShopifyFont && (
