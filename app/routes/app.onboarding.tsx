@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getIsTestStore, getCachedHasActivePayment } from "../services/billing.server";
-import { getCachedSettings } from "../lib/shop-cache.server";
+import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
 import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -15,13 +15,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // must resolve first. Everything else is independent and runs in parallel.
   const isTest = await getIsTestStore(admin, shop);
 
-  const [hasActivePayment, shopInfoRes, setupProgress, settings] = await Promise.all([
+  const [hasActivePayment, setupProgress, settings, dbSession] = await Promise.all([
     // Use the cache — app.tsx already populated it when it redirected here.
     getCachedHasActivePayment(shop, isTest, billing),
-    // Start the Shopify API call now; we'll parse the result below only if needed.
-    admin.graphql(`query { shop { name email myshopifyDomain } }`).catch(() => null),
     prisma.setupProgress.findUnique({ where: { shop } }),
     getCachedSettings(shop),
+    getCachedSession(shop),
   ]);
 
   // Already subscribed — skip onboarding
@@ -37,16 +36,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const step = Math.min(2, Math.max(1, parseInt(url.searchParams.get("step") ?? "1")));
 
-  let shopInfo = { name: shop, email: "", domain: shop };
-  try {
-    if (shopInfoRes) {
-      const json: any = await shopInfoRes.json();
-      const s = json.data?.shop;
-      if (s) shopInfo = { name: s.name, email: s.email, domain: s.myshopifyDomain };
-    }
-  } catch {
-    // Fall back to session data
-  }
+  // Domain, email, and a display name are all available from our DB session —
+  // no Shopify API call needed just to show this info in the onboarding UI.
+  const displayName = shop
+    .replace(".myshopify.com", "")
+    .split("-")
+    .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  const shopInfo = { name: displayName, email: dbSession?.email ?? "", domain: shop };
 
   const existingSettings = {
     lowStockThreshold: settings?.lowStockThreshold ?? 5,
