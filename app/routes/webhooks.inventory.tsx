@@ -21,6 +21,7 @@ const INVENTORY_ITEM_QUERY = `
       variant {
         product {
           legacyResourceId
+          handle
           featuredMedia { preview { image { url } } }
           variants(first: 100) {
             edges { node { inventoryQuantity } }
@@ -100,6 +101,7 @@ async function processInventoryUpdate(
   const invJson: any = await invRes.json();
   const product = invJson.data?.inventoryItem?.variant?.product;
   const productId: string | undefined = product?.legacyResourceId;
+  const productHandle: string | null = product?.handle ?? null;
   const productImageUrl: string | null = product?.featuredMedia?.preview?.image?.url ?? null;
 
   if (!productId) {
@@ -233,6 +235,7 @@ async function processInventoryUpdate(
         shop,
         process.env.SHOPIFY_APP_URL ?? "",
         { logoUrl: settings.brandLogoUrl, color: settings.brandColor, senderName: settings.brandSenderName },
+        productHandle,
       ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
     }
     console.log(`[Webhook] No alert needed — alertType: none`);
@@ -296,6 +299,7 @@ async function processInventoryUpdate(
       shop,
       process.env.SHOPIFY_APP_URL ?? "",
       { logoUrl: settingsCtx.brandLogoUrl, color: settingsCtx.brandColor, senderName: settingsCtx.brandSenderName },
+      productHandle,
     ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
   } else {
     // low_stock and out_of_stock go through the debounce buffer.
