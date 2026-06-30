@@ -337,6 +337,18 @@
     } catch (e) {}
   }
 
+  function clearNotified() {
+    try {
+      var s = getNotifiedSet();
+      s.delete(CFG.productId);
+      if (s.size === 0) {
+        localStorage.removeItem(STORAGE_KEY);
+      } else {
+        localStorage.setItem(STORAGE_KEY, Array.from(s).join(','));
+      }
+    } catch (e) {}
+  }
+
   function isAlreadyNotified() {
     return getNotifiedSet().has(CFG.productId);
   }
@@ -398,9 +410,15 @@
 
     function sync() {
       if (isAlreadyNotified()) {
-        form.style.display = 'none';
-        ourBtn.style.display = '';
-        return;
+        if (isSoldOut()) {
+          // Product still sold out — keep showing "You're on the list"
+          form.style.display = 'none';
+          ourBtn.style.display = '';
+          return;
+        }
+        // Product is back in stock — clear subscription state and restore form
+        clearNotified();
+        ourBtn.style.display = 'none';
       }
       if (isSoldOut()) {
         form.style.display = 'none';
