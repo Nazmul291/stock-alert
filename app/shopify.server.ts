@@ -18,7 +18,12 @@ const shopify = shopifyApp({
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
   apiVersion: ApiVersion.April26,
   scopes: process.env.SHOPIFY_SCOPES?.split(","),
-  appUrl: process.env.SHOPIFY_APP_URL || "",
+  // Append /app so Shopify's post-OAuth redirect lands on the embedded app
+  // shell directly instead of the public landing page at the root URL.
+  // SHOPIFY_APP_URL itself stays as the root (no /app) because other parts
+  // of the codebase use it for the landing page canonical URL, sitemap, and
+  // notification unsubscribe links — all of which need the root origin.
+  appUrl: `${process.env.SHOPIFY_APP_URL || ""}/app`,
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
