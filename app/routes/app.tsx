@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, redirect, useLoaderData, useRouteError, useNavigation } from "react-router";
+import { Outlet, redirect, useLoaderData, useRouteError, useNavigation, isRouteErrorResponse } from "react-router";
 import { useEffect } from "react";
 import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -180,6 +180,17 @@ export function ErrorBoundary() {
       </div>
     );
   }
+
+  // The Shopify library throws an empty Response (status 401/500, no body) when
+  // session-token exchange fails — typically a race between two parallel first-load
+  // requests after install. boundary.error() would show the literal string
+  // "Handling response" in that case. A page reload retries the auth flow and
+  // succeeds on the next attempt.
+  if (isRouteErrorResponse(error) && !error.data) {
+    window.location.reload();
+    return null;
+  }
+
   return boundary.error(error);
 }
 
