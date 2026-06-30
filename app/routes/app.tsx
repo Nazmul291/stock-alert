@@ -1,4 +1,4 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
 import { Outlet, redirect, useLoaderData, useRouteError, useNavigation, isRouteErrorResponse } from "react-router";
 import { useEffect } from "react";
 import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
@@ -195,3 +195,14 @@ export function ErrorBoundary() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+// Skip re-running the billing/alerts check when the user clicks between pages
+// inside the app. The layout re-validates only after form actions (billing or
+// settings might have changed) or when entering /app from somewhere outside it.
+export function shouldRevalidate({ actionResult, currentUrl, nextUrl, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
+  if (actionResult !== undefined) return true;
+  if (currentUrl.pathname.startsWith("/app/") && nextUrl.pathname.startsWith("/app/")) {
+    return false;
+  }
+  return defaultShouldRevalidate;
+}
