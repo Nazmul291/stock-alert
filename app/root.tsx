@@ -20,21 +20,52 @@ export default function App() {
         {/* Preconnect before the app-bridge script tag below so the TLS handshake to
             cdn.shopify.com overlaps with head parsing instead of starting only once
             the script is reached. */}
-        {(isShopifyEmbedded || wantsShopifyFont) && <link rel="preconnect" href="https://cdn.shopify.com/" />}
+        {(isShopifyEmbedded || wantsShopifyFont) && (
+          // crossOrigin is required for the preconnect to cover CORS requests
+          // (scripts and stylesheets from a different origin). Without it the
+          // browser opens a non-CORS socket, then has to open a second CORS
+          // socket when the actual resource request arrives — wasting the hint.
+          <link rel="preconnect" href="https://cdn.shopify.com/" crossOrigin="anonymous" />
+        )}
         {isShopifyEmbedded && (
           <>
             <meta name="shopify-api-key" content={apiKey} />
-            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+            {/* defer moves App Bridge off the critical rendering path.
+                Authentication is handled server-side; App Bridge only needs to
+                run before merchants interact with UI components (toast, modal,
+                navigation), not before the page first paints.
+                The style block below gives <s-*> Polaris web components a
+                block display so layout is correct while the definition is
+                still pending. */}
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" defer />
+            <style dangerouslySetInnerHTML={{ __html:
+              "s-page,s-section,s-card,s-header,s-footer,s-button,s-banner," +
+              "s-badge,s-text,s-box,s-tabs,s-tab,s-tab-panel,s-paragraph," +
+              "s-layout,s-layout-section{display:block}"
+            }} />
           </>
         )}
         {wantsShopifyFont && (
-          // Render-blocking stylesheet instead of the old preload+script trick.
-          // App Bridge is already a blocking <script> on the same cdn.shopify.com
-          // host, so the connection is warm and the font CSS (small, cached for any
-          // merchant who has visited Shopify admin) adds no perceptible delay.
-          // The old non-blocking approach caused font-display:swap to fire after
-          // first render, shifting every text element on the page (CLS ~0.15).
-          <link rel="stylesheet" href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css" />
+          // Async font loading — preload starts the download immediately but
+          // does not block first paint. The inline script adds a load listener
+          // that swaps rel to stylesheet once the CSS arrives. For repeat
+          // visitors (any merchant who uses Shopify admin) Inter is cached so
+          // the swap happens before paint anyway. noscript covers JS-off envs.
+          <>
+            <link
+              id="shopify-inter"
+              rel="preload"
+              as="style"
+              href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
+            />
+            <script dangerouslySetInnerHTML={{ __html:
+              "(function(){var l=document.getElementById('shopify-inter');" +
+              "l&&l.addEventListener('load',function(){l.rel='stylesheet'})})()"
+            }} />
+            <noscript>
+              <link rel="stylesheet" href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css" />
+            </noscript>
+          </>
         )}
         <Meta />
         <Links />
