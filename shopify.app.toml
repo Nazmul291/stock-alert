@@ -14,27 +14,27 @@ scopes = "read_inventory,read_products,write_inventory,write_products,read_locat
 api_version = "2026-04"
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/uninstalled"
+  uri = "https://stock-alert.nazmulcodes.org/webhooks/app/uninstalled"
   topics = [ "app/uninstalled" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/scopes_update"
+  uri = "https://stock-alert.nazmulcodes.org/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/subscriptions_update"
+  uri = "https://stock-alert.nazmulcodes.org/webhooks/app/subscriptions_update"
   topics = [ "app_subscriptions/update" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/inventory"
+  uri = "https://stock-alert.nazmulcodes.org/webhooks/inventory"
   topics = [ "inventory_levels/update" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/products"
+  uri = "https://stock-alert.nazmulcodes.org/webhooks/products"
   topics = [ "products/create", "products/delete", "products/update" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/compliance"
+  uri = "https://stock-alert.nazmulcodes.org/webhooks/compliance"
   compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
 [app_proxy]
