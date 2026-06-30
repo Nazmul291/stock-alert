@@ -221,8 +221,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
   invalidateShopCache(shop);
 
-  const hasNotifications = !!(data.notificationEmail || data.slackWebhookUrl);
-  const isConfigured = data.lowStockThreshold !== 5 || !!data.notificationEmail;
+  // Mark notifications configured when any delivery channel has a destination.
+  // Previously only email and Slack were checked; WhatsApp was missed.
+  const hasNotifications = !!(data.notificationEmail || data.slackWebhookUrl || data.whatsappPhone);
+  // Saving the settings page counts as "configured" regardless of whether the
+  // user changed the threshold from the default — they actively chose their values.
+  const isConfigured = true;
 
   await prisma.setupProgress.upsert({
     where: { shop },
