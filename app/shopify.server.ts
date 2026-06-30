@@ -55,7 +55,24 @@ const shopify = shopifyApp({
 export default shopify;
 export const apiVersion = ApiVersion.April26;
 export const addDocumentResponseHeaders = shopify.addDocumentResponseHeaders;
-export const authenticate = shopify.authenticate;
 export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const sessionStorage = shopify.sessionStorage;
+
+// React Router v7 passes the same Request object to all concurrent loaders in
+// a single page load (layout + child routes). Without deduplication, each
+// loader that calls authenticate.admin() independently triggers its own token
+// exchange when the session is missing or expired — resulting in duplicate DB
+// writes and redundant Shopify API calls. Memoizing on the Request reference
+// ensures the exchange runs exactly once per page load regardless of how many
+// loaders participate.
+const _adminAuthCache = new WeakMap<Request, ReturnType<typeof shopify.authenticate.admin>>();
+export const authenticate: typeof shopify.authenticate = {
+  ...shopify.authenticate,
+  admin: (request: Request) => {
+    if (!_adminAuthCache.has(request)) {
+      _adminAuthCache.set(request, shopify.authenticate.admin(request));
+    }
+    return _adminAuthCache.get(request)!;
+  },
+};
