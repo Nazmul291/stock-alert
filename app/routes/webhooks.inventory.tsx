@@ -222,6 +222,19 @@ async function processInventoryUpdate(
       : null;
 
   if (!alertType) {
+    // Even when the merchant alert isn't needed, the DB status may be stale
+    // (e.g. product went out of stock and back without the status flipping in DB).
+    // Always drain waiting BIS subscribers whenever the product is in stock.
+    if (newStatus === "in_stock") {
+      sendBackInStockNotifications(
+        shop,
+        productId,
+        existingTracking.productTitle ?? "Unknown",
+        shop,
+        process.env.SHOPIFY_APP_URL ?? "",
+        { logoUrl: settings.brandLogoUrl, color: settings.brandColor, senderName: settings.brandSenderName },
+      ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
+    }
     console.log(`[Webhook] No alert needed — alertType: none`);
     return;
   }
