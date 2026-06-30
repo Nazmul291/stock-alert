@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { redirect, useLoaderData } from "react-router";
 
 import { PLAN_LIMITS } from "../../lib/plan-limits";
@@ -40,6 +40,14 @@ const FEATURES = [
     body: "Track alert history, stock-out trends, and webhook health across your entire catalog in one place.",
   },
 ];
+
+// The landing page is fully static — appUrl comes from an env var that never
+// changes at runtime. Cache aggressively so repeat visitors and CDNs never
+// reach the origin. stale-while-revalidate lets CDNs serve immediately while
+// refreshing in the background, eliminating any perceived latency for visitors.
+export const headers: HeadersFunction = () => ({
+  "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800",
+});
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
