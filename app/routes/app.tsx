@@ -144,6 +144,11 @@ export default function App() {
   );
 }
 
+function AuthRetry() {
+  useEffect(() => { window.location.reload(); }, []);
+  return null;
+}
+
 export function ErrorBoundary() {
   const error = useRouteError();
   const isNetworkError =
@@ -186,9 +191,9 @@ export function ErrorBoundary() {
   // requests after install. boundary.error() would show the literal string
   // "Handling response" in that case. A page reload retries the auth flow and
   // succeeds on the next attempt.
+  // useEffect so the reload only runs in the browser — window is undefined during SSR.
   if (isRouteErrorResponse(error) && !error.data) {
-    window.location.reload();
-    return null;
+    return <AuthRetry />;
   }
 
   return boundary.error(error);
