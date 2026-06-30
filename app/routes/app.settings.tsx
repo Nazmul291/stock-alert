@@ -5,7 +5,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendTestNotification } from "../lib/notifications";
-import { invalidateShopCache } from "../lib/shop-cache.server";
+import { getCachedSettings, getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { SkeletonBlock } from "../components/Skeleton";
 
 type SettingsValues = {
@@ -50,8 +50,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 async function loadSettingsData(shop: string): Promise<SettingsData> {
   const [settings, storeSession] = await Promise.all([
-    prisma.storeSettings.findUnique({ where: { shop } }),
-    prisma.session.findFirst({ where: { shop, isOnline: false } }),
+    getCachedSettings(shop),
+    getCachedSession(shop),
   ]);
 
   return {
@@ -124,8 +124,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "test_notification") {
     const [settings, storeSession] = await Promise.all([
-      prisma.storeSettings.findUnique({ where: { shop } }),
-      prisma.session.findFirst({ where: { shop, isOnline: false } }),
+      getCachedSettings(shop),
+      getCachedSession(shop),
     ]);
     if (!settings) {
       return { intent: "test_notification", testResult: { error: "Save your settings first before sending a test." } };
@@ -146,7 +146,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { intent: "test_notification", testResult };
   }
 
-  const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
+  const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? "basic";
 
   const bool = (key: string) => form.get(key) === "true";
@@ -221,8 +221,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
   invalidateShopCache(shop);
 
-  const hasNotifications = !!(data.notificationEmail || data.slackWebhookUrl);
-  const isConfigured = data.lowStockThreshold !== 5 || !!data.notificationEmail;
+  // Mark notifications configured when any delivery channel has a destination.
+  // Previously only email and Slack were checked; WhatsApp was missed.
+  const hasNotifications = !!(data.notificationEmail || data.slackWebhookUrl || data.whatsappPhone);
+  // Saving the settings page counts as "configured" regardless of whether the
+  // user changed the threshold from the default — they actively chose their values.
+  const isConfigured = true;
 
   await prisma.setupProgress.upsert({
     where: { shop },

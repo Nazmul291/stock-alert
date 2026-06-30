@@ -86,8 +86,8 @@ const PRODUCT_UPDATE_MUTATION = `
 `;
 
 const INVENTORY_SET_MUTATION = `
-  mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
-    inventorySetQuantities(input: $input) {
+  mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+    inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
       userErrors { field message }
     }
   }
@@ -198,14 +198,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ].join(",")),
     ];
 
-    const csv = lines.join("\r\n");
-    const filename = `stock-alert-${csvFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
-    return new Response(csv, {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-      },
-    });
+    const csvContent = lines.join("\r\n");
+    const csvFilename = `stock-alert-${csvFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
+    return { csvContent, csvFilename };
   }
 
   if (url.searchParams.get("intent") === "get_collections") {
@@ -636,11 +631,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       try {
         const invRes = await admin.graphql(INVENTORY_SET_MUTATION, {
           variables: {
+            idempotencyKey: crypto.randomUUID(),
             input: {
               name: "available",
               reason: "correction",
-              ignoreCompareQuantity: true,
-              quantities: inventoryUpdates,
+              quantities: inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
             },
           },
         });
@@ -852,6 +847,20 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
   }, [actionData, openStream]);
 
   const bulkFetcher = useFetcher<typeof action>();
+  const csvFetcher = useFetcher<{ csvContent: string; csvFilename: string }>();
+  useEffect(() => {
+    const { csvContent, csvFilename } = (csvFetcher.data ?? {}) as { csvContent?: string; csvFilename?: string };
+    if (!csvContent || !csvFilename) return;
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = csvFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }, [csvFetcher.data]);
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const toggleSelect = (productId: string) => {
@@ -984,13 +993,12 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
               </Link>
             ))}
           </div>
-          <a
-            href={`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`}
-            download
+          <button
+            onClick={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
             style={{
               display: "inline-flex", alignItems: "center", gap: 5,
               padding: "5px 12px", borderRadius: 6, border: "1px solid #d1d5db",
-              background: "#fff", color: "#374151", fontSize: 13, textDecoration: "none",
+              background: "#fff", color: "#374151", fontSize: 13, cursor: "pointer",
               whiteSpace: "nowrap", marginBottom: 1,
             }}
           >
@@ -998,7 +1006,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
             Export CSV
-          </a>
+          </button>
         </div>
         <div style={{ marginBottom: 16 }} />
 

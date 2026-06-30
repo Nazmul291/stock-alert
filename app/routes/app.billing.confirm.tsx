@@ -6,6 +6,7 @@ import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.s
 import prisma from "../db.server";
 import { getIsTestStore } from "../services/billing.server";
 import { invalidateShopCache } from "../lib/shop-cache.server";
+import { invalidateBillingCache } from "../services/billing.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -38,7 +39,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shop, isOnline: false },
       data: { plan: activePlan as any },
     });
+    // Evict both cache layers so the next /app load sees hasActivePayment=true.
+    // invalidateShopCache covers Redis + shop-cache memoryFallback;
+    // invalidateBillingCache covers billing.server.ts's separate in-process memCache.
     invalidateShopCache(shop);
+    invalidateBillingCache(shop);
 
     return { status: "success", plan: activePlan };
   } catch (err) {

@@ -1,5 +1,5 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, redirect, useLoaderData, useRouteError, useNavigation } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
+import { Outlet, redirect, useLoaderData, useRouteError, useNavigation, isRouteErrorResponse } from "react-router";
 import { useEffect } from "react";
 import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -8,7 +8,6 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedHasActivePayment, getIsTestStore } from "../services/billing.server";
-import { ensureWebhooks } from "../lib/webhook-health.server";
 import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 
@@ -26,27 +25,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const isPublicRoute = pathname.startsWith("/app/billing") || pathname.startsWith("/app/onboarding");
 
-  // Runs concurrently with the billing check below instead of after it — it
-  // doesn't depend on that result, so there's no reason to block on it first.
+  // Both fire immediately — neither depends on the billing gate below.
   const alertsTodayPromise = prisma.alertHistory.count({
     where: { shop, sentAt: { gte: todayUTC() } },
   });
-  // Suppress the "unhandled rejection" warning if a redirect below abandons
-  // this promise before it's awaited; the real await further down still throws.
   alertsTodayPromise.catch(() => {});
+
+  // On a fresh install setupProgress doesn't exist yet. Detecting that with a
+  // single indexed DB read (~10ms) lets us redirect to /app/onboarding without
+  // spending ~400ms on two sequential Shopify API calls (getIsTestStore +
+  // billing.check). For returning users both results are cached so the billing
+  // path is also fast; the DB read overlaps with the cache lookups.
+  const setupProgressPromise = !isPublicRoute
+    ? prisma.setupProgress.findUnique({ where: { shop } })
+    : Promise.resolve(null);
+  setupProgressPromise.catch(() => {});
 
   if (!isPublicRoute) {
     try {
+      const setupProgress = await setupProgressPromise;
+
+      if (!setupProgress) {
+        // No record at all → brand-new install. Skip the billing API calls and
+        // go straight to onboarding — they can't have an active subscription yet.
+        throw redirect(embeddedRedirectPath(request, "/app/onboarding", shop));
+      }
+
       const isTest = await getIsTestStore(admin, shop);
       const hasActivePayment = await getCachedHasActivePayment(shop, isTest, billing);
       if (!hasActivePayment) {
-        // If setup is not yet complete, go through onboarding first
-        const setupProgress = await prisma.setupProgress.findUnique({ where: { shop: session.shop } });
-        const setupDone = setupProgress?.appInstalled && setupProgress?.globalSettingsConfigured && setupProgress?.notificationsConfigured;
-        const dest = setupDone ? "/app/billing" : "/app/onboarding";
-        // Preserve embedded/host/shop so App Bridge can detect the iframe context
-        // and escape it properly before any redirect to admin.shopify.com
-        throw redirect(embeddedRedirectPath(request, dest, shop));
+        const setupDone =
+          setupProgress.appInstalled &&
+          setupProgress.globalSettingsConfigured &&
+          setupProgress.notificationsConfigured;
+        throw redirect(embeddedRedirectPath(request, setupDone ? "/app/billing" : "/app/onboarding", shop));
       }
     } catch (err) {
       if (err instanceof Response) throw err;
@@ -55,9 +67,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const alertsToday = await alertsTodayPromise;
-
-  // Non-blocking — re-registers any missing Shopify webhook subscriptions once per hour.
-  ensureWebhooks(admin, shop, process.env.SHOPIFY_APP_URL || "").catch(() => {});
 
   return { shop, alertsToday };
 };
@@ -148,6 +157,11 @@ export default function App() {
   );
 }
 
+function AuthRetry() {
+  useEffect(() => { window.location.reload(); }, []);
+  return null;
+}
+
 export function ErrorBoundary() {
   const error = useRouteError();
   const isNetworkError =
@@ -184,7 +198,29 @@ export function ErrorBoundary() {
       </div>
     );
   }
+
+  // The Shopify library throws an empty Response (status 401/500, no body) when
+  // session-token exchange fails — typically a race between two parallel first-load
+  // requests after install. boundary.error() would show the literal string
+  // "Handling response" in that case. A page reload retries the auth flow and
+  // succeeds on the next attempt.
+  // useEffect so the reload only runs in the browser — window is undefined during SSR.
+  if (isRouteErrorResponse(error) && !error.data) {
+    return <AuthRetry />;
+  }
+
   return boundary.error(error);
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+// Skip re-running the billing/alerts check when the user clicks between pages
+// inside the app. The layout re-validates only after form actions (billing or
+// settings might have changed) or when entering /app from somewhere outside it.
+export function shouldRevalidate({ actionResult, currentUrl, nextUrl, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
+  if (actionResult !== undefined) return true;
+  if (currentUrl.pathname.startsWith("/app/") && nextUrl.pathname.startsWith("/app/")) {
+    return false;
+  }
+  return defaultShouldRevalidate;
+}

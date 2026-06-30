@@ -2,53 +2,49 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "re
 import { useLoaderData, Form, useNavigation, redirect } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../lib/billing-plans";
 import prisma from "../db.server";
-import { getIsTestStore } from "../services/billing.server";
+import { getIsTestStore, getCachedHasActivePayment } from "../services/billing.server";
+import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
 import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // getIsTestStore is needed by getCachedHasActivePayment on a cache miss, so it
+  // must resolve first. Everything else is independent and runs in parallel.
   const isTest = await getIsTestStore(admin, shop);
 
-  // Already subscribed — skip onboarding
-  try {
-    const { hasActivePayment } = await billing.check({
-      plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-      isTest,
-    });
-    if (hasActivePayment) throw redirect(embeddedRedirectPath(request, "/app", shop));
-  } catch (err) {
-    if (err instanceof Response) throw err;
-  }
+  const [hasActivePayment, setupProgress, settings, dbSession] = await Promise.all([
+    // Use the cache — app.tsx already populated it when it redirected here.
+    getCachedHasActivePayment(shop, isTest, billing),
+    prisma.setupProgress.findUnique({ where: { shop } }),
+    getCachedSettings(shop),
+    getCachedSession(shop),
+  ]);
 
-  const url = new URL(request.url);
-  const step = Math.min(2, Math.max(1, parseInt(url.searchParams.get("step") ?? "1")));
+  // Already subscribed — skip onboarding
+  if (hasActivePayment) throw redirect(embeddedRedirectPath(request, "/app", shop));
 
   // If all setup steps are done, skip straight to billing
-  const setupProgress = await prisma.setupProgress.findUnique({ where: { shop } });
   const allStepsDone =
     setupProgress?.appInstalled &&
     setupProgress?.globalSettingsConfigured &&
     setupProgress?.notificationsConfigured;
-  if (allStepsDone) {
-    throw redirect(embeddedRedirectPath(request, "/app/billing", shop));
-  }
+  if (allStepsDone) throw redirect(embeddedRedirectPath(request, "/app/billing", shop));
 
-  // Fetch shop info
-  let shopInfo = { name: shop, email: "", domain: shop };
-  try {
-    const res = await admin.graphql(`query { shop { name email myshopifyDomain } }`);
-    const json: any = await res.json();
-    const s = json.data?.shop;
-    if (s) shopInfo = { name: s.name, email: s.email, domain: s.myshopifyDomain };
-  } catch {
-    // Fall back to session data
-  }
+  const url = new URL(request.url);
+  const step = Math.min(2, Math.max(1, parseInt(url.searchParams.get("step") ?? "1")));
 
-  // Load existing settings for pre-filling step 2
-  const settings = await prisma.storeSettings.findUnique({ where: { shop } });
+  // Domain, email, and a display name are all available from our DB session —
+  // no Shopify API call needed just to show this info in the onboarding UI.
+  const displayName = shop
+    .replace(".myshopify.com", "")
+    .split("-")
+    .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  const shopInfo = { name: displayName, email: dbSession?.email ?? "", domain: shop };
+
   const existingSettings = {
     lowStockThreshold: settings?.lowStockThreshold ?? 5,
     autoHideEnabled: settings?.autoHideEnabled ?? false,

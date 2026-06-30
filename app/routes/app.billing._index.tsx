@@ -1,52 +1,17 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { Suspense } from "react";
-import { useLoaderData, useActionData, Form, useNavigation, Await } from "react-router";
+import { useLoaderData, useActionData, Form, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
-import prisma from "../db.server";
 import { getIsTestStore } from "../services/billing.server";
-import { invalidateShopCache } from "../lib/shop-cache.server";
-import { SkeletonBlock } from "../components/Skeleton";
+import { getCachedSession } from "../lib/shop-cache.server";
 
-type AuthResult = Awaited<ReturnType<typeof authenticate.admin>>;
-
-// Only the auth check blocks the response — the billing-status lookup (a live
-// call to Shopify's billing API) is kicked off but not awaited, so the page
-// shell streams immediately and the plan cards fill in once it resolves.
+// session.plan is kept in sync by the app_subscriptions/update webhook handler
+// and by the billing confirm action — no Shopify billing API call needed here.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing, admin, session } = await authenticate.admin(request);
-  const shop = session.shop;
-  return { activePlan: loadActivePlan({ billing, admin, shop }) };
+  const { session } = await authenticate.admin(request);
+  const dbSession = await getCachedSession(session.shop);
+  return { activePlan: (dbSession?.plan ?? null) as "basic" | "pro" | null };
 };
-
-async function loadActivePlan({ billing, admin, shop }: { billing: AuthResult["billing"]; admin: AuthResult["admin"]; shop: string }): Promise<"basic" | "pro" | null> {
-  const isTest = await getIsTestStore(admin, shop);
-
-  let activePlan: "basic" | "pro" | null = null;
-  try {
-    const { appSubscriptions } = await billing.check({
-      plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-      isTest,
-    });
-    activePlan = appSubscriptions.some((s: any) => s.name === BILLING_PLAN_PRO)
-      ? "pro"
-      : appSubscriptions.some((s: any) => s.name === BILLING_PLAN_BASIC)
-      ? "basic"
-      : null;
-
-    if (activePlan) {
-      await prisma.session.updateMany({
-        where: { shop, isOnline: false },
-        data: { plan: activePlan as any },
-      });
-      invalidateShopCache(shop);
-    }
-  } catch {
-    // Non-fatal — activePlan stays null
-  }
-
-  return activePlan;
-}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { billing, admin, session } = await authenticate.admin(request);
@@ -126,9 +91,7 @@ export default function BillingPage() {
       )}
 
       <s-section heading="Plans">
-        <Suspense fallback={<PlansSkeleton />}>
-          <Await resolve={activePlan}>{(plan) => <PlanCards activePlan={plan} />}</Await>
-        </Suspense>
+        <PlanCards activePlan={activePlan} />
       </s-section>
 
       <s-section heading="30-day free trial">
@@ -199,22 +162,5 @@ function PlanCards({ activePlan }: { activePlan: "basic" | "pro" | null }) {
   );
 }
 
-function PlansSkeleton() {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      {[0, 1].map((i) => (
-        <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
-          <SkeletonBlock width={80} height={20} />
-          <SkeletonBlock width={100} height={28} />
-          <SkeletonBlock width={120} height={13} />
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "8px 0 12px" }}>
-            {Array.from({ length: 5 }, (_, j) => <SkeletonBlock key={j} width="90%" height={14} />)}
-          </div>
-          <SkeletonBlock width="100%" height={36} borderRadius={6} />
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

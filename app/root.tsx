@@ -20,34 +20,49 @@ export default function App() {
         {/* Preconnect before the app-bridge script tag below so the TLS handshake to
             cdn.shopify.com overlaps with head parsing instead of starting only once
             the script is reached. */}
-        {(isShopifyEmbedded || wantsShopifyFont) && <link rel="preconnect" href="https://cdn.shopify.com/" />}
+        {(isShopifyEmbedded || wantsShopifyFont) && (
+          // crossOrigin is required for the preconnect to cover CORS requests
+          // (scripts and stylesheets from a different origin). Without it the
+          // browser opens a non-CORS socket, then has to open a second CORS
+          // socket when the actual resource request arrives — wasting the hint.
+          <link rel="preconnect" href="https://cdn.shopify.com/" crossOrigin="anonymous" />
+        )}
         {isShopifyEmbedded && (
           <>
             <meta name="shopify-api-key" content={apiKey} />
-            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+            {/* Preload kicks off the download immediately — before the parser
+                reaches the <script> tag below. Combined with the preconnect
+                above (warm TLS), App Bridge is typically already in the
+                browser cache by the time it's needed, eliminating the
+                blocking wait without self-hosting the script. */}
+            <link
+              rel="preload"
+              as="script"
+              href="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+              crossOrigin="anonymous"
+            />
+            {/* Must remain synchronous — defines <s-*> Polaris components and
+                drives the auth session-token bounce before content renders. */}
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
           </>
         )}
         {wantsShopifyFont && (
+          // Async font loading — preload starts the download immediately but
+          // does not block first paint. The inline script adds a load listener
+          // that swaps rel to stylesheet once the CSS arrives. For repeat
+          // visitors (any merchant who uses Shopify admin) Inter is cached so
+          // the swap happens before paint anyway. noscript covers JS-off envs.
           <>
-            {/* Loaded as a non-blocking preload that swaps to a stylesheet once
-                fetched, instead of a blocking <link rel="stylesheet">, so the font
-                round-trip doesn't hold up the first paint. React's onLoad prop can't
-                emit a literal onload="" attribute (it only binds JS event handlers,
-                which don't serialize into static SSR HTML), so the swap is done via
-                a tiny inline script instead — CSP here only restricts frame-ancestors,
-                so inline scripts are unaffected. */}
             <link
+              id="shopify-inter"
               rel="preload"
               as="style"
               href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
             />
-            <script
-              // eslint-disable-next-line react/no-danger
-              dangerouslySetInnerHTML={{
-                __html:
-                  "(function(){var l=document.currentScript.previousElementSibling;l.addEventListener('load',function(){l.rel='stylesheet';});})();",
-              }}
-            />
+            <script dangerouslySetInnerHTML={{ __html:
+              "(function(){var l=document.getElementById('shopify-inter');" +
+              "l&&l.addEventListener('load',function(){l.rel='stylesheet'})})()"
+            }} />
             <noscript>
               <link rel="stylesheet" href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css" />
             </noscript>

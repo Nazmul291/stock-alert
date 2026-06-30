@@ -379,6 +379,20 @@ function DashboardContent({ shop, data }: { shop: string; data: DashboardData })
 function DashboardSkeleton() {
   return (
     <>
+      {/* Reserve space for SetupChecklist — it appears above the stats for new
+          merchants (progressPct < 100). Without this placeholder the stats block
+          shifts down when data loads, contributing to CLS. */}
+      <s-section>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 16px" }}>
+              <SkeletonBlock width={20} height={20} borderRadius={10} />
+              <SkeletonBlock width="60%" height={14} />
+            </div>
+          ))}
+        </div>
+      </s-section>
+
       <s-section heading="Inventory Overview">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 12, margin: "8px 0" }}>
           {Array.from({ length: 8 }, (_, i) => (
