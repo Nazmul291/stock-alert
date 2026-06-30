@@ -30,9 +30,19 @@ export default function App() {
         {isShopifyEmbedded && (
           <>
             <meta name="shopify-api-key" content={apiKey} />
-            {/* App Bridge must be synchronous: it defines the <s-*> Polaris web
-                components and handles the auth session-token bounce, both of
-                which must complete before any content renders. */}
+            {/* Preload kicks off the download immediately — before the parser
+                reaches the <script> tag below. Combined with the preconnect
+                above (warm TLS), App Bridge is typically already in the
+                browser cache by the time it's needed, eliminating the
+                blocking wait without self-hosting the script. */}
+            <link
+              rel="preload"
+              as="script"
+              href="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+              crossOrigin="anonymous"
+            />
+            {/* Must remain synchronous — defines <s-*> Polaris components and
+                drives the auth session-token bounce before content renders. */}
             <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
           </>
         )}
