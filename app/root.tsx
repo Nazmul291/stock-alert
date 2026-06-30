@@ -28,30 +28,13 @@ export default function App() {
           </>
         )}
         {wantsShopifyFont && (
-          <>
-            {/* Loaded as a non-blocking preload that swaps to a stylesheet once
-                fetched, instead of a blocking <link rel="stylesheet">, so the font
-                round-trip doesn't hold up the first paint. React's onLoad prop can't
-                emit a literal onload="" attribute (it only binds JS event handlers,
-                which don't serialize into static SSR HTML), so the swap is done via
-                a tiny inline script instead — CSP here only restricts frame-ancestors,
-                so inline scripts are unaffected. */}
-            <link
-              rel="preload"
-              as="style"
-              href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
-            />
-            <script
-              // eslint-disable-next-line react/no-danger
-              dangerouslySetInnerHTML={{
-                __html:
-                  "(function(){var l=document.currentScript.previousElementSibling;l.addEventListener('load',function(){l.rel='stylesheet';});})();",
-              }}
-            />
-            <noscript>
-              <link rel="stylesheet" href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css" />
-            </noscript>
-          </>
+          // Render-blocking stylesheet instead of the old preload+script trick.
+          // App Bridge is already a blocking <script> on the same cdn.shopify.com
+          // host, so the connection is warm and the font CSS (small, cached for any
+          // merchant who has visited Shopify admin) adds no perceptible delay.
+          // The old non-blocking approach caused font-display:swap to fire after
+          // first render, shifting every text element on the page (CLS ~0.15).
+          <link rel="stylesheet" href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css" />
         )}
         <Meta />
         <Links />
