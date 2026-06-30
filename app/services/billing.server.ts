@@ -79,6 +79,11 @@ export async function getIsTestStore(admin: AdminClient, shop?: string): Promise
 // Used on every /app/* page load to gate access behind an active subscription.
 // Cached briefly so rapid navigation within the embedded app doesn't re-hit
 // Shopify's billing API on every single page.
+export function invalidateBillingCache(shop: string): void {
+  memCache.delete(`test-store:${shop}`);
+  memCache.delete(`billing:${shop}`);
+}
+
 export async function getCachedHasActivePayment(
   shop: string,
   isTest: boolean,
