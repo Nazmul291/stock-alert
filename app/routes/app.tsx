@@ -8,7 +8,6 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedHasActivePayment, getIsTestStore } from "../services/billing.server";
-import { ensureWebhooks } from "../lib/webhook-health.server";
 import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 
@@ -55,9 +54,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const alertsToday = await alertsTodayPromise;
-
-  // Non-blocking — re-registers any missing Shopify webhook subscriptions once per hour.
-  ensureWebhooks(admin, shop, process.env.SHOPIFY_APP_URL || "").catch(() => {});
 
   return { shop, alertsToday };
 };

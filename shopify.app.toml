@@ -11,7 +11,7 @@ scopes = "read_inventory,read_products,write_inventory,write_products,read_locat
 
 
 [webhooks]
-api_version = "2025-10"
+api_version = "2026-04"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/uninstalled"

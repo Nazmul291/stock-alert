@@ -86,8 +86,8 @@ const PRODUCT_UPDATE_MUTATION = `
 `;
 
 const INVENTORY_SET_MUTATION = `
-  mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
-    inventorySetQuantities(input: $input) {
+  mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+    inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
       userErrors { field message }
     }
   }
@@ -636,11 +636,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       try {
         const invRes = await admin.graphql(INVENTORY_SET_MUTATION, {
           variables: {
+            idempotencyKey: crypto.randomUUID(),
             input: {
               name: "available",
               reason: "correction",
-              ignoreCompareQuantity: true,
-              quantities: inventoryUpdates,
+              quantities: inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
             },
           },
         });
