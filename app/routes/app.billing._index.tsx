@@ -64,7 +64,6 @@ const BASIC_FEATURES = [
   "Back-in-stock storefront widget",
   "Global threshold settings",
   "Basic inventory tracking",
-  "Up to 1,000 products",
 ];
 
 const PRO_FEATURES = [
@@ -76,8 +75,26 @@ const PRO_FEATURES = [
   "Auto-republish when restocked",
   "Multiple notification recipients",
   "White-label branded emails",
-  "Priority support",
-  "Up to 10,000 products",
+];
+
+// Full side-by-side breakdown shown below the plan cards — includes rows
+// (like product limits and priority support) that were trimmed from the
+// per-card bullet lists above to keep those short and scannable.
+const FEATURE_COMPARISON: { label: string; basic: string | boolean; pro: string | boolean }[] = [
+  { label: "Products tracked", basic: "1,000", pro: "10,000" },
+  { label: "Email notifications", basic: true, pro: true },
+  { label: "Auto-hide sold-out products", basic: true, pro: true },
+  { label: "Shopify Flow triggers", basic: true, pro: true },
+  { label: "Back-in-stock storefront widget", basic: true, pro: true },
+  { label: "Global threshold settings", basic: true, pro: true },
+  { label: "One-click Slack Connect", basic: false, pro: true },
+  { label: "Klaviyo integration", basic: false, pro: true },
+  { label: "Outbound webhook (Zapier/Make/ERP)", basic: false, pro: true },
+  { label: "Per-product thresholds", basic: false, pro: true },
+  { label: "Auto-republish when restocked", basic: false, pro: true },
+  { label: "Multiple notification recipients", basic: false, pro: true },
+  { label: "White-label branded emails", basic: false, pro: true },
+  { label: "Priority support", basic: false, pro: true },
 ];
 
 export default function BillingPage() {
@@ -97,6 +114,10 @@ export default function BillingPage() {
 
       <s-section heading="Plans">
         <PlanCards activePlan={activePlan} />
+      </s-section>
+
+      <s-section heading="Compare features">
+        <FeatureComparisonTable />
       </s-section>
 
       <s-section heading="30-day free trial">
@@ -167,5 +188,33 @@ function PlanCards({ activePlan }: { activePlan: "basic" | "pro" | null }) {
   );
 }
 
+function FeatureComparisonTable() {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", color: "#6b7280", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.04em" }}>Feature</th>
+            <th style={{ textAlign: "center", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", color: "#374151", fontWeight: 700 }}>Basic</th>
+            <th style={{ textAlign: "center", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", color: "#059669", fontWeight: 700 }}>Professional</th>
+          </tr>
+        </thead>
+        <tbody>
+          {FEATURE_COMPARISON.map((row) => (
+            <tr key={row.label} style={{ borderBottom: "1px solid #f3f4f6" }}>
+              <td style={{ padding: "10px 12px", color: "#111827" }}>{row.label}</td>
+              <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                {typeof row.basic === "string" ? row.basic : (row.basic ? "✓" : <span style={{ color: "#d1d5db" }}>—</span>)}
+              </td>
+              <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                {typeof row.pro === "string" ? row.pro : (row.pro ? "✓" : <span style={{ color: "#d1d5db" }}>—</span>)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
