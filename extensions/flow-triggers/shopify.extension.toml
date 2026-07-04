@@ -22,12 +22,12 @@ description = "Triggered when a product's inventory drops to or below its low-st
   description = "The product's SKU (blank if none set)"
 
   [[extensions.settings.fields]]
-  type = "number_integer"
+  type = "number_decimal"
   key = "Current quantity"
   description = "Inventory quantity at the time of the alert"
 
   [[extensions.settings.fields]]
-  type = "number_integer"
+  type = "number_decimal"
   key = "Threshold"
   description = "The low-stock threshold that was crossed"
 
@@ -74,6 +74,6 @@ description = "Triggered when a previously low/out-of-stock product is restocked
   description = "The product's SKU (blank if none set)"
 
   [[extensions.settings.fields]]
-  type = "number_integer"
+  type = "number_decimal"
   key = "Current quantity"
   description = "Inventory quantity the product was restocked to"

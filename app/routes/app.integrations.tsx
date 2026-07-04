@@ -551,7 +551,16 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
             </div>
 
             <ConnectRow
-              icon={<span style={{ fontSize: 20 }}>📣</span>}
+              icon={
+                <img
+                  src="https://www.klaviyo.com/icons/icon-32x32.png"
+                  alt=""
+                  width={20}
+                  height={20}
+                  loading="lazy"
+                  style={{ display: "block" }}
+                />
+              }
               title="Klaviyo"
               connected={settings.klaviyoEnabled}
               connectLabel="Connect"
@@ -662,7 +671,16 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
       {klaviyoModalOpen && (
         <ConnectModal
           title="Klaviyo"
-          icon={<span style={{ fontSize: 20 }}>📣</span>}
+          icon={
+            <img
+              src="https://www.klaviyo.com/icons/icon-32x32.png"
+              alt=""
+              width={20}
+              height={20}
+              loading="lazy"
+              style={{ display: "block" }}
+            />
+          }
           onClose={() => setKlaviyoModalOpen(false)}
           onSubmit={() => klaviyoFetcher.submit({ intent: "save_klaviyo", klaviyoApiKey: klaviyoInput }, { method: "post" })}
           submitting={klaviyoSaving}
