@@ -152,7 +152,7 @@ export default function LandingPage() {
       <header className="sa-header">
         <div className="sa-headerInner">
           <div className="sa-brand">
-            <img src={logoMark} alt="" className="sa-brandLogo" />
+            <img src={logoMark} alt="" className="sa-brandLogo" loading="lazy" />
             <span>{APP_NAME}</span>
           </div>
           <nav className="sa-nav">

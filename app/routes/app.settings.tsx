@@ -4,12 +4,12 @@ import { useLoaderData, Form, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { sendTestNotification } from "../lib/notifications";
-import { getCachedSettings, getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
+import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
+import { Toggle, inputStyle, fieldLabel, helpText } from "../components/IntegrationControls";
 
 // Only the auth check blocks the response — settings data loads entirely in
 // the background via api.settings-stream.ts and is pushed to the client over
@@ -37,63 +37,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { intent: "reset", success: true, message: "All product data reset successfully." };
   }
 
-  if (intent === "test_notification") {
-    const [settings, storeSession] = await Promise.all([
-      getCachedSettings(shop),
-      getCachedSession(shop),
-    ]);
-    if (!settings) {
-      return { intent: "test_notification", testResult: { error: "Save your settings first before sending a test." } };
-    }
-    const testResult = await sendTestNotification(
-      { shop, plan: storeSession?.plan ?? "basic", email: storeSession?.email ?? null },
-      {
-        emailNotifications: settings.emailNotifications,
-        slackNotifications: settings.slackNotifications,
-        notificationEmail: settings.notificationEmail,
-        slackWebhookUrl: settings.slackWebhookUrl,
-        whatsappNotifications: settings.whatsappNotifications,
-        whatsappPhone: settings.whatsappPhone,
-        whatsappPhoneNumberId: settings.whatsappPhoneNumberId,
-        whatsappAccessToken: settings.whatsappAccessToken,
-      },
-    );
-    return { intent: "test_notification", testResult };
-  }
-
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? "basic";
 
   const bool = (key: string) => form.get(key) === "true";
 
   const rawThreshold = parseInt(form.get("lowStockThreshold") as string);
-  const rawEmail = ((form.get("notificationEmail") as string) ?? "").trim();
-  const rawSlack = ((form.get("slackWebhookUrl") as string) ?? "").trim();
-  const rawWhatsappPhone = ((form.get("whatsappPhone") as string) ?? "").trim();
-  const rawWhatsappPhoneNumberId = ((form.get("whatsappPhoneNumberId") as string) ?? "").trim();
-  const rawWhatsappAccessToken = ((form.get("whatsappAccessToken") as string) ?? "").trim();
-  const emailEnabled = bool("emailNotifications");
-  const whatsappEnabled = bool("whatsappNotifications");
 
   const errors: Record<string, string> = {};
 
   if (isNaN(rawThreshold) || rawThreshold < 1 || rawThreshold > 1000) {
     errors.lowStockThreshold = "Threshold must be between 1 and 1,000.";
-  }
-
-  if (emailEnabled && rawEmail) {
-    const addresses = rawEmail.split(",").map((e) => e.trim()).filter(Boolean);
-    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const bad = addresses.find((e) => !emailRe.test(e));
-    if (bad) {
-      errors.notificationEmail = `"${bad}" is not a valid email address.`;
-    } else if (plan !== "pro" && addresses.length > 1) {
-      errors.notificationEmail = "Multiple recipients require the Professional plan.";
-    }
-  }
-
-  if (rawSlack && !rawSlack.startsWith("https://hooks.slack.com/")) {
-    errors.slackWebhookUrl = 'Slack webhook URL must start with "https://hooks.slack.com/".';
   }
 
   if (Object.keys(errors).length > 0) {
@@ -107,14 +61,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     autoHideEnabled: bool("autoHideEnabled"),
     autoRepublishEnabled: bool("autoRepublishEnabled"),
     lowStockThreshold: rawThreshold,
-    emailNotifications: emailEnabled,
-    slackNotifications: bool("slackNotifications"),
-    notificationEmail: rawEmail || null,
-    slackWebhookUrl: rawSlack || null,
-    whatsappNotifications: whatsappEnabled,
-    whatsappPhone: rawWhatsappPhone || null,
-    whatsappPhoneNumberId: rawWhatsappPhoneNumberId || null,
-    whatsappAccessToken: rawWhatsappAccessToken || null,
     digestEnabled: bool("digestEnabled"),
     digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
@@ -125,20 +71,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
       brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
       brandSenderName: ((form.get("brandSenderName") as string) ?? "").trim() || null,
-      outboundWebhookUrl: ((form.get("outboundWebhookUrl") as string) ?? "").trim() || null,
     } : {}),
   };
 
-  await prisma.storeSettings.upsert({
+  const updated = await prisma.storeSettings.upsert({
     where: { shop },
     update: data,
     create: { shop, ...data },
   });
   invalidateShopCache(shop);
 
-  // Mark notifications configured when any delivery channel has a destination.
-  // Previously only email and Slack were checked; WhatsApp was missed.
-  const hasNotifications = !!(data.notificationEmail || data.slackWebhookUrl || data.whatsappPhone);
+  // Recompute from the FULL saved row, not just this page's fields —
+  // app.integrations.tsx's action also writes slackWebhookUrl/whatsappPhone/
+  // klaviyo*, so reading only this page's fields here would incorrectly clear
+  // the flag if those were the only channels a merchant had configured.
+  const hasNotifications = !!(
+    updated.notificationEmail || updated.slackWebhookUrl || updated.whatsappPhone ||
+    (updated.klaviyoEnabled && updated.klaviyoApiKey)
+  );
   // Saving the settings page counts as "configured" regardless of whether the
   // user changed the threshold from the default — they actively chose their values.
   const isConfigured = true;
@@ -159,44 +109,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { intent: "save", success: true, message: "Settings saved successfully." };
 };
 
-type TestResult = {
-  error?: string;
-  email?: { sent: boolean; to?: string; error?: string };
-  slack?: { sent: boolean; error?: string };
-  whatsapp?: { sent: boolean; error?: string };
-};
-
 const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
-
-const inputStyle = (hasError = false): React.CSSProperties => ({
-  width: "100%",
-  border: `1.5px solid ${hasError ? "#fca5a5" : "#d1d5db"}`,
-  borderRadius: 8,
-  padding: "9px 12px",
-  fontSize: 14,
-  color: "#111827",
-  outline: "none",
-  boxSizing: "border-box",
-  background: "#fff",
-  transition: "border-color 0.15s",
-});
-
-const fieldLabel: React.CSSProperties = {
-  display: "block",
-  fontWeight: 600,
-  fontSize: 13,
-  color: "#374151",
-  marginBottom: 5,
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-};
-
-const helpText: React.CSSProperties = {
-  fontSize: 12,
-  color: "#6b7280",
-  marginTop: 5,
-  lineHeight: 1.5,
-};
 
 export default function SettingsPage() {
   const { token } = useLoaderData<typeof loader>();
@@ -273,23 +186,16 @@ export default function SettingsPage() {
 }
 
 function SettingsContent({ data }: { data: SettingsData }) {
-  const { plan, storeEmail, settings } = data;
+  const { plan, settings } = data;
   const saveFetcher = useFetcher<typeof action>();
   const saving = saveFetcher.state !== "idle";
   const [autoHideEnabled, setAutoHideEnabled] = useState(settings.autoHideEnabled);
   const [autoRepublishEnabled, setAutoRepublishEnabled] = useState(settings.autoRepublishEnabled);
-  const [emailEnabled, setEmailEnabled] = useState(settings.emailNotifications);
-  const [slackEnabled, setSlackEnabled] = useState(settings.slackNotifications);
-  const [whatsappEnabled, setWhatsappEnabled] = useState(settings.whatsappNotifications);
-  const [whatsappPhone, setWhatsappPhone] = useState(settings.whatsappPhone);
-  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState(settings.whatsappPhoneNumberId);
-  const [whatsappAccessToken, setWhatsappAccessToken] = useState(settings.whatsappAccessToken);
   const [digestEnabled, setDigestEnabled] = useState(settings.digestEnabled);
   const [digestFrequency, setDigestFrequency] = useState(settings.digestFrequency);
   const [brandLogoUrl, setBrandLogoUrl] = useState(settings.brandLogoUrl);
   const [brandColor, setBrandColor] = useState(settings.brandColor);
   const [brandSenderName, setBrandSenderName] = useState(settings.brandSenderName);
-  const [outboundWebhookUrl, setOutboundWebhookUrl] = useState(settings.outboundWebhookUrl);
   const [monitoringFilter, setMonitoringFilter] = useState(settings.monitoringFilter);
   const [monitoringCollectionId, setMonitoringCollectionId] = useState(settings.monitoringCollectionId);
   const [monitoringTags, setMonitoringTags] = useState(settings.monitoringTags);
@@ -299,42 +205,17 @@ function SettingsContent({ data }: { data: SettingsData }) {
   function handleDiscard() {
     setAutoHideEnabled(settings.autoHideEnabled);
     setAutoRepublishEnabled(settings.autoRepublishEnabled);
-    setEmailEnabled(settings.emailNotifications);
-    setSlackEnabled(settings.slackNotifications);
-    setWhatsappEnabled(settings.whatsappNotifications);
-    setWhatsappPhone(settings.whatsappPhone);
-    setWhatsappPhoneNumberId(settings.whatsappPhoneNumberId);
-    setWhatsappAccessToken(settings.whatsappAccessToken);
     setDigestEnabled(settings.digestEnabled);
     setDigestFrequency(settings.digestFrequency);
     setBrandLogoUrl(settings.brandLogoUrl);
     setBrandColor(settings.brandColor);
     setBrandSenderName(settings.brandSenderName);
-    setOutboundWebhookUrl(settings.outboundWebhookUrl);
     setMonitoringFilter(settings.monitoringFilter);
     setMonitoringCollectionId(settings.monitoringCollectionId);
     setMonitoringTags(settings.monitoringTags);
     formRef.current?.reset();
     setIsDirty(false);
   }
-
-  const testFetcher = useFetcher<typeof action>();
-  const testing = testFetcher.state === "submitting";
-  const testData =
-    testFetcher.data && "intent" in testFetcher.data && testFetcher.data.intent === "test_notification"
-      ? (testFetcher.data as { intent: string; testResult: TestResult }).testResult
-      : null;
-
-  const [toastResult, setToastResult] = useState<TestResult | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (testData) {
-      setToastResult(testData);
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = setTimeout(() => setToastResult(null), 5000);
-    }
-  }, [testData]);
 
   const saveData = saveFetcher.data as any;
 
@@ -355,12 +236,6 @@ function SettingsContent({ data }: { data: SettingsData }) {
     // Set all state-controlled values explicitly — do not rely on DOM serialization
     fd.set("autoHideEnabled", autoHideEnabled ? "true" : "false");
     fd.set("autoRepublishEnabled", autoRepublishEnabled ? "true" : "false");
-    fd.set("emailNotifications", emailEnabled ? "true" : "false");
-    fd.set("slackNotifications", slackEnabled ? "true" : "false");
-    fd.set("whatsappNotifications", whatsappEnabled ? "true" : "false");
-    fd.set("whatsappPhone", whatsappPhone);
-    fd.set("whatsappPhoneNumberId", whatsappPhoneNumberId);
-    fd.set("whatsappAccessToken", whatsappAccessToken);
     fd.set("digestEnabled", digestEnabled ? "true" : "false");
     fd.set("digestFrequency", digestFrequency);
     fd.set("monitoringFilter", monitoringFilter);
@@ -369,12 +244,10 @@ function SettingsContent({ data }: { data: SettingsData }) {
     fd.set("brandLogoUrl", brandLogoUrl);
     fd.set("brandColor", brandColor || "#4f46e5");
     fd.set("brandSenderName", brandSenderName);
-    fd.set("outboundWebhookUrl", outboundWebhookUrl);
     saveFetcher.submit(fd, { method: "post" });
   }
 
   const isPro = plan === "pro";
-  const noChannelsConfigured = !emailEnabled && !(slackEnabled && isPro);
 
   function markDirty() {
     setIsDirty(true);
@@ -465,175 +338,13 @@ function SettingsContent({ data }: { data: SettingsData }) {
           </div>
         </s-section>
 
-        {/* ── Notifications ── */}
-        <div style={{ marginTop: 24 }}>
-          <s-section heading="Notifications">
-            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
-              Choose how you receive stock alerts. At least one channel must be enabled to receive notifications.
-            </p>
-
-            {/* Email channel card */}
-            <ChannelCard
-              icon="✉️"
-              title="Email"
-              badge={null}
-              enabled={emailEnabled}
-              onToggle={(v) => { setEmailEnabled(v); markDirty(); }}
-            >
-              <div>
-                <label style={fieldLabel}>
-                  Notification email{isPro ? " — multiple allowed" : ""}
-                </label>
-                <input
-                  type="text"
-                  name="notificationEmail"
-                  defaultValue={settings.notificationEmail}
-                  placeholder={isPro ? "alerts@example.com, team@example.com" : "alerts@example.com"}
-                  style={inputStyle(!!saveErrors?.notificationEmail)}
-                />
-                {saveErrors?.notificationEmail
-                  ? <p style={{ ...helpText, color: "#dc2626" }}>{saveErrors.notificationEmail}</p>
-                  : <p style={helpText}>
-                      {isPro
-                        ? "Separate multiple addresses with commas."
-                        : storeEmail
-                        ? `Leave empty to use store email (${storeEmail}).`
-                        : "Leave empty to use the store owner email."}
-                    </p>}
-              </div>
-            </ChannelCard>
-
-            {/* Slack channel card */}
-            <ChannelCard
-              icon="💬"
-              title="Slack"
-              badge={!isPro ? "Pro" : null}
-              enabled={slackEnabled && isPro}
-              onToggle={isPro ? (v) => { setSlackEnabled(v); markDirty(); } : undefined}
-              disabled={!isPro}
-            >
-              <div>
-                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
-                  <p style={{ fontWeight: 600, fontSize: 13, color: "#374151", margin: "0 0 8px" }}>How to get a Slack webhook URL</p>
-                  <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: 1.8 }}>
-                    <li>Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>api.slack.com/apps</a> → <strong>Create New App → From scratch</strong></li>
-                    <li>Under <strong>Incoming Webhooks</strong>, toggle it <strong>On</strong></li>
-                    <li>Click <strong>Add New Webhook to Workspace</strong> and choose a channel</li>
-                    <li>Copy the generated URL and paste it below</li>
-                  </ol>
-                </div>
-                <label style={fieldLabel}>Slack webhook URL</label>
-                <input
-                  type="text"
-                  name="slackWebhookUrl"
-                  defaultValue={settings.slackWebhookUrl}
-                  placeholder="https://hooks.slack.com/services/..."
-                  disabled={!isPro}
-                  style={inputStyle(!!saveErrors?.slackWebhookUrl)}
-                />
-                {saveErrors?.slackWebhookUrl
-                  ? <p style={{ ...helpText, color: "#dc2626" }}>{saveErrors.slackWebhookUrl}</p>
-                  : <p style={helpText}>Paste the webhook URL from your Slack app settings.</p>}
-              </div>
-            </ChannelCard>
-
-            {/* WhatsApp channel card */}
-            <ChannelCard
-              icon="💬"
-              title="WhatsApp"
-              badge="Coming Soon"
-              badgeColor="#6b7280"
-              enabled={false}
-              disabled={true}
-              onToggle={undefined}
-            >
-              <div>
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
-                  <p style={{ fontWeight: 600, fontSize: 13, color: "#166534", margin: "0 0 8px" }}>How to set up WhatsApp Business API</p>
-                  <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: 1.8 }}>
-                    <li>Go to <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>developers.facebook.com</a> → create an app</li>
-                    <li>Add the <strong>WhatsApp</strong> product to your app</li>
-                    <li>Copy your <strong>Phone Number ID</strong> and generate a <strong>permanent access token</strong></li>
-                    <li>Enter the number you want alerts sent to below (include country code, e.g. 14155552671)</li>
-                  </ol>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-                  <div>
-                    <label style={fieldLabel}>Phone Number ID</label>
-                    <input
-                      type="text"
-                      value={whatsappPhoneNumberId}
-                      onChange={(e) => { setWhatsappPhoneNumberId(e.target.value); markDirty(); }}
-                      placeholder="123456789012345"
-                      style={inputStyle()}
-                    />
-                    <p style={helpText}>From Meta Developer Console → WhatsApp → API Setup.</p>
-                  </div>
-                  <div>
-                    <label style={fieldLabel}>Recipient phone</label>
-                    <input
-                      type="text"
-                      value={whatsappPhone}
-                      onChange={(e) => { setWhatsappPhone(e.target.value); markDirty(); }}
-                      placeholder="14155552671"
-                      style={inputStyle()}
-                    />
-                    <p style={helpText}>Your WhatsApp number with country code, no +.</p>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={fieldLabel}>Access token</label>
-                  <input
-                    type="password"
-                    value={whatsappAccessToken}
-                    onChange={(e) => { setWhatsappAccessToken(e.target.value); markDirty(); }}
-                    placeholder="EAAxxxxx…"
-                    style={inputStyle()}
-                  />
-                  <p style={helpText}>Permanent token from Meta System User or Developer Console.</p>
-                </div>
-              </div>
-            </ChannelCard>
-
-            {/* Test notification — plain button to avoid nested-form issue */}
-            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                disabled={testing || noChannelsConfigured || isDirty}
-                onClick={() => testFetcher.submit({ intent: "test_notification" }, { method: "post" })}
-                title={
-                  isDirty ? "Save your settings before testing"
-                  : noChannelsConfigured ? "Enable at least one notification channel"
-                  : undefined
-                }
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: 8,
-                  border: "1.5px solid #d1d5db",
-                  background: "#fff",
-                  color: noChannelsConfigured || isDirty ? "#9ca3af" : "#374151",
-                  cursor: testing || noChannelsConfigured || isDirty ? "not-allowed" : "pointer",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                {testing ? "Sending…" : "Send Test Notification"}
-              </button>
-              {isDirty && <span style={{ fontSize: 12, color: "#9ca3af" }}>Save first to test.</span>}
-            </div>
-          </s-section>
-        </div>
-
         {/* ── Digest Emails ── */}
         <div style={{ marginTop: 24 }}>
           <s-section heading="Digest Emails">
             <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
-              A periodic summary of at-risk and out-of-stock products sent to your notification email.{" "}
+              A periodic summary of at-risk and out-of-stock products sent to your notification email —
+              set that (and Slack, WhatsApp, Klaviyo, Shopify Flow) on{" "}
+              <s-link href="/app/integrations">Integrations</s-link>.{" "}
               {isPro ? "Pro plan: choose daily or weekly." : "Basic plan: weekly every Monday."}
             </p>
 
@@ -746,46 +457,6 @@ function SettingsContent({ data }: { data: SettingsData }) {
           </s-section>
         </div>
 
-        {/* ── Outbound Webhook ── */}
-        <div style={{ marginTop: 24 }}>
-          <s-section heading="Outbound Webhook">
-            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
-              Fire a JSON POST to any URL on every stock event. Connect Zapier, Make, or your own ERP.{" "}
-              {!isPro && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
-            </p>
-
-            <div style={{ opacity: isPro ? 1 : 0.45, pointerEvents: isPro ? "auto" : "none" }}>
-              <label style={fieldLabel}>Webhook URL</label>
-              <input
-                type="url"
-                name="outboundWebhookUrl"
-                value={outboundWebhookUrl}
-                onChange={(e) => { setOutboundWebhookUrl(e.target.value); markDirty(); }}
-                placeholder="https://hooks.zapier.com/hooks/catch/..."
-                disabled={!isPro}
-                style={inputStyle()}
-              />
-              <p style={helpText}>Stock Alert will POST a JSON payload to this URL whenever an alert is triggered.</p>
-
-              {isPro && outboundWebhookUrl && (
-                <div style={{ marginTop: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", margin: "0 0 6px" }}>Example payload</p>
-                  <pre style={{ fontSize: 11, color: "#4b5563", margin: 0, overflow: "auto" }}>{JSON.stringify({
-                    event: "low_stock",
-                    shop: "your-store.myshopify.com",
-                    productId: "1234567890",
-                    productTitle: "Blue T-Shirt",
-                    sku: "BTS-001",
-                    currentQuantity: 3,
-                    threshold: 5,
-                    timestamp: new Date().toISOString(),
-                  }, null, 2)}</pre>
-                </div>
-              )}
-            </div>
-          </s-section>
-        </div>
-
         {/* ── Monitoring Scope ── */}
         <div style={{ marginTop: 24 }}>
           <s-section heading="Monitoring Scope">
@@ -873,17 +544,6 @@ function SettingsContent({ data }: { data: SettingsData }) {
         </div>
       </Form>
 
-      {/* ── Test notification toast ── */}
-      {toastResult && (
-        <div style={{
-          position: "fixed", bottom: 24, right: 24, zIndex: 2000,
-          display: "flex", flexDirection: "column", gap: 8,
-          maxWidth: 360, width: "calc(100% - 48px)",
-        }}>
-          <TestResultBanner result={toastResult} onDismiss={() => setToastResult(null)} />
-        </div>
-      )}
-
       {/* ── Sticky unsaved changes bar ── */}
       {isDirty && (
         <div style={{
@@ -946,19 +606,6 @@ function SettingsSkeleton() {
       </s-section>
 
       <div style={{ marginTop: 24 }}>
-        <s-section heading="Notifications">
-          {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} style={{ border: "1.5px solid #e5e7eb", borderRadius: 10, marginBottom: 12, padding: "14px 16px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <SkeletonBlock width={120} height={16} />
-                <SkeletonBlock width={44} height={24} borderRadius={12} />
-              </div>
-            </div>
-          ))}
-        </s-section>
-      </div>
-
-      <div style={{ marginTop: 24 }}>
         <s-section heading="Digest Emails">
           <SkeletonBlock width="100%" height={40} borderRadius={8} />
         </s-section>
@@ -974,12 +621,6 @@ function SettingsSkeleton() {
       </div>
 
       <div style={{ marginTop: 24 }}>
-        <s-section heading="Outbound Webhook">
-          <SkeletonBlock width="100%" height={36} borderRadius={8} />
-        </s-section>
-      </div>
-
-      <div style={{ marginTop: 24 }}>
         <s-section heading="Monitoring Scope">
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {Array.from({ length: 3 }, (_, i) => <SkeletonBlock key={i} width="100%" height={56} borderRadius={8} />)}
@@ -987,116 +628,6 @@ function SettingsSkeleton() {
         </s-section>
       </div>
     </>
-  );
-}
-
-/* ── Toggle switch — purely visual, form value is a hidden input in the parent Form ── */
-function Toggle({
-  label, description, checked, disabled, onChange,
-}: {
-  label: string;
-  description?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange?: (val: boolean) => void;
-}) {
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
-      padding: "12px 0", borderBottom: "1px solid #f3f4f6",
-      opacity: disabled ? 0.5 : 1,
-    }}>
-      <div>
-        <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{label}</div>
-        {description && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{description}</div>}
-      </div>
-      <div
-        role="switch"
-        aria-checked={checked}
-        onClick={() => !disabled && onChange?.(!checked)}
-        style={{ cursor: disabled ? "not-allowed" : "pointer", flexShrink: 0 }}
-      >
-        <div style={{
-          width: 44, height: 24, borderRadius: 12,
-          background: checked && !disabled ? "#4f46e5" : "#d1d5db",
-          position: "relative", transition: "background 0.2s",
-        }}>
-          <div style={{
-            position: "absolute", top: 2,
-            left: checked && !disabled ? 22 : 2,
-            width: 20, height: 20, borderRadius: 10,
-            background: "#fff", transition: "left 0.2s",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
-          }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Notification channel card ── */
-function ChannelCard({
-  icon, title, badge, badgeColor, enabled, onToggle, disabled, children,
-}: {
-  icon: string;
-  title: string;
-  badge: string | null;
-  badgeColor?: string;
-  enabled: boolean;
-  onToggle?: (v: boolean) => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{
-      border: `1.5px solid ${enabled && !disabled ? "#4f46e5" : "#e5e7eb"}`,
-      borderRadius: 10, marginBottom: 12, overflow: "hidden",
-      transition: "border-color 0.2s",
-    }}>
-      {/* Card header */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "14px 16px",
-        background: enabled && !disabled ? "#fafafe" : "#f9fafb",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 20 }}>{icon}</span>
-          <span style={{ fontWeight: 700, fontSize: 15, color: "#111827" }}>{title}</span>
-          {badge && (
-            <span style={{ fontSize: 11, fontWeight: 700, background: badgeColor ?? "#4f46e5", color: "#fff", padding: "2px 8px", borderRadius: 20 }}>
-              {badge}
-            </span>
-          )}
-        </div>
-        <div
-          role="switch"
-          aria-checked={enabled}
-          onClick={() => !disabled && onToggle?.(!enabled)}
-          style={{ cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}
-        >
-          <div style={{
-            width: 44, height: 24, borderRadius: 12,
-            background: enabled && !disabled ? "#4f46e5" : "#d1d5db",
-            position: "relative", transition: "background 0.2s",
-          }}>
-            <div style={{
-              position: "absolute", top: 2,
-              left: enabled ? 22 : 2,
-              width: 20, height: 20, borderRadius: 10,
-              background: "#fff", transition: "left 0.2s",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
-            }} />
-          </div>
-        </div>
-      </div>
-
-      {/* Card body — only shown when enabled */}
-      {enabled && !disabled && (
-        <div style={{ padding: "16px 16px" }}>
-          {children}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1322,6 +853,7 @@ function LogoUrlField({
                 key={debouncedUrl}
                 src={debouncedUrl}
                 alt="Logo"
+                loading="lazy"
                 style={{ display: "block", width: "auto", maxHeight: 80, objectFit: "contain" }}
                 onLoad={() => setImgStatus("ok")}
                 onError={() => setImgStatus("error")}
@@ -1400,42 +932,6 @@ function PlanCard({ plan }: { plan: string }) {
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-/* ── Test result toast ── */
-function TestResultBanner({ result, onDismiss }: { result: TestResult; onDismiss?: () => void }) {
-  const rows: { ok: boolean; text: string }[] = [];
-
-  if (result.error) {
-    rows.push({ ok: false, text: result.error });
-  } else {
-    if (result.email) rows.push({ ok: result.email.sent, text: result.email.sent ? `Email sent to ${result.email.to}` : `Email failed: ${result.email.error}` });
-    if (result.slack) rows.push({ ok: result.slack.sent, text: result.slack.sent ? "Slack message sent" : `Slack failed: ${result.slack.error}` });
-    if (result.whatsapp) rows.push({ ok: result.whatsapp.sent, text: result.whatsapp.sent ? "WhatsApp message sent" : `WhatsApp failed: ${result.whatsapp.error}` });
-    if (!result.email && !result.slack && !result.whatsapp) rows.push({ ok: false, text: "No notification channels enabled." });
-  }
-
-  return (
-    <div style={{
-      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10,
-      boxShadow: "0 8px 24px rgba(0,0,0,0.12)", overflow: "hidden",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid #f3f4f6" }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>Test Notification</span>
-        {onDismiss && (
-          <button type="button" onClick={onDismiss} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 18, lineHeight: 1, padding: 0 }}>×</button>
-        )}
-      </div>
-      <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
-        {rows.map((r, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: r.ok ? "#065f46" : "#991b1b" }}>
-            <span style={{ flexShrink: 0, marginTop: 1 }}>{r.ok ? "✓" : "✗"}</span>
-            <span>{r.text}</span>
-          </div>
-        ))}
       </div>
     </div>
   );

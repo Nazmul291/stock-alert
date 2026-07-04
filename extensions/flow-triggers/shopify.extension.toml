@@ -1,0 +1,79 @@
+api_version = "2025-10"
+
+[[extensions]]
+name = "Low stock"
+type = "flow_trigger"
+handle = "low-stock"
+uid = "7d80063d-61eb-1ac8-c0c2-a1427a8de1ceecbd5b17"
+description = "Triggered when a product's inventory drops to or below its low-stock threshold."
+
+[extensions.settings]
+  [[extensions.settings.fields]]
+  type = "product_reference"
+
+  [[extensions.settings.fields]]
+  type = "single_line_text_field"
+  key = "Product title"
+  description = "The product's title"
+
+  [[extensions.settings.fields]]
+  type = "single_line_text_field"
+  key = "SKU"
+  description = "The product's SKU (blank if none set)"
+
+  [[extensions.settings.fields]]
+  type = "number_integer"
+  key = "Current quantity"
+  description = "Inventory quantity at the time of the alert"
+
+  [[extensions.settings.fields]]
+  type = "number_integer"
+  key = "Threshold"
+  description = "The low-stock threshold that was crossed"
+
+[[extensions]]
+name = "Out of stock"
+type = "flow_trigger"
+handle = "out-of-stock"
+uid = "abbe40e9-5fdc-d0c6-6050-f683be9367e94b4f6d68"
+description = "Triggered when a product's inventory reaches zero."
+
+[extensions.settings]
+  [[extensions.settings.fields]]
+  type = "product_reference"
+
+  [[extensions.settings.fields]]
+  type = "single_line_text_field"
+  key = "Product title"
+  description = "The product's title"
+
+  [[extensions.settings.fields]]
+  type = "single_line_text_field"
+  key = "SKU"
+  description = "The product's SKU (blank if none set)"
+
+[[extensions]]
+name = "Restock"
+type = "flow_trigger"
+handle = "restock"
+uid = "82e73c89-9f69-2163-11b8-916613359b70cc6e60bc"
+description = "Triggered when a previously low/out-of-stock product is restocked."
+
+[extensions.settings]
+  [[extensions.settings.fields]]
+  type = "product_reference"
+
+  [[extensions.settings.fields]]
+  type = "single_line_text_field"
+  key = "Product title"
+  description = "The product's title"
+
+  [[extensions.settings.fields]]
+  type = "single_line_text_field"
+  key = "SKU"
+  description = "The product's SKU (blank if none set)"
+
+  [[extensions.settings.fields]]
+  type = "number_integer"
+  key = "Current quantity"
+  description = "Inventory quantity the product was restocked to"

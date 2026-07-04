@@ -83,6 +83,11 @@ model StoreSettings {
   whatsappPhone          String?  @map("whatsapp_phone") @db.VarChar(30)
   whatsappPhoneNumberId  String?  @map("whatsapp_phone_number_id") @db.VarChar(50)
   whatsappAccessToken    String?  @map("whatsapp_access_token") @db.VarChar(500)
+  klaviyoEnabled         Boolean  @default(false) @map("klaviyo_enabled")
+  klaviyoApiKey          String?  @map("klaviyo_api_key") @db.VarChar(500)
+  slackTeamName          String?  @map("slack_team_name") @db.VarChar(200)
+  slackChannelName       String?  @map("slack_channel_name") @db.VarChar(200)
+  slackAccessToken       String?  @map("slack_access_token") @db.VarChar(500)
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
