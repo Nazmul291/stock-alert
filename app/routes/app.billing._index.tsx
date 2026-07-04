@@ -60,6 +60,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 const BASIC_FEATURES = [
   "Auto-hide sold-out products",
   "Email notifications",
+  "Klaviyo integration",
+  "Shopify Flow triggers",
+  "Back-in-stock storefront widget",
   "Global threshold settings",
   "Basic inventory tracking",
   "Up to 1,000 products",
@@ -67,10 +70,12 @@ const BASIC_FEATURES = [
 
 const PRO_FEATURES = [
   "Everything in Basic, plus:",
-  "Slack notifications",
+  "One-click Slack Connect",
+  "Outbound webhook (Zapier/Make/ERP)",
   "Per-product thresholds",
   "Auto-republish when restocked",
   "Multiple notification recipients",
+  "White-label branded emails",
   "Priority support",
   "Up to 10,000 products",
 ];
