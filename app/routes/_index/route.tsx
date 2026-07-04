@@ -117,7 +117,6 @@ export default function LandingPage() {
         {/* eslint-disable-next-line react/no-danger */}
         <style dangerouslySetInnerHTML={{ __html: inlineCss }} />
         <div className="sa-entrySpinner" />
-        <p>Loading...</p>
       </div>
     );
   }
