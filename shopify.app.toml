@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "38a870cdc7f41175fd49a52689539f9d"
-application_url = "https://stock-alert.nazmulcodes.org/app"
+application_url = "https://stock-alert.nazmulcodes.org"
 embedded = true
 name = "Stock Alert"
 
