@@ -10,6 +10,8 @@ import {
   type DigestEmailData,
   type BrandConfig,
 } from './email-templates';
+import { fireFlowTrigger } from './flow-trigger.server';
+import { sendKlaviyoEvent } from './klaviyo.server';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
@@ -36,6 +38,8 @@ interface SettingsContext {
   whatsappPhone?: string | null;
   whatsappPhoneNumberId?: string | null;
   whatsappAccessToken?: string | null;
+  klaviyoEnabled?: boolean;
+  klaviyoApiKey?: string | null;
 }
 
 async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, body: string): Promise<void> {
@@ -197,6 +201,26 @@ export async function sendLowStockAlert(
     }
   }
 
+  // Flow is its own independent notification channel — fire it regardless of
+  // whether email/Slack are configured or succeeded.
+  await fireFlowTrigger(store.shop, 'low-stock', {
+    product_id: Number(productId),
+    'Product title': product.title,
+    'SKU': product.sku ?? '',
+    'Current quantity': currentQuantity,
+    'Threshold': threshold,
+  });
+
+  if (settings.klaviyoEnabled && settings.klaviyoApiKey && store.email) {
+    await sendKlaviyoEvent(settings.klaviyoApiKey, 'Low Stock Alert', { email: store.email }, {
+      product_id: productId,
+      product_title: product.title,
+      sku: product.sku ?? '',
+      current_quantity: currentQuantity,
+      threshold,
+    });
+  }
+
   if (sentToEmail || sentToSlack) {
     await logAlert(store.shop, productId, product.title, 'low_stock', currentQuantity, threshold, sentToEmail, sentToSlack);
   }
@@ -286,6 +310,20 @@ export async function sendOutOfStockAlert(
     }
   }
 
+  await fireFlowTrigger(store.shop, 'out-of-stock', {
+    product_id: Number(productId),
+    'Product title': product.title,
+    'SKU': product.sku ?? '',
+  });
+
+  if (settings.klaviyoEnabled && settings.klaviyoApiKey && store.email) {
+    await sendKlaviyoEvent(settings.klaviyoApiKey, 'Out of Stock Alert', { email: store.email }, {
+      product_id: productId,
+      product_title: product.title,
+      sku: product.sku ?? '',
+    });
+  }
+
   if (sentToEmail || sentToSlack) {
     await logAlert(store.shop, productId, product.title, 'out_of_stock', 0, null, sentToEmail, sentToSlack);
   }
@@ -294,8 +332,18 @@ export async function sendOutOfStockAlert(
 export async function sendTestNotification(
   store: StoreContext,
   settings: SettingsContext,
-): Promise<{ email?: { sent: boolean; to?: string; error?: string }; slack?: { sent: boolean; error?: string }; whatsapp?: { sent: boolean; error?: string } }> {
-  const result: { email?: { sent: boolean; to?: string; error?: string }; slack?: { sent: boolean; error?: string }; whatsapp?: { sent: boolean; error?: string } } = {};
+): Promise<{
+  email?: { sent: boolean; to?: string; error?: string };
+  slack?: { sent: boolean; error?: string };
+  whatsapp?: { sent: boolean; error?: string };
+  klaviyo?: { sent: boolean; error?: string };
+}> {
+  const result: {
+    email?: { sent: boolean; to?: string; error?: string };
+    slack?: { sent: boolean; error?: string };
+    whatsapp?: { sent: boolean; error?: string };
+    klaviyo?: { sent: boolean; error?: string };
+  } = {};
   const storeName = store.shop.replace('.myshopify.com', '');
 
   if (settings.emailNotifications) {
@@ -377,6 +425,17 @@ export async function sendTestNotification(
     }
   } else {
     console.log(`[Notifications] WhatsApp test skipped — enabled:${settings.whatsappNotifications} phone:${!!settings.whatsappPhone} phoneNumberId:${!!settings.whatsappPhoneNumberId} token:${!!settings.whatsappAccessToken}`);
+  }
+
+  if (settings.klaviyoEnabled && settings.klaviyoApiKey) {
+    if (store.email) {
+      const klaviyoResult = await sendKlaviyoEvent(settings.klaviyoApiKey, 'Test Notification', { email: store.email }, {
+        message: `Stock Alert is connected for ${storeName}.`,
+      });
+      result.klaviyo = klaviyoResult.ok ? { sent: true } : { sent: false, error: klaviyoResult.error };
+    } else {
+      result.klaviyo = { sent: false, error: 'No store email on file to attach the Klaviyo profile to.' };
+    }
   }
 
   return result;
@@ -468,6 +527,22 @@ export async function sendRestockAlert(
     }
   }
 
+  await fireFlowTrigger(store.shop, 'restock', {
+    product_id: Number(productId),
+    'Product title': product.title,
+    'SKU': product.sku ?? '',
+    'Current quantity': currentQuantity,
+  });
+
+  if (settings.klaviyoEnabled && settings.klaviyoApiKey && store.email) {
+    await sendKlaviyoEvent(settings.klaviyoApiKey, 'Restock Alert', { email: store.email }, {
+      product_id: productId,
+      product_title: product.title,
+      sku: product.sku ?? '',
+      current_quantity: currentQuantity,
+    });
+  }
+
   if (sentToEmail || sentToSlack) {
     await logAlert(store.shop, productId, product.title, 'restock', currentQuantity, null, sentToEmail, sentToSlack);
   }
@@ -481,6 +556,7 @@ export async function sendBackInStockNotifications(
   appUrl: string,
   brand: BrandConfig = {},
   productHandle?: string | null,
+  klaviyo?: { enabled: boolean; apiKey: string | null },
 ): Promise<number> {
   const storeName = (brand.senderName) || shopDomain.replace('.myshopify.com', '');
   const productUrl = productHandle
@@ -517,6 +593,18 @@ export async function sendBackInStockNotifications(
         data: { notifiedAt: new Date() },
       });
       sent++;
+
+      // Customer-facing Klaviyo sync — separate from the merchant's own
+      // "Restock Alert" event above; this one is keyed to the subscriber's
+      // profile so the merchant can build a real marketing flow/campaign
+      // off actual shopper back-in-stock signups.
+      if (klaviyo?.enabled && klaviyo.apiKey) {
+        await sendKlaviyoEvent(klaviyo.apiKey, 'Back in Stock', { email: sub.email, first_name: sub.firstName ?? undefined }, {
+          product_id: productId,
+          product_title: productTitle,
+          product_url: productUrl ?? '',
+        });
+      }
     } catch (err) {
       console.error(`[Notifications] Back-in-stock email failed to ${sub.email}:`, err);
     }

@@ -10,7 +10,7 @@ export function useShopAwareNavigate() {
   const location = useLocation();
 
   return useCallback(
-    (to: string) => {
+    (to: string, options?: { replace?: boolean }) => {
       const [path, query] = to.split("?");
       const params = new URLSearchParams(query);
       const current = new URLSearchParams(location.search);
@@ -18,7 +18,7 @@ export function useShopAwareNavigate() {
         if (!params.has(key) && current.has(key)) params.set(key, current.get(key)!);
       }
       const search = params.toString();
-      navigate(search ? `${path}?${search}` : path);
+      navigate(search ? `${path}?${search}` : path, options);
     },
     [navigate, location.search],
   );

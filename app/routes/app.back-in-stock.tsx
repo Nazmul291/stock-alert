@@ -1,104 +1,28 @@
-import { Suspense } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher, Form, Await } from "react-router";
+import { useLoaderData, useFetcher, Form } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { format } from "date-fns";
-import { SkeletonBlock } from "../components/Skeleton";
-
-const PAGE_SIZE = 50;
-
-type BackInStockData = {
-  subscribers: {
-    id: string;
-    productId: string;
-    productTitle: string | null;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-    subscribedAt: string;
-    notifiedAt: string | null;
-  }[];
-  total: number;
-  pendingCount: number;
-  notifiedCount: number;
-  totalPages: number;
-  productGroups: { productId: string; productTitle: string | null; count: number; expectedRestockDate: string | null }[];
-};
+import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
+import { mintSseToken } from "../lib/sse-token.server";
+import type { BackInStockData } from "../lib/back-in-stock-data.server";
+import { useSSEData } from "../hooks/use-sse-data";
 
 // `page` comes straight from the URL — available immediately. Everything else
-// is DB-backed, kicked off but not awaited, so the page chrome (including the
-// static Theme App Embed instructions) renders immediately and the stats/
-// tables stream in once ready.
+// loads entirely in the background via api.back-in-stock-stream.ts and streams
+// to the client over SSE once ready. loadBackInStockData itself lives in
+// app/lib/back-in-stock-data.server.ts, not here — see app._index.tsx's loader
+// comment for why a plain exported function can't stay in a route file.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1") || 1);
+  const token = await mintSseToken(shop);
 
-  return { page, data: loadBackInStockData({ shop, page }) };
+  return { page, token };
 };
-
-async function loadBackInStockData({ shop, page }: { shop: string; page: number }): Promise<BackInStockData> {
-  const [rows, total, pendingCount, notifiedCount, productGroups, restockDates] = await Promise.all([
-    prisma.backInStockSubscriber.findMany({
-      where: { shop },
-      orderBy: { subscribedAt: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      select: {
-        id: true,
-        productId: true,
-        productTitle: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        subscribedAt: true,
-        notifiedAt: true,
-      },
-    }),
-    prisma.backInStockSubscriber.count({ where: { shop } }),
-    prisma.backInStockSubscriber.count({ where: { shop, notifiedAt: null } }),
-    prisma.backInStockSubscriber.count({ where: { shop, notifiedAt: { not: null } } }),
-    prisma.backInStockSubscriber.groupBy({
-      by: ["productId", "productTitle"],
-      where: { shop },
-      _count: { _all: true },
-      orderBy: { _count: { email: "desc" } },
-    }),
-    prisma.inventoryTracking.findMany({
-      where: { shop },
-      select: { productId: true, expectedRestockDate: true },
-    }),
-  ]);
-
-  return {
-    subscribers: rows.map((r) => ({
-      id: r.id,
-      productId: r.productId.toString(),
-      productTitle: r.productTitle,
-      email: r.email,
-      firstName: r.firstName,
-      lastName: r.lastName,
-      subscribedAt: r.subscribedAt.toISOString(),
-      notifiedAt: r.notifiedAt?.toISOString() ?? null,
-    })),
-    total,
-    pendingCount,
-    notifiedCount,
-    totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
-    productGroups: productGroups.map((g) => {
-      const rd = restockDates.find((r) => r.productId === g.productId);
-      return {
-        productId: g.productId.toString(),
-        productTitle: g.productTitle,
-        count: g._count._all,
-        expectedRestockDate: rd?.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
-      };
-    }),
-  };
-}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -135,32 +59,46 @@ function statCard(label: string, value: number | string, color: string) {
 }
 
 export default function BackInStockPage() {
-  const { page, data } = useLoaderData<typeof loader>();
+  const { page, token } = useLoaderData<typeof loader>();
+  const { data, error, retry } = useSSEData<BackInStockData>(
+    `/api/back-in-stock-stream?token=${encodeURIComponent(token)}&page=${page}`,
+  );
+
+  if (error) {
+    return (
+      <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
+        <SSEErrorRetry message={error} onRetry={retry} />
+      </s-page>
+    );
+  }
+
+  if (!data) {
+    return (
+      <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
+        <StatsSkeleton />
+        <div style={{ marginTop: 24 }}>
+          <SubscriberListSkeleton />
+        </div>
+      </s-page>
+    );
+  }
 
   return (
     <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
       {/* Stats */}
-      <Suspense fallback={<StatsSkeleton />}>
-        <Await resolve={data}>{(d) => (
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
-            {statCard("Total Subscribers", d.total, "#111827")}
-            {statCard("Waiting", d.pendingCount, "#d97706")}
-            {statCard("Notified", d.notifiedCount, "#059669")}
-            {statCard("Products Watched", d.productGroups.length, "#4f46e5")}
-          </div>
-        )}</Await>
-      </Suspense>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
+        {statCard("Total Subscribers", data.total, "#111827")}
+        {statCard("Waiting", data.pendingCount, "#d97706")}
+        {statCard("Notified", data.notifiedCount, "#059669")}
+        {statCard("Products Watched", data.productGroups.length, "#4f46e5")}
+      </div>
 
       {/* Subscribers by product */}
-      <Suspense fallback={null}>
-        <Await resolve={data}>{(d) => d.productGroups.length > 0 && <ProductGroupsSection productGroups={d.productGroups} />}</Await>
-      </Suspense>
+      {data.productGroups.length > 0 && <ProductGroupsSection productGroups={data.productGroups} />}
 
       {/* Subscriber list */}
       <div style={{ marginTop: 24 }}>
-        <Suspense fallback={<SubscriberListSkeleton />}>
-          <Await resolve={data}>{(d) => <SubscriberList data={d} page={page} />}</Await>
-        </Suspense>
+        <SubscriberList data={data} page={page} />
       </div>
     </s-page>
   );

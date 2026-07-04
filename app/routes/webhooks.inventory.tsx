@@ -236,6 +236,7 @@ async function processInventoryUpdate(
         process.env.SHOPIFY_APP_URL ?? "",
         { logoUrl: settings.brandLogoUrl, color: settings.brandColor, senderName: settings.brandSenderName },
         productHandle,
+        { enabled: settings.klaviyoEnabled, apiKey: settings.klaviyoApiKey },
       ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
     }
     console.log(`[Webhook] No alert needed — alertType: none`);
@@ -275,6 +276,8 @@ async function processInventoryUpdate(
     brandLogoUrl: settings.brandLogoUrl,
     brandColor: settings.brandColor,
     brandSenderName: settings.brandSenderName,
+    klaviyoEnabled: settings.klaviyoEnabled,
+    klaviyoApiKey: settings.klaviyoApiKey,
   };
   const productCtx = {
     id: productId,
@@ -300,6 +303,7 @@ async function processInventoryUpdate(
       process.env.SHOPIFY_APP_URL ?? "",
       { logoUrl: settingsCtx.brandLogoUrl, color: settingsCtx.brandColor, senderName: settingsCtx.brandSenderName },
       productHandle,
+      { enabled: settingsCtx.klaviyoEnabled, apiKey: settingsCtx.klaviyoApiKey },
     ).catch((err) => console.error("[Webhook] Back-in-stock notifications failed:", err));
   } else {
     // low_stock and out_of_stock go through the debounce buffer.

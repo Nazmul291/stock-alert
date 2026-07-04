@@ -1,8 +1,10 @@
 import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
-import { redirect, useLoaderData } from "react-router";
+import { useLoaderData } from "react-router";
+import { useEffect, useState } from "react";
 
 import { PLAN_LIMITS } from "../../lib/plan-limits";
 import logoMark from "../../assets/logo-mark.png";
+import { useSSEData } from "../../hooks/use-sse-data";
 // Inlined as a <style> tag below instead of a <link rel="stylesheet"> so this
 // page has zero render-blocking network requests — the CSS ships in the same
 // response as the HTML.
@@ -52,18 +54,10 @@ export const headers: HeadersFunction = () => ({
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
-  // Shopify's embedded admin doesn't consistently send the same params on every
-  // load path (sometimes shop, sometimes only host, sometimes other tracking
-  // params alongside). `embedded=1` is the one marker it always sends when
-  // rendering this URL inside the admin iframe, so treat any of these as "this
-  // is an embedded load" rather than requiring a specific param to be present.
-  const isEmbeddedLoad = ["shop", "host", "embedded", "appLoadId"].some((key) => url.searchParams.has(key));
-  if (isEmbeddedLoad) {
-    throw redirect(`/app?${url.searchParams.toString()}`);
-  }
-
+  const hasEmbedParams = ["shop", "host", "embedded", "appLoadId"].some((key) => url.searchParams.has(key));
   const appUrl = process.env.SHOPIFY_APP_URL || url.origin;
-  return { appUrl };
+
+  return { appUrl, hasEmbedParams, search: url.search };
 };
 
 export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
@@ -85,8 +79,48 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
 };
 
 export default function LandingPage() {
-  const { appUrl } = useLoaderData<typeof loader>();
+  const { appUrl, hasEmbedParams, search } = useLoaderData<typeof loader>();
   const year = new Date().getFullYear();
+  // Starts "ready" (not "loading") for a plain, non-embedded visit — this is a
+  // useState initial value, so it's also what the server renders. If it
+  // defaulted to "loading" unconditionally, crawlers and link-preview bots
+  // would only ever see the skeleton instead of the marketing page.
+  const [appStatus, setAppStatus] = useState<"loading" | "redirect" | "ready">(hasEmbedParams ? "loading" : "ready");
+
+  // Only opens a connection for an embedded load — a plain marketing-page
+  // visit never touches the server again after the initial document.
+  const { data: entry } = useSSEData<{ embedded: boolean }>(
+    hasEmbedParams ? `/api/entry-stream${search}` : null,
+  );
+
+  useEffect(() => {
+    if (!hasEmbedParams) return; // already "ready" — no SSE call was made
+    if (entry?.embedded) {
+      setAppStatus("redirect");
+      window.location.replace(`/app${search}`);
+    } else if (entry) {
+      // Stream resolved but says not embedded — shouldn't happen (same params
+      // checked both here and in api.entry-stream.ts), but avoids a stuck
+      // skeleton instead of assuming "ready" merely because `entry` starts
+      // out null while the SSE call is still in flight.
+      setAppStatus("ready");
+    }
+  }, [entry, search, hasEmbedParams]);
+
+  // Embedded load: skeleton until the redirect above fires. If the stream
+  // ever resolves to embedded:false (shouldn't happen — the same params are
+  // checked both here and in api.entry-stream.ts — kept as a safe fallback
+  // rather than a stuck skeleton), fall through to the marketing page.
+  if (appStatus === "loading" || appStatus === "redirect") {
+    return (
+      <div className="sa-entrySkeleton">
+        {/* eslint-disable-next-line react/no-danger */}
+        <style dangerouslySetInnerHTML={{ __html: inlineCss }} />
+        <div className="sa-entrySpinner" />
+        <p>Loading...</p>
+      </div>
+    );
+  }
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -118,7 +152,7 @@ export default function LandingPage() {
       <header className="sa-header">
         <div className="sa-headerInner">
           <div className="sa-brand">
-            <img src={logoMark} alt="" className="sa-brandLogo" />
+            <img src={logoMark} alt="" className="sa-brandLogo" loading="lazy" />
             <span>{APP_NAME}</span>
           </div>
           <nav className="sa-nav">

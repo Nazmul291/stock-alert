@@ -137,7 +137,7 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
 
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
           {product.imageUrl ? (
-            <img src={product.imageUrl} alt={product.imageAlt} width={52} height={52}
+            <img src={product.imageUrl} alt={product.imageAlt} width={52} height={52} loading="lazy"
               style={{ borderRadius: 8, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
           ) : (
             <div style={{ width: 52, height: 52, borderRadius: 8, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 22 }}>
