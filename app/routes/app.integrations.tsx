@@ -581,7 +581,7 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
 
         {/* ── Shopify Flow ── */}
         <div style={{ marginTop: 24 }}>
-          <s-section heading="Shopify Flow">
+          <s-section heading="Flow">
             <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
               Stock Alert publishes three Flow triggers — no setup needed here. Build a workflow in{" "}
               <a href="https://admin.shopify.com/admin/apps/flow" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>
