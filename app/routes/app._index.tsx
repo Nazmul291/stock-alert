@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
+import { useLoaderData, useFetcher, useOutletContext } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -9,6 +9,7 @@ import { format } from "date-fns";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { DashboardData } from "../lib/dashboard-data.server";
+import type { AppOutletContext } from "./app";
 import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
 
 // Only the auth check blocks the response — dashboard data is fetched entirely
@@ -42,6 +43,13 @@ export default function Dashboard() {
     `/api/dashboard-stream?token=${encodeURIComponent(token)}`,
   );
 
+  // app.tsx's gate check runs in parallel and may still decide to bounce this
+  // merchant to onboarding/billing. Hold the skeleton while appStatus is
+  // "loading" or "redirect", instead of flashing full dashboard content right
+  // before the redirect fires — only "ready" means it's safe to render.
+  const { appStatus } = useOutletContext<AppOutletContext>();
+  const showContent = !!data && appStatus === "ready";
+
   return (
     <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
       <s-button slot="primary-action" variant="primary" href="/app/products">
@@ -50,8 +58,8 @@ export default function Dashboard() {
 
       {error ? (
         <SSEErrorRetry message={error} onRetry={retry} />
-      ) : data ? (
-        <DashboardContent shop={shop} data={data} />
+      ) : showContent ? (
+        <DashboardContent shop={shop} data={data!} />
       ) : (
         <DashboardSkeleton />
       )}
