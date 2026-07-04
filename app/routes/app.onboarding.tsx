@@ -1,37 +1,28 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, Form, useNavigation, redirect } from "react-router";
+import { useEffect } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getIsTestStore, getCachedHasActivePayment } from "../services/billing.server";
 import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
 import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
+import { mintSseToken } from "../lib/sse-token.server";
+import { useSSEData } from "../hooks/use-sse-data";
+import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 
+// The hasActivePayment / allStepsDone redirect gate used to be awaited here
+// (isTestStore + billing.check, both Shopify API calls) before any of the step
+// content below could render. It now runs in the background via
+// api.onboarding-gate-stream.ts — the step form renders immediately and bounces
+// client-side if the gate resolves to a redirect.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, billing, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  // getIsTestStore is needed by getCachedHasActivePayment on a cache miss, so it
-  // must resolve first. Everything else is independent and runs in parallel.
-  const isTest = await getIsTestStore(admin, shop);
-
-  const [hasActivePayment, setupProgress, settings, dbSession] = await Promise.all([
-    // Use the cache — app.tsx already populated it when it redirected here.
-    getCachedHasActivePayment(shop, isTest, billing),
-    prisma.setupProgress.findUnique({ where: { shop } }),
+  const [settings, dbSession] = await Promise.all([
     getCachedSettings(shop),
     getCachedSession(shop),
   ]);
-
-  // Already subscribed — skip onboarding
-  if (hasActivePayment) throw redirect(embeddedRedirectPath(request, "/app", shop));
-
-  // If all setup steps are done, skip straight to billing
-  const allStepsDone =
-    setupProgress?.appInstalled &&
-    setupProgress?.globalSettingsConfigured &&
-    setupProgress?.notificationsConfigured;
-  if (allStepsDone) throw redirect(embeddedRedirectPath(request, "/app/billing", shop));
 
   const url = new URL(request.url);
   const step = Math.min(2, Math.max(1, parseInt(url.searchParams.get("step") ?? "1")));
@@ -51,7 +42,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     autoRepublishEnabled: settings?.autoRepublishEnabled ?? false,
   };
 
-  return { step, shopInfo, existingSettings };
+  const token = await mintSseToken(shop);
+
+  return { step, shopInfo, existingSettings, token };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -126,9 +119,17 @@ const STEP_LABELS = ["App Installed", "Global Settings"];
 const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
 
 export default function OnboardingPage() {
-  const { step, shopInfo, existingSettings } = useLoaderData<typeof loader>();
+  const { step, shopInfo, existingSettings, token } = useLoaderData<typeof loader>();
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
+
+  const navigate = useShopAwareNavigate();
+  const { data: gate } = useSSEData<{ redirectTo: string | null }>(
+    `/api/onboarding-gate-stream?token=${encodeURIComponent(token)}`,
+  );
+  useEffect(() => {
+    if (gate?.redirectTo) navigate(gate.redirectTo, { replace: true });
+  }, [gate, navigate]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f6f6f7", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 16px" }}>

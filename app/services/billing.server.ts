@@ -1,4 +1,4 @@
-import { authenticate } from "../shopify.server";
+import { authenticate, unauthenticated } from "../shopify.server";
 import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../lib/billing-plans";
 import { redis } from "../lib/redis.server";
 
@@ -97,6 +97,46 @@ export async function getCachedHasActivePayment(
     plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
     isTest,
   });
+
+  cacheSet(cacheKey, hasActivePayment ? "1" : "0", BILLING_STATUS_TTL_SECONDS);
+  return hasActivePayment;
+}
+
+// SSE routes run outside a request-authenticated session (EventSource can't send
+// the Authorization header Shopify's session-token auth needs), so they can't use
+// the request-bound `billing` client above. This queries the same underlying data
+// billing.check() does, via the shop's stored offline access token instead.
+// Shares the same cache key/TTL, so whichever path populates the cache first is
+// reused by the other.
+export async function getCachedHasActivePaymentOffline(shop: string, isTest: boolean): Promise<boolean> {
+  const cacheKey = `billing:${shop}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached !== undefined) return cached === "1";
+
+  const { admin } = await unauthenticated.admin(shop);
+  const res = await admin.graphql(
+    `#graphql
+    query {
+      currentAppInstallation {
+        activeSubscriptions { name test }
+        oneTimePurchases(first: 250, sortKey: CREATED_AT) {
+          edges { node { name test status } }
+        }
+      }
+    }`,
+  );
+  const data = await res.json();
+  const installation = data.data?.currentAppInstallation;
+  const plans = [BILLING_PLAN_BASIC, BILLING_PLAN_PRO];
+
+  const hasActivePayment =
+    (installation?.activeSubscriptions ?? []).some(
+      (s: { name: string; test: boolean }) => plans.includes(s.name) && (isTest || !s.test),
+    ) ||
+    (installation?.oneTimePurchases?.edges ?? []).some(
+      ({ node }: { node: { name: string; test: boolean; status: string } }) =>
+        plans.includes(node.name) && (isTest || !node.test) && node.status === "ACTIVE",
+    );
 
   cacheSet(cacheKey, hasActivePayment ? "1" : "0", BILLING_STATUS_TTL_SECONDS);
   return hasActivePayment;

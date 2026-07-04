@@ -1,112 +1,27 @@
-import { useState, useRef, useEffect, Suspense } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, Form, useFetcher, Await } from "react-router";
+import { useLoaderData, Form, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendTestNotification } from "../lib/notifications";
 import { getCachedSettings, getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
-import { SkeletonBlock } from "../components/Skeleton";
+import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
+import { mintSseToken } from "../lib/sse-token.server";
+import type { SettingsData } from "../lib/settings-data.server";
+import { useSSEData } from "../hooks/use-sse-data";
 
-type SettingsValues = {
-  autoHideEnabled: boolean;
-  autoRepublishEnabled: boolean;
-  lowStockThreshold: number;
-  emailNotifications: boolean;
-  slackNotifications: boolean;
-  notificationEmail: string;
-  slackWebhookUrl: string;
-  whatsappNotifications: boolean;
-  whatsappPhone: string;
-  whatsappPhoneNumberId: string;
-  whatsappAccessToken: string;
-  digestEnabled: boolean;
-  digestFrequency: string;
-  brandLogoUrl: string;
-  brandColor: string;
-  brandSenderName: string;
-  outboundWebhookUrl: string;
-  supplierLeadTimeDays: number;
-  monitoringFilter: string;
-  monitoringCollectionId: string;
-  monitoringTags: string;
-};
-
-type SettingsData = {
-  shop: string;
-  plan: string;
-  storeEmail: string | null;
-  settings: SettingsValues;
-};
-
-// Only the auth check blocks the response — the two settings/session lookups
-// are kicked off but not awaited, so the page shell (plan card + form
-// skeleton) streams immediately while the real form fills in once ready.
+// Only the auth check blocks the response — settings data loads entirely in
+// the background via api.settings-stream.ts and is pushed to the client over
+// SSE once ready. loadSettingsData itself lives in
+// app/lib/settings-data.server.ts, not here — see app._index.tsx's loader
+// comment for why a plain exported function can't stay in a route file.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  return { settingsData: loadSettingsData(shop) };
+  const token = await mintSseToken(shop);
+  return { token };
 };
-
-async function loadSettingsData(shop: string): Promise<SettingsData> {
-  const [settings, storeSession] = await Promise.all([
-    getCachedSettings(shop),
-    getCachedSession(shop),
-  ]);
-
-  return {
-    shop,
-    plan: storeSession?.plan ?? "basic",
-    storeEmail: storeSession?.email ?? null,
-    settings: settings
-      ? {
-          autoHideEnabled: settings.autoHideEnabled,
-          autoRepublishEnabled: settings.autoRepublishEnabled,
-          lowStockThreshold: settings.lowStockThreshold,
-          emailNotifications: settings.emailNotifications,
-          slackNotifications: settings.slackNotifications,
-          notificationEmail: settings.notificationEmail ?? "",
-          slackWebhookUrl: settings.slackWebhookUrl ?? "",
-          whatsappNotifications: settings.whatsappNotifications,
-          whatsappPhone: settings.whatsappPhone ?? "",
-          whatsappPhoneNumberId: settings.whatsappPhoneNumberId ?? "",
-          whatsappAccessToken: settings.whatsappAccessToken ?? "",
-          digestEnabled: settings.digestEnabled,
-          digestFrequency: settings.digestFrequency,
-          brandLogoUrl: settings.brandLogoUrl ?? "",
-          brandColor: settings.brandColor ?? "#4f46e5",
-          brandSenderName: settings.brandSenderName ?? "",
-          outboundWebhookUrl: settings.outboundWebhookUrl ?? "",
-          supplierLeadTimeDays: settings.supplierLeadTimeDays ?? 7,
-          monitoringFilter: settings.monitoringFilter ?? "all",
-          monitoringCollectionId: settings.monitoringCollectionId ?? "",
-          monitoringTags: settings.monitoringTags ?? "",
-        }
-      : {
-          autoHideEnabled: false,
-          autoRepublishEnabled: false,
-          lowStockThreshold: 5,
-          emailNotifications: true,
-          slackNotifications: false,
-          notificationEmail: "",
-          slackWebhookUrl: "",
-          whatsappNotifications: false,
-          whatsappPhone: "",
-          whatsappPhoneNumberId: "",
-          whatsappAccessToken: "",
-          digestEnabled: true,
-          digestFrequency: "weekly",
-          brandLogoUrl: "",
-          brandColor: "#4f46e5",
-          brandSenderName: "",
-          outboundWebhookUrl: "",
-          supplierLeadTimeDays: 7,
-          monitoringFilter: "all",
-          monitoringCollectionId: "",
-          monitoringTags: "",
-        },
-  };
-}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -284,13 +199,20 @@ const helpText: React.CSSProperties = {
 };
 
 export default function SettingsPage() {
-  const { settingsData } = useLoaderData<typeof loader>();
+  const { token } = useLoaderData<typeof loader>();
+  const { data, error, retry } = useSSEData<SettingsData>(
+    `/api/settings-stream?token=${encodeURIComponent(token)}`,
+  );
 
   return (
     <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
-      <Suspense fallback={<SettingsSkeleton />}>
-        <Await resolve={settingsData}>{(data) => <SettingsContent data={data} />}</Await>
-      </Suspense>
+      {error ? (
+        <SSEErrorRetry message={error} onRetry={retry} />
+      ) : data ? (
+        <SettingsContent data={data} />
+      ) : (
+        <SettingsSkeleton />
+      )}
 
       {/* ── Theme App Embed — static, doesn't depend on loaded settings ── */}
       <div style={{ marginTop: 24 }}>

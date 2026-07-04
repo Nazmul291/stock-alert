@@ -1,8 +1,10 @@
 import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-router";
-import { redirect, useLoaderData } from "react-router";
+import { useLoaderData } from "react-router";
+import { useEffect } from "react";
 
 import { PLAN_LIMITS } from "../../lib/plan-limits";
 import logoMark from "../../assets/logo-mark.png";
+import { useSSEData } from "../../hooks/use-sse-data";
 // Inlined as a <style> tag below instead of a <link rel="stylesheet"> so this
 // page has zero render-blocking network requests — the CSS ships in the same
 // response as the HTML.
@@ -57,13 +59,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // params alongside). `embedded=1` is the one marker it always sends when
   // rendering this URL inside the admin iframe, so treat any of these as "this
   // is an embedded load" rather than requiring a specific param to be present.
-  const isEmbeddedLoad = ["shop", "host", "embedded", "appLoadId"].some((key) => url.searchParams.has(key));
-  if (isEmbeddedLoad) {
-    throw redirect(`/app?${url.searchParams.toString()}`);
-  }
-
+  //
+  // This only decides which UI to render — it never blocks or redirects here.
+  // A plain "/" visit with none of these params (a real visitor, a crawler, a
+  // link-preview bot) always gets the marketing page instantly, so SEO/social
+  // previews are unaffected. An embedded load instead gets a skeleton, and the
+  // redirect to /app is confirmed via api.entry-stream.ts + SSE, matching the
+  // rest of the app.
+  const hasEmbedParams = ["shop", "host", "embedded", "appLoadId"].some((key) => url.searchParams.has(key));
   const appUrl = process.env.SHOPIFY_APP_URL || url.origin;
-  return { appUrl };
+
+  return { appUrl, hasEmbedParams, search: url.search };
 };
 
 export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
@@ -85,8 +91,37 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
 };
 
 export default function LandingPage() {
-  const { appUrl } = useLoaderData<typeof loader>();
+  const { appUrl, hasEmbedParams, search } = useLoaderData<typeof loader>();
   const year = new Date().getFullYear();
+
+  // Only opens a connection for an embedded load — a plain marketing-page
+  // visit never touches the server again after the initial document.
+  const { data: entry } = useSSEData<{ embedded: boolean }>(
+    hasEmbedParams ? `/api/entry-stream${search}` : null,
+  );
+
+  useEffect(() => {
+    if (entry?.embedded) {
+      // Full page navigation, not an SPA transition — /app needs root.tsx to
+      // decide isShopifyEmbedded and render the App Bridge <script> tag
+      // synchronously from the very first byte of that document response.
+      window.location.replace(`/app${search}`);
+    }
+  }, [entry, search]);
+
+  // Embedded load: skeleton until the redirect above fires. If the stream
+  // ever resolves to embedded:false (shouldn't happen — the same params are
+  // checked both here and in api.entry-stream.ts — kept as a safe fallback
+  // rather than a stuck skeleton), fall through to the marketing page.
+  if (hasEmbedParams && entry?.embedded !== false) {
+    return (
+      <div className="sa-entrySkeleton">
+        {/* eslint-disable-next-line react/no-danger */}
+        <style dangerouslySetInnerHTML={{ __html: inlineCss }} />
+        <div className="sa-entrySpinner" />
+      </div>
+    );
+  }
 
   const jsonLd = {
     "@context": "https://schema.org",

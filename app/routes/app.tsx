@@ -1,74 +1,32 @@
 import type { HeadersFunction, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
-import { Outlet, redirect, useLoaderData, useRouteError, useNavigation, isRouteErrorResponse } from "react-router";
+import { Outlet, useLoaderData, useRouteError, useNavigation, isRouteErrorResponse } from "react-router";
 import { useEffect } from "react";
 import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
-import { getCachedHasActivePayment, getIsTestStore } from "../services/billing.server";
-import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
+import { mintSseToken } from "../lib/sse-token.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
+import { useSSEData } from "../hooks/use-sse-data";
 
-const todayUTC = () => {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
-};
+type GateData = { redirectTo: string | null; alertsToday: number };
 
+// Only auth blocks the response now — the billing/onboarding gate check and the
+// alertsToday count used to be awaited here too (~400-1000ms on a cache miss,
+// in front of every single /app/* page). They now run in the background via
+// api.app-gate-stream.ts, identified by a short-lived token instead of a
+// re-authenticated request (EventSource can't carry the session-token header).
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing, admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const shop = session.shop;
   const url = new URL(request.url);
   const pathname = url.pathname;
 
   const isPublicRoute = pathname.startsWith("/app/billing") || pathname.startsWith("/app/onboarding");
+  const token = await mintSseToken(shop);
 
-  // Both fire immediately — neither depends on the billing gate below.
-  const alertsTodayPromise = prisma.alertHistory.count({
-    where: { shop, sentAt: { gte: todayUTC() } },
-  });
-  alertsTodayPromise.catch(() => {});
-
-  // On a fresh install setupProgress doesn't exist yet. Detecting that with a
-  // single indexed DB read (~10ms) lets us redirect to /app/onboarding without
-  // spending ~400ms on two sequential Shopify API calls (getIsTestStore +
-  // billing.check). For returning users both results are cached so the billing
-  // path is also fast; the DB read overlaps with the cache lookups.
-  const setupProgressPromise = !isPublicRoute
-    ? prisma.setupProgress.findUnique({ where: { shop } })
-    : Promise.resolve(null);
-  setupProgressPromise.catch(() => {});
-
-  if (!isPublicRoute) {
-    try {
-      const setupProgress = await setupProgressPromise;
-
-      if (!setupProgress) {
-        // No record at all → brand-new install. Skip the billing API calls and
-        // go straight to onboarding — they can't have an active subscription yet.
-        throw redirect(embeddedRedirectPath(request, "/app/onboarding", shop));
-      }
-
-      const isTest = await getIsTestStore(admin, shop);
-      const hasActivePayment = await getCachedHasActivePayment(shop, isTest, billing);
-      if (!hasActivePayment) {
-        const setupDone =
-          setupProgress.appInstalled &&
-          setupProgress.globalSettingsConfigured &&
-          setupProgress.notificationsConfigured;
-        throw redirect(embeddedRedirectPath(request, setupDone ? "/app/billing" : "/app/onboarding", shop));
-      }
-    } catch (err) {
-      if (err instanceof Response) throw err;
-      // Billing check failed — allow access rather than lock merchant out
-    }
-  }
-
-  const alertsToday = await alertsTodayPromise;
-
-  return { shop, alertsToday };
+  return { shop, token, isPublicRoute };
 };
 
 
@@ -109,7 +67,7 @@ function NavigationLoadingOverlay() {
 }
 
 export default function App() {
-  const { shop, alertsToday } = useLoaderData<typeof loader>();
+  const { shop, token, isPublicRoute } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const isNavigating = navigation.state === "loading";
@@ -126,6 +84,17 @@ export default function App() {
     document.addEventListener("shopify:navigate", handleNavigate);
     return () => document.removeEventListener("shopify:navigate", handleNavigate);
   }, [navigate]);
+
+  // Background gate check + alerts count — nav and <Outlet/> render immediately;
+  // this resolves shortly after and bounces to onboarding/billing if needed.
+  const { data: gate } = useSSEData<GateData>(
+    `/api/app-gate-stream?token=${encodeURIComponent(token)}&isPublicRoute=${isPublicRoute ? "1" : "0"}`,
+  );
+  const alertsToday = gate?.alertsToday ?? 0;
+
+  useEffect(() => {
+    if (gate?.redirectTo) navigate(gate.redirectTo, { replace: true });
+  }, [gate, navigate]);
 
   return (
     <AppProvider embedded={false}>

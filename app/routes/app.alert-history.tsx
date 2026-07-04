@@ -1,13 +1,14 @@
-import { Suspense, useState } from "react";
+import { useState } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, Link, Form, useFetcher, Await } from "react-router";
+import { useLoaderData, Link, Form, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { format } from "date-fns";
-import { SkeletonBlock } from "../components/Skeleton";
-
-const PAGE_SIZE = 25;
+import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
+import { mintSseToken } from "../lib/sse-token.server";
+import type { AlertsData } from "../lib/alert-history-data.server";
+import { useSSEData } from "../hooks/use-sse-data";
 
 const ALERT_STYLES: Record<string, { label: string; bg: string; color: string }> = {
   low_stock:    { label: "Low Stock",     bg: "#fef3c7", color: "#92400e" },
@@ -22,25 +23,13 @@ const TYPE_TABS = [
   { key: "restock",      label: "Back in Stock" },
 ];
 
-type AlertsData = {
-  alerts: {
-    id: string;
-    productTitle: string | null;
-    alertType: string | null;
-    quantityAtAlert: number | null;
-    thresholdTriggered: number | null;
-    sentToEmail: string | null;
-    sentToSlack: boolean;
-    sentAt: string;
-  }[];
-  total: number;
-  totalPages: number;
-};
-
 // Filters come straight from the URL — available immediately, no DB needed —
-// so they're returned synchronously. The actual alert rows require two DB
-// queries; that work is kicked off but not awaited, so the search bar and
-// filter tabs render immediately while the table streams in once ready.
+// so they're returned synchronously. The actual alert rows load entirely in
+// the background via api.alert-history-stream.ts (same filter params, passed
+// through the query string) and stream to the client over SSE once ready.
+// loadAlerts itself lives in app/lib/alert-history-data.server.ts, not here —
+// see app._index.tsx's loader comment for why a plain exported function can't
+// stay in a route file.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
@@ -49,49 +38,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1") || 1);
   const typeFilter = url.searchParams.get("type") ?? "all";
   const productSearch = url.searchParams.get("product") ?? "";
+  const token = await mintSseToken(shop);
 
-  return {
-    page,
-    typeFilter,
-    productSearch,
-    alertsData: loadAlerts({ shop, page, typeFilter, productSearch }),
-  };
+  return { page, typeFilter, productSearch, token };
 };
-
-async function loadAlerts({ shop, page, typeFilter, productSearch }: {
-  shop: string; page: number; typeFilter: string; productSearch: string;
-}): Promise<AlertsData> {
-  const where = {
-    shop,
-    ...(typeFilter !== "all" ? { alertType: typeFilter as "low_stock" | "out_of_stock" | "restock" } : {}),
-    ...(productSearch ? { productTitle: { contains: productSearch, mode: "insensitive" as const } } : {}),
-  };
-
-  const [alerts, total] = await Promise.all([
-    prisma.alertHistory.findMany({
-      where,
-      orderBy: { sentAt: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    }),
-    prisma.alertHistory.count({ where }),
-  ]);
-
-  return {
-    alerts: alerts.map((a) => ({
-      id: a.id,
-      productTitle: a.productTitle,
-      alertType: a.alertType as string | null,
-      quantityAtAlert: a.quantityAtAlert,
-      thresholdTriggered: a.thresholdTriggered,
-      sentToEmail: a.sentToEmail,
-      sentToSlack: a.sentToSlack,
-      sentAt: a.sentAt.toISOString(),
-    })),
-    total,
-    totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
-  };
-}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -114,7 +64,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function AlertHistoryPage() {
-  const { typeFilter, productSearch, page, alertsData } = useLoaderData<typeof loader>();
+  const { typeFilter, productSearch, page, token } = useLoaderData<typeof loader>();
+  const { data, error, retry } = useSSEData<AlertsData>(
+    `/api/alert-history-stream?token=${encodeURIComponent(token)}&page=${page}&type=${encodeURIComponent(typeFilter)}&product=${encodeURIComponent(productSearch)}`,
+  );
 
   const buildUrl = (overrides: Record<string, string | number | null>) => {
     const p = new URLSearchParams();
@@ -160,9 +113,7 @@ export default function AlertHistoryPage() {
             )}
           </Form>
 
-          <Suspense fallback={null}>
-            <Await resolve={alertsData}>{(data) => data.total > 0 ? <ClearAllButton total={data.total} /> : null}</Await>
-          </Suspense>
+          {data && data.total > 0 && <ClearAllButton total={data.total} />}
         </div>
 
         {/* Filter tabs — URL-derived, render immediately */}
@@ -186,9 +137,13 @@ export default function AlertHistoryPage() {
           ))}
         </div>
 
-        <Suspense fallback={<AlertsTableSkeleton />}>
-          <Await resolve={alertsData}>{(data) => <AlertsTable data={data} page={page} buildUrl={buildUrl} />}</Await>
-        </Suspense>
+        {error ? (
+          <SSEErrorRetry message={error} onRetry={retry} />
+        ) : data ? (
+          <AlertsTable data={data} page={page} buildUrl={buildUrl} />
+        ) : (
+          <AlertsTableSkeleton />
+        )}
       </s-section>
     </s-page>
   );

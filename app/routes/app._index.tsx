@@ -1,151 +1,30 @@
-import React, { Suspense, useEffect } from "react";
+import React, { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher, Await } from "react-router";
+import { useLoaderData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
+import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { format } from "date-fns";
-import { syncState } from "../lib/sync-state.server";
-import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
-import { SkeletonBlock } from "../components/Skeleton";
+import { mintSseToken } from "../lib/sse-token.server";
+import type { DashboardData } from "../lib/dashboard-data.server";
+import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
 
-type DashboardData = {
-  plan: string;
-  stats: {
-    totalProducts: number;
-    outOfStock: number;
-    lowStock: number;
-    inStock: number;
-    hidden: number;
-    deactivated: number;
-  };
-  setupProgress: {
-    appInstalled: boolean;
-    globalSettingsConfigured: boolean;
-    notificationsConfigured: boolean;
-    firstProductTracked: boolean;
-  };
-  progressPct: number;
-  syncRunning: boolean;
-  lastSyncCompletedAt: string | null;
-  lastSyncCount: number | null;
-  lastWebhookAt: string | null;
-  recentAlerts: { id: string; productTitle: string | null; alertType: string | null; sentAt: string }[];
-  notificationEmail: string | null;
-  alertsToday: number;
-  spark7: number[];
-  stockOutSoonCount: number;
-  atRiskProducts: { productId: string; productTitle: string | null; sku: string | null; currentQuantity: number; inventoryStatus: string }[];
-};
-
-// Only the auth check blocks the response — everything else is fetched here but
-// NOT awaited, so the shell (page chrome + skeletons) streams to the browser
-// immediately while this keeps resolving on the server and streams in via
-// <Suspense>/<Await> the moment it's ready.
+// Only the auth check blocks the response — dashboard data is fetched entirely
+// in the background by api.dashboard-stream.ts, identified by a short-lived
+// token (EventSource can't carry the session-token auth header), and pushed to
+// the client over SSE the moment it's ready. loadDashboardData itself lives in
+// app/lib/dashboard-data.server.ts (not here) — React Router only strips
+// server-only code from `loader`/`action`/`headers`/`middleware`, so any other
+// export from a route file (like a plain helper function) gets pulled into the
+// client bundle too, dragging in server-only modules like db.server with it.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  return { shop, dashboardData: loadDashboardData(shop) };
+  const token = await mintSseToken(shop);
+  return { shop, token };
 };
-
-async function loadDashboardData(shop: string): Promise<DashboardData> {
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
-
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
-  sevenDaysAgo.setUTCHours(0, 0, 0, 0);
-
-  const [statusGroups, hiddenCount, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows, atRiskRaw, stockOutSoonCount] = await Promise.all([
-    prisma.inventoryTracking.groupBy({ by: ["inventoryStatus"], where: { shop }, _count: { _all: true } }),
-    prisma.inventoryTracking.count({ where: { shop, isHidden: true } }),
-    getCachedSettings(shop),
-    prisma.setupProgress.findUnique({ where: { shop } }),
-    prisma.alertHistory.findMany({ where: { shop }, orderBy: { sentAt: "desc" }, take: 10 }),
-    getCachedSession(shop),
-    prisma.alertHistory.count({ where: { shop, sentAt: { gte: todayStart } } }),
-    syncState.get(shop),
-    prisma.$queryRaw<{ day: string; count: number }[]>`
-      SELECT TO_CHAR(sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)::int AS count
-      FROM alert_history
-      WHERE shop = ${shop} AND sent_at >= ${sevenDaysAgo}
-      GROUP BY day
-      ORDER BY day ASC
-    `,
-    prisma.inventoryTracking.findMany({
-      where: { shop, inventoryStatus: { in: ["out_of_stock", "low_stock"] } },
-      orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
-      take: 8,
-      select: { productId: true, productTitle: true, sku: true, currentQuantity: true, inventoryStatus: true },
-    }),
-    prisma.inventoryTracking.count({
-      where: { shop, stockOutDays: { not: null, lt: 7 }, inventoryStatus: { not: "out_of_stock" } },
-    }),
-  ]);
-
-  const statusCounts = new Map(statusGroups.map((g) => [g.inventoryStatus as string, g._count._all]));
-  const stats = {
-    totalProducts: (statusCounts.get("in_stock") ?? 0) + (statusCounts.get("low_stock") ?? 0) + (statusCounts.get("out_of_stock") ?? 0),
-    outOfStock: statusCounts.get("out_of_stock") ?? 0,
-    lowStock: statusCounts.get("low_stock") ?? 0,
-    inStock: statusCounts.get("in_stock") ?? 0,
-    hidden: hiddenCount,
-    deactivated: statusCounts.get("deactivated") ?? 0,
-  };
-
-  const setupSteps = [
-    setupProgress?.appInstalled ?? true,
-    setupProgress?.globalSettingsConfigured ?? false,
-    setupProgress?.notificationsConfigured ?? false,
-    setupProgress?.firstProductTracked ?? false,
-  ];
-  const progressPct = Math.round((setupSteps.filter(Boolean).length / setupSteps.length) * 100);
-
-  // Build a 7-element array [oldest … today] for the sparkline
-  const rowMap = new Map(sparkRows.map((r) => [r.day, r.count]));
-  const todayUTC = new Date();
-  todayUTC.setUTCHours(0, 0, 0, 0);
-  const spark7 = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(todayUTC);
-    d.setUTCDate(d.getUTCDate() - (6 - i));
-    return rowMap.get(d.toISOString().slice(0, 10)) ?? 0;
-  });
-
-  return {
-    plan: storeSession?.plan ?? "basic",
-    stats,
-    setupProgress: {
-      appInstalled: setupProgress?.appInstalled ?? true,
-      globalSettingsConfigured: setupProgress?.globalSettingsConfigured ?? false,
-      notificationsConfigured: setupProgress?.notificationsConfigured ?? false,
-      firstProductTracked: setupProgress?.firstProductTracked ?? false,
-    },
-    progressPct,
-    syncRunning: shopSyncState?.running ?? false,
-    lastSyncCompletedAt: shopSyncState?.completedAt?.toISOString() ?? null,
-    lastSyncCount: shopSyncState?.syncedCount ?? null,
-    lastWebhookAt: shopSyncState?.lastWebhookAt?.toISOString() ?? null,
-    recentAlerts: recentAlerts.map((a) => ({
-      id: a.id,
-      productTitle: a.productTitle,
-      alertType: a.alertType,
-      sentAt: a.sentAt.toISOString(),
-    })),
-    notificationEmail: settings?.notificationEmail ?? null,
-    alertsToday,
-    spark7,
-    stockOutSoonCount,
-    atRiskProducts: atRiskRaw.map((p) => ({
-      productId: p.productId.toString(),
-      productTitle: p.productTitle,
-      sku: p.sku,
-      currentQuantity: p.currentQuantity,
-      inventoryStatus: p.inventoryStatus as string,
-    })),
-  };
-}
 
 function timeAgo(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -158,7 +37,10 @@ function timeAgo(iso: string): string {
 }
 
 export default function Dashboard() {
-  const { shop, dashboardData } = useLoaderData<typeof loader>();
+  const { shop, token } = useLoaderData<typeof loader>();
+  const { data, error, retry } = useSSEData<DashboardData>(
+    `/api/dashboard-stream?token=${encodeURIComponent(token)}`,
+  );
 
   return (
     <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
@@ -166,9 +48,13 @@ export default function Dashboard() {
         Manage Products
       </s-button>
 
-      <Suspense fallback={<DashboardSkeleton />}>
-        <Await resolve={dashboardData}>{(data) => <DashboardContent shop={shop} data={data} />}</Await>
-      </Suspense>
+      {error ? (
+        <SSEErrorRetry message={error} onRetry={retry} />
+      ) : data ? (
+        <DashboardContent shop={shop} data={data} />
+      ) : (
+        <DashboardSkeleton />
+      )}
     </s-page>
   );
 }
