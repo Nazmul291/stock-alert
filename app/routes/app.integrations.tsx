@@ -151,6 +151,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "save_klaviyo") {
+    const storeSession = await getCachedSession(shop);
+    if (storeSession?.plan !== "pro") {
+      return { intent: "save_klaviyo", success: false as const, error: "Klaviyo is a Professional plan feature." };
+    }
     const rawKlaviyoApiKey = ((form.get("klaviyoApiKey") as string) ?? "").trim();
     if (!rawKlaviyoApiKey) {
       return { intent: "save_klaviyo", success: false as const, error: "Enter your Klaviyo private API key." };
@@ -367,7 +371,7 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
     saveFetcher.submit(fd, { method: "post" });
   }
 
-  const noChannelsConfigured = !settings.emailNotifications && !(settings.slackConnected && isPro) && !settings.klaviyoEnabled;
+  const noChannelsConfigured = !settings.emailNotifications && !(settings.slackConnected && isPro) && !(settings.klaviyoEnabled && isPro);
 
   return (
     <>
@@ -562,7 +566,10 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
                 />
               }
               title="Klaviyo"
-              connected={settings.klaviyoEnabled}
+              badge={!isPro ? "Pro" : null}
+              connected={isPro && settings.klaviyoEnabled}
+              locked={!isPro}
+              lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
               connectLabel="Connect"
               onConnect={() => { setKlaviyoInput(""); setKlaviyoError(null); setKlaviyoModalOpen(true); }}
               onDisconnect={() => klaviyoDisconnectFetcher.submit({ intent: "disconnect_klaviyo" }, { method: "post" })}

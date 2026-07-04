@@ -60,7 +60,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 const BASIC_FEATURES = [
   "Auto-hide sold-out products",
   "Email notifications",
-  "Klaviyo integration",
   "Shopify Flow triggers",
   "Back-in-stock storefront widget",
   "Global threshold settings",
@@ -71,6 +70,7 @@ const BASIC_FEATURES = [
 const PRO_FEATURES = [
   "Everything in Basic, plus:",
   "One-click Slack Connect",
+  "Klaviyo integration",
   "Outbound webhook (Zapier/Make/ERP)",
   "Per-product thresholds",
   "Auto-republish when restocked",
