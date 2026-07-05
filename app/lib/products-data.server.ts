@@ -168,9 +168,9 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
   let pageInfo = { hasNextPage: false, endCursor: null as string | null };
 
   try {
-    const shopifyQuery = search ? `title:*${search}*` : null;
+    const shopifyQuery = search ? `status:active AND title:*${search}*` : "status:active";
     const gqlResponse = await admin.graphql(PRODUCTS_GRAPHQL, {
-      variables: { first: pageSize, after, ...(shopifyQuery ? { query: shopifyQuery } : {}) },
+      variables: { first: pageSize, after, query: shopifyQuery },
     });
     const gqlJson: any = await gqlResponse.json();
     const productsData = gqlJson.data?.products;
