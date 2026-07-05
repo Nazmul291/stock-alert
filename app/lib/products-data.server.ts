@@ -25,6 +25,8 @@ const PRODUCTS_GRAPHQL = `
   }
 `;
 
+const STATUS_FILTERS = new Set(["out_of_stock", "low_stock", "in_stock"]);
+
 export type ProductsData = {
   shop: string;
   plan: string;
@@ -58,6 +60,70 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
   const plan = storeSession?.plan ?? "basic";
   const maxProducts = getMaxProducts(plan);
   const threshold = settings?.lowStockThreshold ?? 5;
+
+  // Status/tracked filters are answered straight from the DB — it holds the
+  // status (and now the cached image) for every tracked product regardless of
+  // catalog size, whereas the Shopify products() query below only returns one
+  // page at a time. Filtering that single page client-side (as this used to
+  // do) made the counts depend on which page Shopify happened to return, e.g.
+  // showing "0 out of stock" when the true out-of-stock products just weren't
+  // on the fetched page. No live Shopify call is needed here at all: the
+  // webhook handlers delete a row the moment a product leaves ACTIVE, so any
+  // row still present in inventoryTracking is guaranteed to be active, and
+  // imageUrl/imageAlt are kept in sync by sync + the product webhooks.
+  if (STATUS_FILTERS.has(filter) || filter === "tracked") {
+    const skip = after ? parseInt(after, 10) : 0;
+    const where = {
+      shop,
+      ...(filter === "tracked" ? { inventoryStatus: { not: "deactivated" as const } } : { inventoryStatus: filter as any }),
+      ...(search ? { productTitle: { contains: search, mode: "insensitive" as const } } : {}),
+    };
+
+    const [rows, total, trackedCountDb] = await Promise.all([
+      prisma.inventoryTracking.findMany({
+        where,
+        orderBy: [{ currentQuantity: "asc" }, { id: "asc" }],
+        skip,
+        take: pageSize,
+      }),
+      prisma.inventoryTracking.count({ where }),
+      prisma.inventoryTracking.count({ where: { shop, inventoryStatus: { not: "deactivated" } } }),
+    ]);
+
+    const products: ProductRow[] = rows.map((t) => ({
+      id: t.id,
+      productId: t.productId.toString(),
+      productTitle: t.productTitle ?? "Unknown",
+      sku: t.sku,
+      currentQuantity: t.currentQuantity,
+      inventoryStatus: t.inventoryStatus as string,
+      isHidden: t.isHidden,
+      isTracked: true,
+      monitoringEnabled: t.monitoringEnabled,
+      imageUrl: t.imageUrl,
+      imageAlt: t.imageAlt ?? t.productTitle ?? "Product",
+      shopifyStatus: "ACTIVE",
+      inventoryItemId: null,
+      stockOutDays: t.stockOutDays ?? null,
+      manualDailySales: t.manualDailySales ?? null,
+      expectedRestockDate: t.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
+    }));
+
+    const nextSkip = skip + rows.length;
+    return {
+      shop, plan, maxProducts, trackedCount: trackedCountDb, threshold, products,
+      pageInfo: { hasNextPage: nextSkip < total, endCursor: nextSkip < total ? String(nextSkip) : null },
+      syncRunning: shopSyncState?.running ?? false,
+      lastSyncCompletedAt: shopSyncState?.completedAt?.toISOString() ?? null,
+      lastSyncCount: shopSyncState?.syncedCount ?? null,
+      autoHideEnabled: settings?.autoHideEnabled ?? false,
+      autoRepublishEnabled: settings?.autoRepublishEnabled ?? false,
+      supplierLeadTimeDays: settings?.supplierLeadTimeDays ?? 7,
+      monitoringFilter: settings?.monitoringFilter ?? "all",
+      monitoringCollectionId: settings?.monitoringCollectionId ?? null,
+      monitoringTags: settings?.monitoringTags ?? null,
+    };
+  }
 
   let shopifyEdges: any[] = [];
   let pageInfo = { hasNextPage: false, endCursor: null as string | null };
@@ -168,13 +234,10 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     };
   });
 
-  const products =
-    filter === "out_of_stock"  ? allProducts.filter((p) => p.inventoryStatus === "out_of_stock")
-    : filter === "low_stock"   ? allProducts.filter((p) => p.inventoryStatus === "low_stock")
-    : filter === "in_stock"    ? allProducts.filter((p) => p.inventoryStatus === "in_stock")
-    : filter === "tracked"     ? allProducts.filter((p) => p.isTracked)
-    : filter === "not_tracked" ? allProducts.filter((p) => !p.isTracked)
-    : allProducts;
+  // Status/tracked filters are handled by the DB-driven branch above and
+  // return early — only "not_tracked" and "all" (plus title search) fall
+  // through to here, both inherently scoped to whatever page Shopify returns.
+  const products = filter === "not_tracked" ? allProducts.filter((p) => !p.isTracked) : allProducts;
 
   return {
     shop, plan, maxProducts, trackedCount, threshold, products: products as ProductRow[], pageInfo,
