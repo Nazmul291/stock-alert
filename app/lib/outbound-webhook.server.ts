@@ -2,6 +2,8 @@ export interface OutboundWebhookPayload {
   event: "low_stock" | "out_of_stock" | "restock";
   shop: string;
   productId: string;
+  variantId?: string;
+  variantTitle?: string | null;
   productTitle: string;
   sku: string | null;
   currentQuantity: number;

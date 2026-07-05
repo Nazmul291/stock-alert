@@ -101,6 +101,7 @@ model InventoryTracking {
   id               String          @id @default(uuid()) @db.Uuid
   shop             String
   productId        BigInt          @map("product_id")
+  variantId        BigInt          @map("variant_id")
   productTitle     String?         @map("product_title") @db.VarChar(500)
   variantTitle     String?         @map("variant_title") @db.VarChar(500)
   sku              String?         @db.VarChar(255)
@@ -123,8 +124,9 @@ model InventoryTracking {
 
   session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 
-  @@unique([shop, productId])
+  @@unique([shop, variantId])
   @@index([shop])
+  @@index([shop, productId])
   @@index([shop, currentQuantity])
   @@index([shop, isHidden])
   @@index([lastCheckedAt])
@@ -137,7 +139,9 @@ model AlertHistory {
   id                 String     @id @default(uuid()) @db.Uuid
   shop               String
   productId          BigInt?    @map("product_id")
+  variantId          BigInt?    @map("variant_id")
   productTitle       String?    @map("product_title") @db.VarChar(500)
+  variantTitle       String?    @map("variant_title") @db.VarChar(500)
   alertType          AlertType? @map("alert_type")
   quantityAtAlert    Int?       @map("quantity_at_alert")
   thresholdTriggered Int?       @map("threshold_triggered")
@@ -193,9 +197,10 @@ model SyncState {
 // No FK relation to Session so cascades don't interfere with rapid writes.
 model InventoryBuffer {
   id        String   @id @default(cuid())
-  eventKey  String   @unique // "{productId}_{shop}_{alertType}"
+  eventKey  String   @unique // "{variantId}_{shop}_{alertType}"
   shop      String
   productId String
+  variantId String?
   alertType String   // "low_stock" | "out_of_stock"
   payload   Json     // Full notification context; overwritten on each upsert
   jobId     String?  // pg-boss job ID of the current pending debounce job

@@ -3,6 +3,7 @@ import {
   makeAdminDashboardLoader,
 } from "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/dashboard";
 import db from "~/db.server";
+import { countDistinctProducts } from "~/lib/inventory-rollup.server";
 
 export const loader = makeAdminDashboardLoader({
   sessionSecret: process.env.SESSION_SECRET,
@@ -17,7 +18,7 @@ export const loader = makeAdminDashboardLoader({
       {
         title: "Overview",
         stats: [
-          { label: "Tracked Products", value: await db.inventoryTracking.count({ where: { monitoringEnabled: true } }), accent: true },
+          { label: "Tracked Products", value: await countDistinctProducts({ monitoringEnabled: true }), accent: true },
           { label: "Alerts (30d)", value: await db.alertHistory.count({ where: { sentAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }) },
           { label: "Active Stores", value: await db.session.count({ where: { isOnline: false } }) },
         ],

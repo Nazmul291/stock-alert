@@ -1,26 +1,30 @@
 import prisma from '../db.server';
 import { getMaxProducts } from './plan-limits';
+import { countDistinctProducts } from './inventory-rollup.server';
 
 export async function enforcePlanLimits(shop: string, plan: string | null) {
   const maxProducts = getMaxProducts(plan);
 
-  const activeProducts = await prisma.inventoryTracking.findMany({
+  // Grouped by productId (not row) — a product's variants must be deactivated
+  // together, not piecemeal, or a product would end up partially deactivated.
+  const productGroups = await prisma.inventoryTracking.groupBy({
+    by: ['productId'],
     where: { shop, inventoryStatus: { not: 'deactivated' } },
-    orderBy: { updatedAt: 'desc' },
-    select: { id: true },
+    _max: { updatedAt: true },
+    orderBy: { _max: { updatedAt: 'desc' } },
   });
 
-  if (activeProducts.length <= maxProducts) {
-    return { deactivatedCount: 0, activeCount: activeProducts.length, maxAllowed: maxProducts };
+  if (productGroups.length <= maxProducts) {
+    return { deactivatedCount: 0, activeCount: productGroups.length, maxAllowed: maxProducts };
   }
 
-  const toDeactivate = activeProducts.slice(maxProducts).map((p) => p.id);
+  const toDeactivateProductIds = productGroups.slice(maxProducts).map((g) => g.productId);
   await prisma.inventoryTracking.updateMany({
-    where: { id: { in: toDeactivate } },
+    where: { shop, productId: { in: toDeactivateProductIds } },
     data: { inventoryStatus: 'deactivated', monitoringEnabled: false },
   });
 
-  return { deactivatedCount: toDeactivate.length, activeCount: maxProducts, maxAllowed: maxProducts };
+  return { deactivatedCount: toDeactivateProductIds.length, activeCount: maxProducts, maxAllowed: maxProducts };
 }
 
 export async function canAddProduct(shop: string): Promise<{ canAdd: boolean; reason?: string }> {
@@ -28,9 +32,9 @@ export async function canAddProduct(shop: string): Promise<{ canAdd: boolean; re
   if (!session) return { canAdd: false, reason: 'Store not found' };
 
   const maxProducts = getMaxProducts(session.plan);
-  const activeCount = await prisma.inventoryTracking.count({
-    where: { shop, inventoryStatus: { not: 'deactivated' } },
-  });
+  // Distinct products, not tracking rows — a product's variants must never
+  // count multiple times against the plan cap.
+  const activeCount = await countDistinctProducts({ shop, inventoryStatus: { not: 'deactivated' } });
 
   if (activeCount >= maxProducts) {
     return { canAdd: false, reason: `Plan limit reached: ${activeCount}/${maxProducts} products. Upgrade to Pro for up to 10,000 products.` };

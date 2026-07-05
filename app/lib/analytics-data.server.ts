@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { rollupStatusCounts } from "./inventory-rollup.server";
 
 export type AnalyticsData = {
   totalThisMonth: number;
@@ -23,7 +24,7 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
   let channelRow: { email_count: number; slack_count: number }[] = [];
   let totalThisMonth = 0;
   let totalLastMonth = 0;
-  let stockGroups: { inventoryStatus: string; _count: { _all: number } }[] = [];
+  let stockMap: Map<string, number> = new Map();
 
   try {
   ([
@@ -33,7 +34,7 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
     channelRow,
     totalThisMonth,
     totalLastMonth,
-    stockGroups,
+    stockMap,
   ] = await Promise.all([
     // Alert count per day for last 30 days
     prisma.$queryRaw<{ day: string; count: number }[]>`
@@ -72,12 +73,8 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
     prisma.alertHistory.count({ where: { shop, sentAt: { gte: thirtyDaysAgo } } }),
     prisma.alertHistory.count({ where: { shop, sentAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } } }),
 
-    // Current stock health
-    prisma.inventoryTracking.groupBy({
-      by: ["inventoryStatus"],
-      where: { shop },
-      _count: { _all: true },
-    }),
+    // Current stock health — worst-case status per product, not per row.
+    rollupStatusCounts(shop),
   ]));
   } catch (err) {
     console.error("[analytics] loader error:", err);
@@ -95,7 +92,6 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
   });
 
   const busiest = daily30.reduce((a, b) => (b.count > a.count ? b : a), { day: "", count: 0 });
-  const stockMap = new Map(stockGroups.map((g) => [g.inventoryStatus as string, g._count._all]));
 
   return {
     totalThisMonth,

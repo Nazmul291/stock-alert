@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
@@ -134,23 +134,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : csvFilter === "in_stock"   ? ["in_stock"]
       : ["in_stock", "low_stock", "out_of_stock"];
 
+    // One row per variant — the SKU-level detail (which variant, its own
+    // quantity) is what makes this actionable for reordering; a rolled-up
+    // per-product row would lose exactly that.
     const rows = await prisma.inventoryTracking.findMany({
       where: { shop, inventoryStatus: { in: statusFilter as any }, monitoringEnabled: true },
       orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
       select: {
-        productId: true, productTitle: true, sku: true,
+        productId: true, productTitle: true, variantTitle: true, sku: true,
         currentQuantity: true, inventoryStatus: true,
         stockOutDays: true, avgDailySales: true,
         lastAlertType: true, lastAlertSentAt: true,
       },
     });
 
-    const header = ["Product Title", "SKU", "Quantity", "Status", "Days Left", "Avg Daily Sales", "Last Alert", "Last Alert Date"];
+    const header = ["Product Title", "Variant", "SKU", "Quantity", "Status", "Days Left", "Avg Daily Sales", "Last Alert", "Last Alert Date"];
     const escape = (v: string | null | undefined) => `"${(v ?? "").replace(/"/g, '""')}"`;
     const lines = [
       header.join(","),
       ...rows.map((r) => [
         escape(r.productTitle),
+        escape(r.variantTitle),
         escape(r.sku),
         r.currentQuantity,
         r.inventoryStatus,
@@ -266,13 +270,14 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
   admin: any; shop: string; plan: string; maxProducts: number; threshold: number;
   monitoringFilter?: string; monitoringCollectionId?: string | null; monitoringTags?: string | null;
 }) {
-  let allProducts: any[] = [];
+  const allVariants: any[] = [];
+  const seenProductIds = new Set<string>();
   let cursor: string | null = null;
   let hasNextPage = true;
 
   try {
-    while (hasNextPage && allProducts.length < maxProducts) {
-      const batchSize = Math.min(250, maxProducts - allProducts.length);
+    while (hasNextPage && seenProductIds.size < maxProducts) {
+      const batchSize = Math.min(250, maxProducts - seenProductIds.size);
       const filterQuery =
         monitoringFilter === "collection" && monitoringCollectionId
           ? `collection_id:${monitoringCollectionId}`
@@ -298,93 +303,100 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       for (const edge of page.edges) {
         const p = edge.node;
         const productId = p.id.split("/").pop();
-        let totalQty = 0;
-        const skus: string[] = [];
-        let allUntracked = true;
+        seenProductIds.add(productId);
+        const imageUrl = p.featuredMedia?.preview?.image?.url ?? null;
+        const imageAlt = p.featuredMedia?.preview?.image?.altText ?? null;
 
         for (const ve of p.variants.edges) {
           const v = ve.node;
-          if (v.inventoryItem?.tracked !== false) allUntracked = false;
-          totalQty += v.inventoryQuantity ?? 0;
-          if (v.sku) skus.push(v.sku);
+          // Skip untracked variants individually rather than skipping the
+          // whole product — a product can have some tracked and some
+          // untracked variants.
+          if (v.inventoryItem?.tracked === false) continue;
+
+          const qty = v.inventoryQuantity ?? 0;
+          const status: "in_stock" | "low_stock" | "out_of_stock" =
+            qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
+
+          allVariants.push({
+            productId: BigInt(productId),
+            variantId: BigInt(v.id.split("/").pop()),
+            productTitle: p.title,
+            variantTitle: v.title,
+            sku: v.sku || null,
+            currentQuantity: qty,
+            inventoryStatus: status,
+            imageUrl,
+            imageAlt,
+          });
         }
-
-        if (allUntracked) continue;
-
-        const status: "in_stock" | "low_stock" | "out_of_stock" =
-          totalQty <= 0 ? "out_of_stock" : totalQty <= threshold ? "low_stock" : "in_stock";
-
-        allProducts.push({
-          productId: BigInt(productId),
-          productTitle: p.title,
-          sku: skus.join(", ") || null,
-          currentQuantity: totalQty,
-          inventoryStatus: status,
-          imageUrl: p.featuredMedia?.preview?.image?.url ?? null,
-          imageAlt: p.featuredMedia?.preview?.image?.altText ?? null,
-        });
       }
 
       hasNextPage = page.pageInfo.hasNextPage;
       cursor = page.pageInfo.endCursor;
 
-      const fetchPct = Math.min(80, 5 + Math.round((allProducts.length / maxProducts) * 75));
+      const fetchPct = Math.min(80, 5 + Math.round((seenProductIds.size / maxProducts) * 75));
       await syncState.progress(shop, fetchPct);
     }
 
     await syncState.progress(shop, 82);
     const CHUNK = 100;
     const now = new Date();
-    for (let i = 0; i < allProducts.length; i += CHUNK) {
-      const chunk = allProducts.slice(i, i + CHUNK);
+    for (let i = 0; i < allVariants.length; i += CHUNK) {
+      const chunk = allVariants.slice(i, i + CHUNK);
       await prisma.$transaction(
-        chunk.map((p) =>
+        chunk.map((v) =>
           prisma.inventoryTracking.upsert({
-            where: { shop_productId: { shop, productId: p.productId } },
-            update: { productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, imageUrl: p.imageUrl, imageAlt: p.imageAlt, lastCheckedAt: now },
-            create: { shop, productId: p.productId, productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, previousQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, imageUrl: p.imageUrl, imageAlt: p.imageAlt },
+            where: { shop_variantId: { shop, variantId: v.variantId } },
+            update: { productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, lastCheckedAt: now },
+            create: { shop, productId: v.productId, variantId: v.variantId, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, previousQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt },
           }),
         ),
       );
-      const dbPct = 82 + Math.round(((i + chunk.length) / allProducts.length) * 16);
+      const dbPct = 82 + Math.round(((i + chunk.length) / allVariants.length) * 16);
       await syncState.progress(shop, dbPct);
     }
 
-    if (allProducts.length > 0) {
-      const syncedIds = allProducts.map((p) => p.productId);
+    if (allVariants.length > 0) {
+      const syncedVariantIds = allVariants.map((v) => v.variantId);
       const { count: pruned } = await prisma.inventoryTracking.deleteMany({
-        where: { shop, productId: { notIn: syncedIds } },
+        where: { shop, variantId: { notIn: syncedVariantIds } },
       });
       if (pruned > 0) {
         console.log(`[Sync] Pruned ${pruned} stale tracking row(s) for ${shop}`);
       }
     }
 
-    // Velocity calculation — query last 30 days of orders to compute avg daily sales
+    // Velocity calculation — query last 30 days of orders to compute avg daily sales.
+    // avgDailySales/stockOutDays stay product-wide (velocity.server.ts only
+    // resolves orders down to the product level, not variant), so each
+    // variant's stockOutDays is "this variant's own quantity against the
+    // product's blended sales rate" — a reasonable approximation until
+    // per-variant velocity is added.
     try {
       await syncState.progress(shop, 99);
       const velocity = await calcSalesVelocity(admin);
-      const velUpdates: Array<{ productId: bigint; avgDailySales: number; stockOutDays: number | null }> = [];
-      for (const p of allProducts) {
-        const avg = velocity.get(p.productId.toString()) ?? 0;
+      const velUpdates: Array<{ variantId: bigint; avgDailySales: number; stockOutDays: number | null }> = [];
+      for (const v of allVariants) {
+        const avg = velocity.get(v.productId.toString()) ?? 0;
         if (avg > 0) {
           velUpdates.push({
-            productId: p.productId,
+            variantId: v.variantId,
             avgDailySales: avg,
-            stockOutDays: computeStockOutDays(p.currentQuantity, avg),
+            stockOutDays: computeStockOutDays(v.currentQuantity, avg),
           });
         }
       }
       if (velUpdates.length > 0) {
         await prisma.$transaction(
-          velUpdates.map((v) =>
+          velUpdates.map((u) =>
             prisma.inventoryTracking.updateMany({
-              where: { shop, productId: v.productId },
-              data: { avgDailySales: v.avgDailySales, stockOutDays: v.stockOutDays },
+              where: { shop, variantId: u.variantId },
+              data: { avgDailySales: u.avgDailySales, stockOutDays: u.stockOutDays },
             }),
           ),
         );
-        console.log(`[Sync] Velocity updated for ${velUpdates.length} product(s) in ${shop}`);
+        console.log(`[Sync] Velocity updated for ${velUpdates.length} variant row(s) in ${shop}`);
       }
     } catch (err) {
       console.warn(`[Sync] Velocity calc failed for ${shop}:`, err instanceof Error ? err.message : err);
@@ -401,7 +413,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       console.log(`[Sync] Plan limit enforced for ${shop}: deactivated ${enforcement.deactivatedCount} products (max ${enforcement.maxAllowed})`);
     }
 
-    await syncState.done(shop, allProducts.length);
+    await syncState.done(shop, seenProductIds.size);
   } catch (err) {
     await syncState.fail(shop, err instanceof Error ? err.message : "Unknown error");
   }
@@ -425,6 +437,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       const raw = form.get("inventoryUpdates") as string;
       if (raw) inventoryUpdates = JSON.parse(raw);
+    } catch { /* ignore parse errors */ }
+
+    // Maps each inventoryItemId (one per variant) to its variant identity, so
+    // the summed inventoryUpdates quantities can be written to the right
+    // per-variant tracking row.
+    let variantsMeta: Array<{ inventoryItemId: string; variantId: string; variantTitle: string; sku: string | null }> = [];
+    try {
+      const raw = form.get("variantsMeta") as string;
+      if (raw) variantsMeta = JSON.parse(raw);
     } catch { /* ignore parse errors */ }
 
     const errors: string[] = [];
@@ -475,8 +496,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const settings = await prisma.storeSettings.findUnique({ where: { shop } });
     const threshold = settings?.lowStockThreshold ?? 5;
-    const existing = await prisma.inventoryTracking.findUnique({
-      where: { shop_productId: { shop, productId: BigInt(productId) } },
+    const existingRows = await prisma.inventoryTracking.findMany({
+      where: { shop, productId: BigInt(productId) },
     });
 
     const rawManualSales = ((form.get("manualDailySales") as string) ?? "").trim();
@@ -484,31 +505,62 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const rawRestockDate = ((form.get("expectedRestockDate") as string) ?? "").trim();
     const expectedRestockDate = rawRestockDate ? new Date(rawRestockDate) : null;
 
-    if (tracked) {
-      const totalQty = inventoryUpdates.reduce((sum, u) => sum + u.quantity, 0);
-      const qty = inventoryUpdates.length > 0 ? totalQty : (existing?.currentQuantity ?? 0);
-      const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
-        qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
-      const effectiveSales = manualDailySales ?? existing?.avgDailySales ?? null;
-      const stockOutDays = effectiveSales ? Math.min(999, Math.ceil(qty / effectiveSales)) : undefined;
-      if (existing) {
-        await prisma.inventoryTracking.update({
-          where: { id: existing.id },
-          data: {
-            ...(inventoryUpdates.length > 0 ? { currentQuantity: qty, inventoryStatus: invStatus } : {}),
+    if (tracked && variantsMeta.length > 0) {
+      // inventoryUpdates carries per-location quantities keyed by
+      // inventoryItemId — sum each variant's locations to get its own total.
+      const qtyByInventoryItem = new Map<string, number>();
+      for (const u of inventoryUpdates) {
+        qtyByInventoryItem.set(u.inventoryItemId, (qtyByInventoryItem.get(u.inventoryItemId) ?? 0) + u.quantity);
+      }
+      const existingByVariantId = new Map(existingRows.map((r) => [r.variantId.toString(), r]));
+
+      for (const vm of variantsMeta) {
+        const hasQtyUpdate = qtyByInventoryItem.has(vm.inventoryItemId);
+        const existingRow = existingByVariantId.get(vm.variantId);
+        const qty = hasQtyUpdate ? qtyByInventoryItem.get(vm.inventoryItemId)! : (existingRow?.currentQuantity ?? 0);
+        const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
+          qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
+        const effectiveSales = manualDailySales ?? existingRow?.avgDailySales ?? null;
+        const stockOutDays = effectiveSales ? Math.min(999, Math.ceil(qty / effectiveSales)) : undefined;
+
+        await prisma.inventoryTracking.upsert({
+          where: { shop_variantId: { shop, variantId: BigInt(vm.variantId) } },
+          update: {
+            ...(hasQtyUpdate ? { currentQuantity: qty, inventoryStatus: invStatus } : {}),
+            productTitle,
+            variantTitle: vm.variantTitle,
+            sku: vm.sku,
             monitoringEnabled,
             lastCheckedAt: new Date(),
             manualDailySales,
             expectedRestockDate,
             ...(stockOutDays !== undefined ? { stockOutDays } : {}),
           },
-        });
-      } else {
-        await prisma.inventoryTracking.create({
-          data: { shop, productId: BigInt(productId), productTitle, currentQuantity: qty, previousQuantity: 0, inventoryStatus: invStatus, monitoringEnabled, manualDailySales, expectedRestockDate },
+          create: {
+            shop,
+            productId: BigInt(productId),
+            variantId: BigInt(vm.variantId),
+            productTitle,
+            variantTitle: vm.variantTitle,
+            sku: vm.sku,
+            currentQuantity: qty,
+            previousQuantity: qty,
+            inventoryStatus: invStatus,
+            monitoringEnabled,
+            manualDailySales,
+            expectedRestockDate,
+          },
         });
       }
-    } else if (existing) {
+    } else if (tracked && existingRows.length > 0) {
+      // Inventory data hadn't loaded when saved — keep whole-product fields
+      // in sync rather than losing tracking; per-variant quantities are
+      // untouched.
+      await prisma.inventoryTracking.updateMany({
+        where: { shop, productId: BigInt(productId) },
+        data: { productTitle, monitoringEnabled, manualDailySales, expectedRestockDate },
+      });
+    } else if (!tracked && existingRows.length > 0) {
       await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
     }
 
@@ -693,6 +745,14 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
   }, [csvFetcher.data]);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set());
+  const toggleExpandProduct = (productId: string) => {
+    setExpandedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId); else next.add(productId);
+      return next;
+    });
+  };
 
   const toggleSelect = (productId: string) => {
     setSelectedIds((prev) => {
@@ -884,8 +944,12 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                 {products.map((p: ProductRow) => {
                   const s = STATUS_STYLE[p.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
                   const isNotTracked = p.inventoryStatus === "not_tracked";
+                  const hasVariants = (p.variantCount ?? 0) > 1;
+                  const isExpanded = expandedProductIds.has(p.productId);
+                  const mixedVariants = hasVariants && (p.variantsAtRiskCount ?? 0) > 0 && (p.variantsAtRiskCount ?? 0) < (p.variantCount ?? 0);
                   return (
-                    <tr key={p.id} style={{ borderBottom: "1px solid #f3f4f6", opacity: isNotTracked ? 0.8 : 1 }}>
+                    <Fragment key={p.id}>
+                    <tr style={{ borderBottom: isExpanded ? "none" : "1px solid #f3f4f6", opacity: isNotTracked ? 0.8 : 1 }}>
                       <td style={{ padding: "10px 8px 10px 12px", width: 32 }}>
                         <input
                           type="checkbox"
@@ -898,6 +962,18 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          {hasVariants ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandProduct(p.productId)}
+                              aria-label={isExpanded ? "Collapse variants" : "Expand variants"}
+                              style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#6b7280", flexShrink: 0, transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform .15s" }}
+                            >
+                              ▸
+                            </button>
+                          ) : (
+                            <span style={{ width: 18, flexShrink: 0 }} />
+                          )}
                           {p.imageUrl ? (
                             <img src={p.imageUrl} alt={p.imageAlt} width={40} height={40} loading="lazy"
                               style={{ borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
@@ -909,14 +985,20 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                           <span style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
                         </div>
                       </td>
-                      <td style={{ padding: "10px 12px", color: "#6b7280" }}>{p.sku ?? "—"}</td>
+                      <td style={{ padding: "10px 12px", color: "#6b7280" }}>{hasVariants ? `${p.variantCount} variants` : (p.sku ?? "—")}</td>
                       <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.currentQuantity <= 0 ? "#dc2626" : p.currentQuantity <= 5 ? "#d97706" : "#059669" }}>
                         {isNotTracked ? "—" : p.currentQuantity}
                       </td>
                       <td style={{ padding: "10px 12px", width: 130, minWidth: 130 }}>
-                        <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                          {s.label}
-                        </span>
+                        {mixedVariants ? (
+                          <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
+                            {p.variantsAtRiskCount} of {p.variantCount} low
+                          </span>
+                        ) : (
+                          <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
+                            {s.label}
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} isManual={!!p.manualDailySales} />
@@ -952,6 +1034,31 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                         </button>
                       </td>
                     </tr>
+                    {isExpanded && hasVariants && (
+                      <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
+                        <td />
+                        <td colSpan={7} style={{ padding: "4px 12px 12px 40px" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            {(p.variants ?? []).map((v) => {
+                              const vs = STATUS_STYLE[v.inventoryStatus] ?? STATUS_STYLE.not_tracked;
+                              return (
+                                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "#fff", borderRadius: 6, border: "1px solid #f0f0f0" }}>
+                                  <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{v.variantTitle ?? "—"}</span>
+                                  <span style={{ fontSize: 12, color: "#9ca3af" }}>{v.sku ?? "—"}</span>
+                                  <span style={{ fontWeight: 600, fontSize: 13, width: 50, textAlign: "right", color: v.currentQuantity <= 0 ? "#dc2626" : v.currentQuantity <= 5 ? "#d97706" : "#059669" }}>
+                                    {v.currentQuantity}
+                                  </span>
+                                  <span style={{ background: vs.bg, color: vs.color, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", width: 90, textAlign: "center" }}>
+                                    {vs.label}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

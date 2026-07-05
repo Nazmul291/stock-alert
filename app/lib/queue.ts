@@ -29,6 +29,8 @@ export interface ProductCtx {
   title: string;
   sku: string | null;
   imageUrl: string | null;
+  variantId: string;
+  variantTitle: string | null;
 }
 
 export interface BufferPayload {

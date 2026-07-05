@@ -26,6 +26,7 @@ import {
   type BufferPayload,
   type InventoryBufferJobData,
 } from "../app/lib/queue.js";
+import { atRiskRepresentativeRows } from "../app/lib/inventory-rollup.server.js";
 
 // ── pg-boss instance ──────────────────────────────────────────────────────────
 const boss = new PgBoss({ connectionString: process.env.DATABASE_URL! });
@@ -75,7 +76,7 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
   console.log(`[Worker] Quiet window elapsed — firing ${payload.alertType} for ${eventKey}.`);
 
   if (payload.alertType === "out_of_stock") {
-    await sendOutOfStockAlert(payload.storeCtx, payload.productCtx, payload.settingsCtx);
+    await sendOutOfStockAlert(payload.storeCtx, payload.productCtx, payload.settingsCtx, payload.productCtx.variantTitle);
   } else {
     await sendLowStockAlert(
       payload.storeCtx,
@@ -83,6 +84,7 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
       payload.newQty,
       payload.threshold,
       payload.settingsCtx,
+      payload.productCtx.variantTitle,
     );
   }
 
@@ -144,16 +146,9 @@ async function processDigests(): Promise<void> {
       }
     }
 
-    const atRisk = await prisma.inventoryTracking.findMany({
-      where: {
-        shop,
-        inventoryStatus: { in: ["out_of_stock", "low_stock"] },
-        monitoringEnabled: true,
-      },
-      orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
-      take: 20,
-      select: { productTitle: true, sku: true, currentQuantity: true, inventoryStatus: true },
-    });
+    // One representative row per at-risk product (its worst variant) — a
+    // product with several bad variants shouldn't appear multiple times.
+    const atRisk = await atRiskRepresentativeRows(shop, 20, true);
 
     if (atRisk.length === 0) {
       console.log(`[Digest] ${shop} — nothing at risk, skipping`);
