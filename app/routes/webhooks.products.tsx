@@ -77,7 +77,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const title: string = data?.title ?? "Unknown";
     const variants: any[] = data?.variants ?? [];
-    const shopifyStatus: string | undefined = data?.status; // "ACTIVE" | "ARCHIVED" | "DRAFT"
+    // This is a REST-shaped webhook payload (confirmed by the snake_case
+    // fields elsewhere in this handler, e.g. inventory_management), and
+    // Shopify's REST Admin API returns status as lowercase "active" /
+    // "archived" / "draft" — NOT the GraphQL API's uppercase enum. Comparing
+    // against "ACTIVE" unnormalized meant this branch fired on every single
+    // PRODUCTS_UPDATE for a genuinely active product, deleting its tracking
+    // rows on essentially any edit in Shopify admin.
+    const shopifyStatus: string | undefined = data?.status?.toUpperCase();
     const imageUrl: string | null = data?.image?.src ?? null;
     const imageAlt: string | null = data?.image?.alt ?? null;
 
