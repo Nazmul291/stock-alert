@@ -1,7 +1,9 @@
 import prisma from "../db.server";
 import { getMaxProducts } from "./plan-limits";
 import { syncState } from "./sync-state.server";
-import type { ProductRow } from "../components/ProductEditModal";
+import { classifyProductStatus, countDistinctProducts, paginatedProductIdsByStatus } from "./inventory-rollup.server";
+import type { ProductRow, VariantStatusRow } from "../components/ProductEditModal";
+import type { InventoryTracking } from "@prisma/client";
 
 const PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String, $query: String) {
@@ -46,6 +48,53 @@ export type ProductsData = {
   monitoringTags: string | null;
 };
 
+// Assembles a product-level row from its sibling variant tracking rows —
+// shared by both branches below so the "all" tab and the status-filter tabs
+// always agree on what a product's rolled-up status/quantity looks like.
+// imageUrl/imageAlt/shopifyStatus can be overridden with fresher live-Shopify
+// data where available (the live-paginated branch has it; the DB-only branch
+// doesn't need to call Shopify at all).
+function buildTrackedProductRow(
+  productId: string,
+  rows: InventoryTracking[],
+  overrides?: { imageUrl?: string | null; imageAlt?: string | null; shopifyStatus?: string },
+): ProductRow {
+  const first = rows[0];
+  const statuses = rows.map((r) => r.inventoryStatus as string);
+  const stockOutDaysValues = rows.map((r) => r.stockOutDays).filter((d): d is number => d != null);
+
+  const variants: VariantStatusRow[] = rows.map((r) => ({
+    id: r.id,
+    variantId: r.variantId.toString(),
+    variantTitle: r.variantTitle,
+    sku: r.sku,
+    currentQuantity: r.currentQuantity,
+    inventoryStatus: r.inventoryStatus as string,
+  }));
+
+  return {
+    id: first.id,
+    productId,
+    productTitle: first.productTitle ?? "Unknown",
+    sku: rows.length === 1 ? first.sku : null,
+    currentQuantity: rows.reduce((sum, r) => sum + r.currentQuantity, 0),
+    inventoryStatus: classifyProductStatus(statuses),
+    isHidden: first.isHidden,
+    isTracked: true,
+    monitoringEnabled: first.monitoringEnabled,
+    imageUrl: overrides?.imageUrl ?? first.imageUrl,
+    imageAlt: overrides?.imageAlt ?? first.imageAlt ?? first.productTitle ?? "Product",
+    shopifyStatus: overrides?.shopifyStatus ?? "ACTIVE",
+    inventoryItemId: null,
+    stockOutDays: stockOutDaysValues.length > 0 ? Math.min(...stockOutDaysValues) : null,
+    manualDailySales: first.manualDailySales ?? null,
+    expectedRestockDate: first.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
+    variants,
+    variantCount: rows.length,
+    variantsAtRiskCount: statuses.filter((s) => s === "low_stock" || s === "out_of_stock").length,
+  };
+}
+
 export async function loadProductsData({ admin, shop, search, after, filter }: {
   admin: any; shop: string; search: string; after: string | null; filter: string;
 }): Promise<ProductsData> {
@@ -71,45 +120,35 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
   // webhook handlers delete a row the moment a product leaves ACTIVE, so any
   // row still present in inventoryTracking is guaranteed to be active, and
   // imageUrl/imageAlt are kept in sync by sync + the product webhooks.
+  //
+  // Pagination happens on distinct products (via paginatedProductIdsByStatus,
+  // which applies the same worst-case-per-product classification used for
+  // the dashboard tiles), not on tracking rows — a product with several
+  // variants must count once, not once per variant.
   if (STATUS_FILTERS.has(filter) || filter === "tracked") {
     const skip = after ? parseInt(after, 10) : 0;
-    const where = {
-      shop,
-      ...(filter === "tracked" ? { inventoryStatus: { not: "deactivated" as const } } : { inventoryStatus: filter as any }),
-      ...(search ? { productTitle: { contains: search, mode: "insensitive" as const } } : {}),
-    };
+    const { productIds, total } = await paginatedProductIdsByStatus(shop, filter as any, search, skip, pageSize);
 
-    const [rows, total, trackedCountDb] = await Promise.all([
-      prisma.inventoryTracking.findMany({
-        where,
-        orderBy: [{ currentQuantity: "asc" }, { id: "asc" }],
-        skip,
-        take: pageSize,
-      }),
-      prisma.inventoryTracking.count({ where }),
-      prisma.inventoryTracking.count({ where: { shop, inventoryStatus: { not: "deactivated" } } }),
+    const [rows, trackedCountDb] = await Promise.all([
+      productIds.length > 0
+        ? prisma.inventoryTracking.findMany({ where: { shop, productId: { in: productIds } } })
+        : Promise.resolve([]),
+      countDistinctProducts({ shop, inventoryStatus: { not: "deactivated" } }),
     ]);
 
-    const products: ProductRow[] = rows.map((t) => ({
-      id: t.id,
-      productId: t.productId.toString(),
-      productTitle: t.productTitle ?? "Unknown",
-      sku: t.sku,
-      currentQuantity: t.currentQuantity,
-      inventoryStatus: t.inventoryStatus as string,
-      isHidden: t.isHidden,
-      isTracked: true,
-      monitoringEnabled: t.monitoringEnabled,
-      imageUrl: t.imageUrl,
-      imageAlt: t.imageAlt ?? t.productTitle ?? "Product",
-      shopifyStatus: "ACTIVE",
-      inventoryItemId: null,
-      stockOutDays: t.stockOutDays ?? null,
-      manualDailySales: t.manualDailySales ?? null,
-      expectedRestockDate: t.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
-    }));
+    const rowsByProduct = new Map<string, InventoryTracking[]>();
+    for (const r of rows) {
+      const key = r.productId.toString();
+      if (!rowsByProduct.has(key)) rowsByProduct.set(key, []);
+      rowsByProduct.get(key)!.push(r);
+    }
 
-    const nextSkip = skip + rows.length;
+    const products: ProductRow[] = productIds
+      .map((pid) => rowsByProduct.get(pid.toString()))
+      .filter((rowsForProduct): rowsForProduct is InventoryTracking[] => !!rowsForProduct && rowsForProduct.length > 0)
+      .map((rowsForProduct) => buildTrackedProductRow(rowsForProduct[0].productId.toString(), rowsForProduct));
+
+    const nextSkip = skip + productIds.length;
     return {
       shop, plan, maxProducts, trackedCount: trackedCountDb, threshold, products,
       pageInfo: { hasNextPage: nextSkip < total, endCursor: nextSkip < total ? String(nextSkip) : null },
@@ -148,28 +187,28 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     productIds.length > 0
       ? prisma.inventoryTracking.findMany({ where: { shop, productId: { in: productIds } } })
       : Promise.resolve([]),
-    prisma.inventoryTracking.count({ where: { shop, inventoryStatus: { not: "deactivated" } } }),
+    countDistinctProducts({ shop, inventoryStatus: { not: "deactivated" } }),
   ]);
 
-  const trackingMap = new Map(trackingRecords.map((t) => [t.productId.toString(), t]));
+  const trackingMap = new Map<string, InventoryTracking[]>();
+  for (const t of trackingRecords) {
+    const key = t.productId.toString();
+    if (!trackingMap.has(key)) trackingMap.set(key, []);
+    trackingMap.get(key)!.push(t);
+  }
 
   const allProducts = shopifyEdges.map((e: any) => {
     const p = e.node;
     const productId = p.id.split("/").pop() as string;
-    const tracking = trackingMap.get(productId);
+    const trackingRows = trackingMap.get(productId) ?? [];
 
     let totalQty = 0;
     const skus: string[] = [];
     let allVariantsUntracked = true;
-    let firstInventoryItemId: string | null = null;
 
     for (const ve of p.variants.edges) {
       const v = ve.node;
-      const isTracked = v.inventoryItem?.tracked !== false;
-      if (isTracked) {
-        allVariantsUntracked = false;
-        if (!firstInventoryItemId) firstInventoryItemId = v.inventoryItem?.id ?? null;
-      }
+      if (v.inventoryItem?.tracked !== false) allVariantsUntracked = false;
       totalQty += v.inventoryQuantity ?? 0;
       if (v.sku) skus.push(v.sku);
     }
@@ -180,10 +219,10 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
 
     if (allVariantsUntracked) {
       return {
-        id: tracking?.id ?? productId,
+        id: trackingRows[0]?.id ?? productId,
         productId,
-        productTitle: tracking?.productTitle ?? (p.title as string),
-        sku: tracking?.sku ?? (skus.join(", ") || null),
+        productTitle: trackingRows[0]?.productTitle ?? (p.title as string),
+        sku: trackingRows[0]?.sku ?? (skus.join(", ") || null),
         currentQuantity: 0,
         inventoryStatus: "not_tracked" as string,
         isHidden: false,
@@ -196,25 +235,8 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
       };
     }
 
-    if (tracking) {
-      return {
-        id: tracking.id,
-        productId,
-        productTitle: tracking.productTitle ?? p.title,
-        sku: tracking.sku,
-        currentQuantity: tracking.currentQuantity,
-        inventoryStatus: tracking.inventoryStatus as string,
-        isHidden: tracking.isHidden,
-        isTracked: true,
-        monitoringEnabled: tracking.monitoringEnabled,
-        imageUrl,
-        imageAlt,
-        shopifyStatus,
-        inventoryItemId: firstInventoryItemId,
-        stockOutDays: tracking.stockOutDays ?? null,
-        manualDailySales: tracking.manualDailySales ?? null,
-        expectedRestockDate: tracking.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
-      };
+    if (trackingRows.length > 0) {
+      return buildTrackedProductRow(productId, trackingRows, { imageUrl, imageAlt, shopifyStatus });
     }
 
     return {
@@ -230,7 +252,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
       imageUrl,
       imageAlt,
       shopifyStatus,
-      inventoryItemId: firstInventoryItemId,
+      inventoryItemId: null as string | null,
     };
   });
 

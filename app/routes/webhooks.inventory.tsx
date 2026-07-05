@@ -15,17 +15,20 @@ import { syncState } from "../lib/sync-state.server";
 import { computeStockOutDays } from "../lib/velocity.server";
 import { fireOutboundWebhook } from "../lib/outbound-webhook.server";
 
+// inventoryQuantity on a variant is already the cross-location total, so a
+// specific variant's own quantity is all that's needed — no need to walk
+// every sibling variant like the old product-level-summing query did.
 const INVENTORY_ITEM_QUERY = `
   query ($id: ID!) {
     inventoryItem(id: $id) {
       variant {
+        legacyResourceId
+        title
+        inventoryQuantity
         product {
           legacyResourceId
           handle
           featuredMedia { preview { image { url } } }
-          variants(first: 100) {
-            edges { node { inventoryQuantity } }
-          }
         }
       }
     }
@@ -94,43 +97,38 @@ async function processInventoryUpdate(
     return;
   }
 
-  // ── 1. Resolve product from Shopify ───────────────────────────────────────
+  // ── 1. Resolve variant + product from Shopify ─────────────────────────────
   const invRes = await admin.graphql(INVENTORY_ITEM_QUERY, {
     variables: { id: `gid://shopify/InventoryItem/${inventoryItemId}` },
   });
   const invJson: any = await invRes.json();
-  const product = invJson.data?.inventoryItem?.variant?.product;
+  const variant = invJson.data?.inventoryItem?.variant;
+  const product = variant?.product;
+  const variantId: string | undefined = variant?.legacyResourceId;
   const productId: string | undefined = product?.legacyResourceId;
   const productHandle: string | null = product?.handle ?? null;
   const productImageUrl: string | null = product?.featuredMedia?.preview?.image?.url ?? null;
+  const newQty: number = variant?.inventoryQuantity ?? 0;
 
-  if (!productId) {
+  if (!variantId || !productId) {
     console.warn(
-      `[Webhook] Could not resolve productId for inventoryItem ${inventoryItemId} on ${shop}`,
+      `[Webhook] Could not resolve variant/product for inventoryItem ${inventoryItemId} on ${shop}`,
     );
     return;
   }
-
-  // Sum inventoryQuantity across ALL variants → true cross-location total
-  const newQtyTotal: number = (product?.variants?.edges ?? []).reduce(
-    (sum: number, e: any) => sum + (e.node.inventoryQuantity ?? 0),
-    0,
-  );
-  console.log(
-    `[Webhook] ${shop} product ${productId}: total qty across all locations = ${newQtyTotal}`,
-  );
+  console.log(`[Webhook] ${shop} variant ${variantId} (product ${productId}): qty across all locations = ${newQty}`);
 
   // ── 2. DB lookups ─────────────────────────────────────────────────────────
   const [existingTracking, settings, storeSession] = await Promise.all([
     prisma.inventoryTracking.findUnique({
-      where: { shop_productId: { shop, productId: BigInt(productId) } },
+      where: { shop_variantId: { shop, variantId: BigInt(variantId) } },
     }),
     prisma.storeSettings.findUnique({ where: { shop } }),
     prisma.session.findFirst({ where: { shop, isOnline: false } }),
   ]);
 
   if (!existingTracking) {
-    console.log(`[Webhook] Product ${productId} not tracked in DB for ${shop} — skipping`);
+    console.log(`[Webhook] Variant ${variantId} not tracked in DB for ${shop} — skipping`);
     return;
   }
   if (!storeSession?.plan) {
@@ -143,7 +141,7 @@ async function processInventoryUpdate(
   }
   if (!existingTracking.monitoringEnabled) {
     console.log(
-      `[Webhook] Monitoring disabled for product ${productId} (${existingTracking.productTitle}) on ${shop} — skipping`,
+      `[Webhook] Monitoring disabled for variant ${variantId} (${existingTracking.productTitle}) on ${shop} — skipping`,
     );
     return;
   }
@@ -177,10 +175,10 @@ async function processInventoryUpdate(
   // ── 4. Status determination ───────────────────────────────────────────────
   const previousQty = existingTracking.currentQuantity ?? 0;
   const previousStatus = existingTracking.inventoryStatus ?? "in_stock";
-  const newQty = newQtyTotal;
   const qtyChanged = newQty !== previousQty;
 
   // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
+  // Compared against this variant's own quantity, not the old product-wide total.
   const threshold =
     (storeSession?.plan === "pro" && productMeta.customThreshold !== null)
       ? productMeta.customThreshold
@@ -189,11 +187,11 @@ async function processInventoryUpdate(
     newQty === 0 ? "out_of_stock" : newQty <= threshold ? "low_stock" : "in_stock";
 
   console.log(
-    `[Webhook] Product ${productId} (${existingTracking.productTitle}): qty ${previousQty}→${newQty} (changed:${qtyChanged}), status ${previousStatus}→${newStatus}, threshold ${threshold}`,
+    `[Webhook] Variant ${variantId} (${existingTracking.productTitle}): qty ${previousQty}→${newQty} (changed:${qtyChanged}), status ${previousStatus}→${newStatus}, threshold ${threshold}`,
   );
 
   if (previousStatus === "deactivated") {
-    console.log(`[Webhook] Product ${productId} is deactivated — skipping`);
+    console.log(`[Webhook] Variant ${variantId} is deactivated — skipping`);
     return;
   }
 
@@ -284,6 +282,8 @@ async function processInventoryUpdate(
     title: existingTracking.productTitle ?? "Unknown",
     sku: existingTracking.sku ?? null,
     imageUrl: productImageUrl,
+    variantId,
+    variantTitle: existingTracking.variantTitle ?? null,
   };
 
   console.log(
@@ -293,8 +293,10 @@ async function processInventoryUpdate(
   // ── 8. Route the alert ────────────────────────────────────────────────────
   if (alertType === "restock") {
     // Restock fires immediately — no need to debounce going from 0→N.
-    await sendRestockAlert(storeCtx, productCtx, newQty, settingsCtx);
-    // Notify back-in-stock subscribers (non-blocking)
+    await sendRestockAlert(storeCtx, productCtx, newQty, settingsCtx, productCtx.variantTitle);
+    // Notify back-in-stock subscribers (non-blocking). Stays product-level —
+    // BackInStockSubscriber is keyed by (shop, productId, email), not variant,
+    // since shoppers subscribe on the product page, not a specific variant.
     sendBackInStockNotifications(
       shop,
       productId,
@@ -308,8 +310,8 @@ async function processInventoryUpdate(
   } else {
     // low_stock and out_of_stock go through the debounce buffer.
     // Shopify may fire dozens of parallel webhooks per bulk inventory update;
-    // the buffer collapses them into a single notification per product per type.
-    await upsertBufferAndSchedule(shop, productId, alertType as "low_stock" | "out_of_stock", {
+    // the buffer collapses them into a single notification per variant per type.
+    await upsertBufferAndSchedule(shop, productId, variantId, alertType as "low_stock" | "out_of_stock", {
       alertType: alertType as "low_stock" | "out_of_stock",
       newQty,
       threshold,
@@ -325,6 +327,8 @@ async function processInventoryUpdate(
       event: alertType as "low_stock" | "out_of_stock" | "restock",
       shop,
       productId,
+      variantId,
+      variantTitle: productCtx.variantTitle,
       productTitle: productCtx.title,
       sku: productCtx.sku,
       currentQuantity: newQty,
@@ -335,6 +339,8 @@ async function processInventoryUpdate(
 
   // ── 9. Auto-hide / auto-republish (fires immediately, separate from alerts) ──
   // Per-product setting wins; falls back to store-wide default when not set.
+  // Archiving/republishing is a whole-product action, so it only fires when
+  // ALL of a product's variants agree — not just the one this webhook is for.
   const effectiveAutoHide = productMeta.autoHide !== null ? productMeta.autoHide : settings.autoHideEnabled;
   const effectiveAutoRepublish = productMeta.autoRepublish !== null ? productMeta.autoRepublish : settings.autoRepublishEnabled;
 
@@ -343,42 +349,62 @@ async function processInventoryUpdate(
     effectiveAutoHide &&
     !existingTracking.isHidden
   ) {
-    const res = await admin.graphql(
-      `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
-      { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } } },
-    );
-    const json: any = await res.json();
-    const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
-    if (errs.length > 0) {
-      console.error(`[Webhook] Auto-hide failed for product ${productId}:`, errs.join(", "));
-    } else {
-      await prisma.inventoryTracking.update({
-        where: { id: existingTracking.id },
-        data: { isHidden: true },
-      });
+    const siblings = await prisma.inventoryTracking.findMany({
+      where: { shop, productId: BigInt(productId), variantId: { not: BigInt(variantId) } },
+      select: { inventoryStatus: true },
+    });
+    // This variant is already confirmed out_of_stock (newStatus); an empty
+    // sibling list (single-variant product) trivially satisfies "all out."
+    const allOut = siblings.every((s) => s.inventoryStatus === "out_of_stock");
+    if (allOut) {
+      const res = await admin.graphql(
+        `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
+        { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } } },
+      );
+      const json: any = await res.json();
+      const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
+      if (errs.length > 0) {
+        console.error(`[Webhook] Auto-hide failed for product ${productId}:`, errs.join(", "));
+      } else {
+        // isHidden is a whole-product flag duplicated on every sibling row —
+        // keep them all in sync.
+        await prisma.inventoryTracking.updateMany({
+          where: { shop, productId: BigInt(productId) },
+          data: { isHidden: true },
+        });
+      }
     }
   }
 
   if (
     newStatus === "in_stock" &&
-    previousQty === 0 &&
     effectiveAutoRepublish &&
     storeSession?.plan === "pro" &&
     existingTracking.isHidden
   ) {
-    const res = await admin.graphql(
-      `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
-      { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } } },
-    );
-    const json: any = await res.json();
-    const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
-    if (errs.length > 0) {
-      console.error(`[Webhook] Auto-republish failed for product ${productId}:`, errs.join(", "));
-    } else {
-      await prisma.inventoryTracking.update({
-        where: { id: existingTracking.id },
-        data: { isHidden: false },
-      });
+    const siblings = await prisma.inventoryTracking.findMany({
+      where: { shop, productId: BigInt(productId), variantId: { not: BigInt(variantId) } },
+      select: { inventoryStatus: true },
+    });
+    // This variant just came back in stock; republish unless every OTHER
+    // variant is still out (an empty sibling list means this was the only
+    // variant, so it must not still be "all out").
+    const stillAllOut = siblings.length > 0 && siblings.every((s) => s.inventoryStatus === "out_of_stock");
+    if (!stillAllOut) {
+      const res = await admin.graphql(
+        `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
+        { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } } },
+      );
+      const json: any = await res.json();
+      const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
+      if (errs.length > 0) {
+        console.error(`[Webhook] Auto-republish failed for product ${productId}:`, errs.join(", "));
+      } else {
+        await prisma.inventoryTracking.updateMany({
+          where: { shop, productId: BigInt(productId) },
+          data: { isHidden: false },
+        });
+      }
     }
   }
 }
@@ -388,11 +414,12 @@ async function processInventoryUpdate(
 async function upsertBufferAndSchedule(
   shop: string,
   productId: string,
+  variantId: string,
   alertType: "low_stock" | "out_of_stock",
   payload: BufferPayload,
 ): Promise<void> {
-  // eventKey uniquely identifies: which product, which shop, which alert type.
-  const eventKey = `${productId}_${shop}_${alertType}`;
+  // eventKey uniquely identifies: which variant, which shop, which alert type.
+  const eventKey = `${variantId}_${shop}_${alertType}`;
   const boss = await getBoss();
 
   // pg_advisory_xact_lock serializes concurrent webhooks for the same eventKey
@@ -416,7 +443,7 @@ async function upsertBufferAndSchedule(
     await tx.inventoryBuffer.upsert({
       where: { eventKey },
       update: { payload: payload as any },
-      create: { eventKey, shop, productId, alertType, payload: payload as any },
+      create: { eventKey, shop, productId, variantId, alertType, payload: payload as any },
     });
 
     const jobId = await boss.send(QUEUE_NAME, { eventKey }, {
@@ -431,6 +458,6 @@ async function upsertBufferAndSchedule(
   });
 
   console.log(
-    `[Webhook] Debounce reset for ${alertType} — product ${productId}, key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s`,
+    `[Webhook] Debounce reset for ${alertType} — variant ${variantId} (product ${productId}), key: ${eventKey}, fires in ${DEBOUNCE_SECONDS}s`,
   );
 }

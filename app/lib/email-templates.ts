@@ -3,11 +3,26 @@ export interface EmailTemplateData {
   shopDomain: string;
   productTitle: string;
   productId: string | number;
+  variantId?: string | null;
   sku?: string | null;
   currentQuantity?: number;
   threshold?: number;
   variantTitle?: string | null;
   imageUrl?: string | null;
+}
+
+// Deep-links to the specific variant's admin page when known, so merchants
+// land exactly where they need to act instead of the product's default
+// (first) variant.
+function productAdminUrl(data: EmailTemplateData): string {
+  const base = `https://${data.shopDomain}/admin/products/${data.productId}`;
+  return data.variantId ? `${base}/variants/${data.variantId}` : base;
+}
+
+// "Product — Variant" when the alert is for a specific variant, so subject
+// lines and preview text are unambiguous for multi-variant products.
+function displayTitle(data: EmailTemplateData): string {
+  return data.variantTitle ? `${data.productTitle} — ${data.variantTitle}` : data.productTitle;
 }
 
 export interface BrandConfig {
@@ -97,13 +112,26 @@ function productCard(
               style="border-radius:8px;object-fit:cover;border:1px solid #e5e7eb;display:block;" />
           </td>` : ''}
           <td valign="top">
-            <div style="font-size:18px;font-weight:700;color:#111827;line-height:1.3;margin-bottom:4px;">${esc(data.productTitle)}</div>
-            ${data.variantTitle ? `<div style="font-size:13px;color:#6b7280;margin-bottom:2px;">Variant: ${esc(data.variantTitle)}</div>` : ''}
-            ${data.sku ? `<div style="font-size:13px;color:#6b7280;margin-bottom:6px;">SKU: ${esc(data.sku)}</div>` : ''}
+            <div style="font-size:18px;font-weight:700;color:#111827;line-height:1.3;margin-bottom:8px;">${esc(data.productTitle)}</div>
             <span style="display:inline-block;padding:3px 10px;background:${badge.bg};color:${badge.color};font-size:12px;font-weight:600;border-radius:20px;">${badge.text}</span>
           </td>
         </tr>
       </table>
+
+      ${(data.variantTitle || data.sku) ? `
+      <!-- Variant details -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        ${data.variantTitle ? `
+        <tr>
+          <td style="padding:9px 14px;background:#f9fafb;font-size:12px;font-weight:600;color:#6b7280;width:100px;border-bottom:${data.sku ? '1px solid #e5e7eb' : '0'};">Variant</td>
+          <td style="padding:9px 14px;font-size:13px;color:#111827;font-weight:600;border-left:1px solid #e5e7eb;border-bottom:${data.sku ? '1px solid #e5e7eb' : '0'};">${esc(data.variantTitle)}</td>
+        </tr>` : ''}
+        ${data.sku ? `
+        <tr>
+          <td style="padding:9px 14px;background:#f9fafb;font-size:12px;font-weight:600;color:#6b7280;width:100px;">SKU</td>
+          <td style="padding:9px 14px;font-size:13px;color:#111827;font-weight:600;border-left:1px solid #e5e7eb;">${esc(data.sku)}</td>
+        </tr>` : ''}
+      </table>` : ''}
 
       <!-- Stats -->
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
@@ -124,7 +152,7 @@ function productCard(
       <table role="presentation" cellpadding="0" cellspacing="0">
         <tr>
           <td style="border-radius:8px;${brandBg(brand.color)}">
-            <a href="https://${data.shopDomain}/admin/products/${data.productId}"
+            <a href="${productAdminUrl(data)}"
               style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
               ${esc(ctaLabel)} &rarr;
             </a>
@@ -149,10 +177,10 @@ function tip(text: string, bg: string, borderColor: string, color: string): stri
 
 export function getLowStockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `⚠️ Low Stock: ${data.productTitle} (${data.currentQuantity} left)`,
+    subject: `⚠️ Low Stock: ${displayTitle(data)} (${data.currentQuantity} left)`,
     html: shell(
-      `${data.productTitle} is running low — ${data.currentQuantity} units remaining`,
-      `${header('⚠️', 'Low Stock Alert', `${data.productTitle} needs your attention`, brand)}
+      `${displayTitle(data)} is running low — ${data.currentQuantity} units remaining`,
+      `${header('⚠️', 'Low Stock Alert', `${displayTitle(data)} needs your attention`, brand)}
        ${productCard(
          data,
          { text: '⚠️ Low Stock', bg: '#fef3c7', color: '#92400e' },
@@ -171,10 +199,10 @@ export function getLowStockEmailTemplate(data: EmailTemplateData, brand: BrandCo
 
 export function getOutOfStockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `❌ Out of Stock: ${data.productTitle}`,
+    subject: `❌ Out of Stock: ${displayTitle(data)}`,
     html: shell(
-      `${data.productTitle} is now out of stock`,
-      `${header('❌', 'Out of Stock', `${data.productTitle} has sold out`, brand)}
+      `${displayTitle(data)} is now out of stock`,
+      `${header('❌', 'Out of Stock', `${displayTitle(data)} has sold out`, brand)}
        ${productCard(
          data,
          { text: '❌ Sold Out', bg: '#fee2e2', color: '#991b1b' },
@@ -190,10 +218,10 @@ export function getOutOfStockEmailTemplate(data: EmailTemplateData, brand: Brand
 
 export function getRestockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `🎉 Back in Stock: ${data.productTitle} (${data.currentQuantity} units)`,
+    subject: `🎉 Back in Stock: ${displayTitle(data)} (${data.currentQuantity} units)`,
     html: shell(
-      `${data.productTitle} is back in stock — ${data.currentQuantity} units available`,
-      `${header('🎉', 'Back in Stock', `${data.productTitle} is available again`, brand)}
+      `${displayTitle(data)} is back in stock — ${data.currentQuantity} units available`,
+      `${header('🎉', 'Back in Stock', `${displayTitle(data)} is available again`, brand)}
        ${productCard(
          data,
          { text: '✅ In Stock', bg: '#d1fae5', color: '#065f46' },

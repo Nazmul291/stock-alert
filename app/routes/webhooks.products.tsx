@@ -13,10 +13,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const productId = data?.id?.toString();
     if (!productId) return new Response(null, { status: 200 });
 
-    // Skip products where every variant has inventory tracking disabled in Shopify.
+    // Skip variants with inventory tracking disabled in Shopify individually
+    // rather than skipping the whole product.
     const variants: any[] = data?.variants ?? [];
-    const allUntracked = variants.length > 0 && variants.every((v: any) => v.inventory_management !== "shopify");
-    if (allUntracked) return new Response(null, { status: 200 });
+    const trackedVariants = variants.filter((v: any) => v.inventory_management === "shopify");
+    if (trackedVariants.length === 0) return new Response(null, { status: 200 });
 
     // Respect the plan's product cap — don't add if the merchant is already at the limit.
     const { canAdd } = await canAddProduct(shop);
@@ -26,38 +27,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const title: string = data?.title ?? "Unknown";
-    const skus: string[] = variants.map((v: any) => v.sku).filter(Boolean);
-    const totalQty: number = variants.reduce((sum: number, v: any) => sum + (v.inventory_quantity ?? 0), 0);
     const imageUrl: string | null = data?.image?.src ?? null;
     const imageAlt: string | null = data?.image?.alt ?? null;
 
-    const settings = await prisma.storeSettings.findUnique({ where: { shop } });
-    const threshold = settings?.lowStockThreshold ?? 5;
-    const inventoryStatus: "in_stock" | "low_stock" | "out_of_stock" =
-      totalQty <= 0 ? "out_of_stock" : totalQty <= threshold ? "low_stock" : "in_stock";
+    for (const v of trackedVariants) {
+      const variantId = v.id?.toString();
+      if (!variantId) continue;
+      const qty = v.inventory_quantity ?? 0;
 
-    await prisma.inventoryTracking.upsert({
-      where: { shop_productId: { shop, productId: BigInt(productId) } },
-      update: { productTitle: title, sku: skus.join(", ") || null, imageUrl, imageAlt },
-      // Seed with "in_stock" regardless of the REST payload quantity.
-      // The REST webhook only carries single-location qty which is unreliable for
-      // multi-location stores. Starting optimistically means the first real
-      // inventory_levels/update transitions in_stock→out_of_stock (correct alert)
-      // rather than out_of_stock→in_stock (false restock alert).
-      create: {
-        shop,
-        productId: BigInt(productId),
-        productTitle: title,
-        sku: skus.join(", ") || null,
-        currentQuantity: totalQty,
-        previousQuantity: totalQty,
-        inventoryStatus: "in_stock",
-        imageUrl,
-        imageAlt,
-      },
-    });
+      await prisma.inventoryTracking.upsert({
+        where: { shop_variantId: { shop, variantId: BigInt(variantId) } },
+        update: { productTitle: title, variantTitle: v.title ?? null, sku: v.sku || null, imageUrl, imageAlt },
+        // Seed with "in_stock" regardless of the REST payload quantity.
+        // The REST webhook only carries single-location qty which is unreliable for
+        // multi-location stores. Starting optimistically means the first real
+        // inventory_levels/update transitions in_stock→out_of_stock (correct alert)
+        // rather than out_of_stock→in_stock (false restock alert).
+        create: {
+          shop,
+          productId: BigInt(productId),
+          variantId: BigInt(variantId),
+          productTitle: title,
+          variantTitle: v.title ?? null,
+          sku: v.sku || null,
+          currentQuantity: qty,
+          previousQuantity: qty,
+          inventoryStatus: "in_stock",
+          imageUrl,
+          imageAlt,
+        },
+      });
+    }
 
-    console.log(`[Webhook] Auto-added new product ${productId} (${title}) for ${shop}`);
+    console.log(`[Webhook] Auto-added new product ${productId} (${title}) — ${trackedVariants.length} variant(s) for ${shop}`);
   }
 
   if (topic === "PRODUCTS_DELETE") {
@@ -75,8 +77,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const title: string = data?.title ?? "Unknown";
     const variants: any[] = data?.variants ?? [];
-    const skus: string[] = variants.map((v: any) => v.sku).filter(Boolean);
-    const shopifyStatus: string | undefined = data?.status; // "ACTIVE" | "ARCHIVED" | "DRAFT"
+    // This is a REST-shaped webhook payload (confirmed by the snake_case
+    // fields elsewhere in this handler, e.g. inventory_management), and
+    // Shopify's REST Admin API returns status as lowercase "active" /
+    // "archived" / "draft" — NOT the GraphQL API's uppercase enum. Comparing
+    // against "ACTIVE" unnormalized meant this branch fired on every single
+    // PRODUCTS_UPDATE for a genuinely active product, deleting its tracking
+    // rows on essentially any edit in Shopify admin.
+    const shopifyStatus: string | undefined = data?.status?.toUpperCase();
     const imageUrl: string | null = data?.image?.src ?? null;
     const imageAlt: string | null = data?.image?.alt ?? null;
 
@@ -89,14 +97,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (shopifyStatus === "ACTIVE") {
-      const existing = await prisma.inventoryTracking.findUnique({
-        where: { shop_productId: { shop, productId: BigInt(productId) } },
+      const existing = await prisma.inventoryTracking.findFirst({
+        where: { shop, productId: BigInt(productId) },
+        select: { id: true },
       });
 
       if (!existing) {
         // Product just became active — start tracking it again (mirrors PRODUCTS_CREATE).
-        const allUntracked = variants.length > 0 && variants.every((v: any) => v.inventory_management !== "shopify");
-        if (allUntracked) return new Response(null, { status: 200 });
+        const trackedVariants = variants.filter((v: any) => v.inventory_management === "shopify");
+        if (trackedVariants.length === 0) return new Response(null, { status: 200 });
 
         const { canAdd } = await canAddProduct(shop);
         if (!canAdd) {
@@ -104,38 +113,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return new Response(null, { status: 200 });
         }
 
-        const totalQty: number = variants.reduce((sum: number, v: any) => sum + (v.inventory_quantity ?? 0), 0);
+        for (const v of trackedVariants) {
+          const variantId = v.id?.toString();
+          if (!variantId) continue;
+          const qty = v.inventory_quantity ?? 0;
 
-        await prisma.inventoryTracking.create({
-          data: {
-            shop,
-            productId: BigInt(productId),
-            productTitle: title,
-            sku: skus.join(", ") || null,
-            currentQuantity: totalQty,
-            previousQuantity: totalQty,
-            // Seed with "in_stock" regardless of the REST payload quantity — see
-            // the PRODUCTS_CREATE comment above for why.
-            inventoryStatus: "in_stock",
-            imageUrl,
-            imageAlt,
-          },
-        });
-        console.log(`[Webhook] Re-added product ${productId} (${title}) for ${shop} after status change to ACTIVE`);
+          await prisma.inventoryTracking.create({
+            data: {
+              shop,
+              productId: BigInt(productId),
+              variantId: BigInt(variantId),
+              productTitle: title,
+              variantTitle: v.title ?? null,
+              sku: v.sku || null,
+              currentQuantity: qty,
+              previousQuantity: qty,
+              // Seed with "in_stock" regardless of the REST payload quantity — see
+              // the PRODUCTS_CREATE comment above for why.
+              inventoryStatus: "in_stock",
+              imageUrl,
+              imageAlt,
+            },
+          });
+        }
+        console.log(`[Webhook] Re-added product ${productId} (${title}) — ${trackedVariants.length} variant(s) for ${shop} after status change to ACTIVE`);
         return new Response(null, { status: 200 });
       }
     }
 
-    // Always sync title, SKU, and image regardless of status change.
+    // Always sync title and image (whole-product fields) regardless of status change.
     await prisma.inventoryTracking.updateMany({
       where: { shop, productId: BigInt(productId) },
       data: {
         ...(title ? { productTitle: title } : {}),
-        ...(skus.length > 0 ? { sku: skus.join(", ") } : {}),
         imageUrl,
         imageAlt,
       },
     });
+
+    // SKU and variant title are per-variant — sync each variant present in the payload.
+    for (const v of variants) {
+      const variantId = v.id?.toString();
+      if (!variantId) continue;
+      await prisma.inventoryTracking.updateMany({
+        where: { shop, variantId: BigInt(variantId) },
+        data: { sku: v.sku || null, variantTitle: v.title ?? null },
+      });
+    }
   }
 
   } catch (err) {

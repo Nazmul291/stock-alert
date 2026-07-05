@@ -55,6 +55,14 @@ async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, t
   }
 }
 
+// Deep-links to the specific variant's admin page when known, matching
+// email-templates.ts's productAdminUrl, so Slack/WhatsApp links land on the
+// exact variant instead of the product's default one.
+function adminProductUrl(shop: string, productId: string, variantId?: string): string {
+  const base = `https://${shop}/admin/products/${productId}`;
+  return variantId ? `${base}/variants/${variantId}` : base;
+}
+
 function fromAddress(settings: SettingsContext): { name: string; address: string } {
   return {
     name: settings.brandSenderName || 'Stock Alert',
@@ -73,7 +81,9 @@ function toBrand(settings: SettingsContext): BrandConfig {
 async function logAlert(
   shop: string,
   productId: string,
+  variantId: string,
   productTitle: string,
+  variantTitle: string | null | undefined,
   alertType: 'low_stock' | 'out_of_stock' | 'restock',
   quantityAtAlert: number | null,
   thresholdTriggered: number | null,
@@ -87,7 +97,9 @@ async function logAlert(
         data: {
           shop,
           productId: BigInt(productId),
+          variantId: BigInt(variantId),
           productTitle,
+          variantTitle,
           alertType,
           quantityAtAlert,
           thresholdTriggered,
@@ -95,8 +107,11 @@ async function logAlert(
           sentToSlack,
         },
       }),
+      // Scoped to this one variant — a product-wide updateMany here would
+      // stamp every sibling variant row and defeat the per-variant 24h
+      // cooldown check in webhooks.inventory.tsx.
       prisma.inventoryTracking.updateMany({
-        where: { shop, productId: BigInt(productId) },
+        where: { shop, variantId: BigInt(variantId) },
         data: { lastAlertSentAt: now, lastAlertType: alertType },
       }),
     ]);
@@ -107,7 +122,7 @@ async function logAlert(
 
 export async function sendLowStockAlert(
   store: StoreContext,
-  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null },
+  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null; variantId?: string },
   currentQuantity: number,
   threshold: number,
   settings: SettingsContext,
@@ -120,6 +135,7 @@ export async function sendLowStockAlert(
     shopDomain: store.shop,
     productTitle: product.title,
     productId,
+    variantId: product.variantId,
     sku: product.sku,
     currentQuantity,
     threshold,
@@ -176,7 +192,7 @@ export async function sendLowStockAlert(
           },
           {
             type: 'actions',
-            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: `https://${store.shop}/admin/products/${productId}` }],
+            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: adminProductUrl(store.shop, productId, product.variantId) }],
           },
         ],
       });
@@ -193,7 +209,7 @@ export async function sendLowStockAlert(
         settings.whatsappPhoneNumberId,
         settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `⚠️ Low Stock Alert\n\n${product.title}${variantSuffix} has only *${currentQuantity} units* left (threshold: ${threshold}).\n\nhttps://${store.shop}/admin/products/${productId}`,
+        `⚠️ Low Stock Alert\n\n${product.title}${variantSuffix} has only *${currentQuantity} units* left (threshold: ${threshold}).\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
       );
       console.log(`[Notifications] Low stock WhatsApp sent for ${product.title}`);
     } catch (err) {
@@ -222,13 +238,13 @@ export async function sendLowStockAlert(
   }
 
   if (sentToEmail || sentToSlack) {
-    await logAlert(store.shop, productId, product.title, 'low_stock', currentQuantity, threshold, sentToEmail, sentToSlack);
+    await logAlert(store.shop, productId, product.variantId ?? productId, product.title, variantTitle, 'low_stock', currentQuantity, threshold, sentToEmail, sentToSlack);
   }
 }
 
 export async function sendOutOfStockAlert(
   store: StoreContext,
-  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null },
+  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null; variantId?: string },
   settings: SettingsContext,
   variantTitle?: string | null,
 ) {
@@ -239,6 +255,7 @@ export async function sendOutOfStockAlert(
     shopDomain: store.shop,
     productTitle: product.title,
     productId,
+    variantId: product.variantId,
     sku: product.sku,
     variantTitle,
     imageUrl: product.imageUrl,
@@ -286,7 +303,7 @@ export async function sendOutOfStockAlert(
           },
           {
             type: 'actions',
-            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: `https://${store.shop}/admin/products/${productId}` }],
+            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: adminProductUrl(store.shop, productId, product.variantId) }],
           },
         ],
       });
@@ -303,7 +320,7 @@ export async function sendOutOfStockAlert(
         settings.whatsappPhoneNumberId,
         settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `❌ Out of Stock\n\n${product.title}${variantSuffix} is now *sold out*.\n\nhttps://${store.shop}/admin/products/${productId}`,
+        `❌ Out of Stock\n\n${product.title}${variantSuffix} is now *sold out*.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
       );
     } catch (err) {
       console.error('[Notifications] Out of stock WhatsApp failed:', err);
@@ -325,7 +342,7 @@ export async function sendOutOfStockAlert(
   }
 
   if (sentToEmail || sentToSlack) {
-    await logAlert(store.shop, productId, product.title, 'out_of_stock', 0, null, sentToEmail, sentToSlack);
+    await logAlert(store.shop, productId, product.variantId ?? productId, product.title, variantTitle, 'out_of_stock', 0, null, sentToEmail, sentToSlack);
   }
 }
 
@@ -443,7 +460,7 @@ export async function sendTestNotification(
 
 export async function sendRestockAlert(
   store: StoreContext,
-  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null },
+  product: { id: string; title: string; sku?: string | null; imageUrl?: string | null; variantId?: string },
   currentQuantity: number,
   settings: SettingsContext,
   variantTitle?: string | null,
@@ -455,6 +472,7 @@ export async function sendRestockAlert(
     shopDomain: store.shop,
     productTitle: product.title,
     productId,
+    variantId: product.variantId,
     sku: product.sku,
     currentQuantity,
     variantTitle,
@@ -503,7 +521,7 @@ export async function sendRestockAlert(
           },
           {
             type: 'actions',
-            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: `https://${store.shop}/admin/products/${productId}` }],
+            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: adminProductUrl(store.shop, productId, product.variantId) }],
           },
         ],
       });
@@ -520,7 +538,7 @@ export async function sendRestockAlert(
         settings.whatsappPhoneNumberId,
         settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `🎉 Back in Stock\n\n${product.title}${variantSuffix} is back with *${currentQuantity} units*.\n\nhttps://${store.shop}/admin/products/${productId}`,
+        `🎉 Back in Stock\n\n${product.title}${variantSuffix} is back with *${currentQuantity} units*.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
       );
     } catch (err) {
       console.error('[Notifications] Restock WhatsApp failed:', err);
@@ -544,7 +562,7 @@ export async function sendRestockAlert(
   }
 
   if (sentToEmail || sentToSlack) {
-    await logAlert(store.shop, productId, product.title, 'restock', currentQuantity, null, sentToEmail, sentToSlack);
+    await logAlert(store.shop, productId, product.variantId ?? productId, product.title, variantTitle, 'restock', currentQuantity, null, sentToEmail, sentToSlack);
   }
 }
 

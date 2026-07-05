@@ -3,6 +3,15 @@ import { useFetcher } from "react-router";
 import { InventorySection } from "./InventorySection";
 import type { VariantInventory } from "./InventorySection";
 
+export type VariantStatusRow = {
+  id: string;
+  variantId: string;
+  variantTitle: string | null;
+  sku: string | null;
+  currentQuantity: number;
+  inventoryStatus: string;
+};
+
 export type ProductRow = {
   id: string | number;
   productId: string;
@@ -20,6 +29,9 @@ export type ProductRow = {
   stockOutDays?: number | null;
   manualDailySales?: number | null;
   expectedRestockDate?: string | null;
+  variants?: VariantStatusRow[];
+  variantCount?: number;
+  variantsAtRiskCount?: number;
 };
 
 type ProductSettings = {
