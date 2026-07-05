@@ -28,6 +28,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const title: string = data?.title ?? "Unknown";
     const skus: string[] = variants.map((v: any) => v.sku).filter(Boolean);
     const totalQty: number = variants.reduce((sum: number, v: any) => sum + (v.inventory_quantity ?? 0), 0);
+    const imageUrl: string | null = data?.image?.src ?? null;
+    const imageAlt: string | null = data?.image?.alt ?? null;
 
     const settings = await prisma.storeSettings.findUnique({ where: { shop } });
     const threshold = settings?.lowStockThreshold ?? 5;
@@ -36,7 +38,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     await prisma.inventoryTracking.upsert({
       where: { shop_productId: { shop, productId: BigInt(productId) } },
-      update: { productTitle: title, sku: skus.join(", ") || null },
+      update: { productTitle: title, sku: skus.join(", ") || null, imageUrl, imageAlt },
       // Seed with "in_stock" regardless of the REST payload quantity.
       // The REST webhook only carries single-location qty which is unreliable for
       // multi-location stores. Starting optimistically means the first real
@@ -50,6 +52,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         currentQuantity: totalQty,
         previousQuantity: totalQty,
         inventoryStatus: "in_stock",
+        imageUrl,
+        imageAlt,
       },
     });
 
@@ -73,6 +77,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const variants: any[] = data?.variants ?? [];
     const skus: string[] = variants.map((v: any) => v.sku).filter(Boolean);
     const shopifyStatus: string | undefined = data?.status; // "ACTIVE" | "ARCHIVED" | "DRAFT"
+    const imageUrl: string | null = data?.image?.src ?? null;
+    const imageAlt: string | null = data?.image?.alt ?? null;
 
     if (shopifyStatus && shopifyStatus !== "ACTIVE") {
       // Product is no longer active (archived or draft) — stop tracking it entirely.
@@ -111,6 +117,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             // Seed with "in_stock" regardless of the REST payload quantity — see
             // the PRODUCTS_CREATE comment above for why.
             inventoryStatus: "in_stock",
+            imageUrl,
+            imageAlt,
           },
         });
         console.log(`[Webhook] Re-added product ${productId} (${title}) for ${shop} after status change to ACTIVE`);
@@ -118,16 +126,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    // Always sync title and SKU regardless of status change.
-    if (title || skus.length > 0) {
-      await prisma.inventoryTracking.updateMany({
-        where: { shop, productId: BigInt(productId) },
-        data: {
-          ...(title ? { productTitle: title } : {}),
-          ...(skus.length > 0 ? { sku: skus.join(", ") } : {}),
-        },
-      });
-    }
+    // Always sync title, SKU, and image regardless of status change.
+    await prisma.inventoryTracking.updateMany({
+      where: { shop, productId: BigInt(productId) },
+      data: {
+        ...(title ? { productTitle: title } : {}),
+        ...(skus.length > 0 ? { sku: skus.join(", ") } : {}),
+        imageUrl,
+        imageAlt,
+      },
+    });
   }
 
   } catch (err) {

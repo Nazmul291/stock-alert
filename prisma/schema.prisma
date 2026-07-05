@@ -112,6 +112,8 @@ model InventoryTracking {
   isHidden           Boolean         @default(false) @map("is_hidden")
   monitoringEnabled  Boolean         @default(true) @map("monitoring_enabled")
   inventoryStatus    InventoryStatus @default(in_stock) @map("inventory_status")
+  imageUrl           String?         @map("image_url")
+  imageAlt           String?         @map("image_alt")
   avgDailySales        Float?    @map("avg_daily_sales")
   stockOutDays         Int?      @map("stock_out_days")
   manualDailySales     Float?    @map("manual_daily_sales")

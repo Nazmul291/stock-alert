@@ -24,6 +24,7 @@ const SYNC_PRODUCTS_GRAPHQL = `
       edges {
         node {
           id title status
+          featuredMedia { preview { image { url altText } } }
           variants(first: 100) {
             edges {
               node {
@@ -313,7 +314,15 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         const status: "in_stock" | "low_stock" | "out_of_stock" =
           totalQty <= 0 ? "out_of_stock" : totalQty <= threshold ? "low_stock" : "in_stock";
 
-        allProducts.push({ productId: BigInt(productId), productTitle: p.title, sku: skus.join(", ") || null, currentQuantity: totalQty, inventoryStatus: status });
+        allProducts.push({
+          productId: BigInt(productId),
+          productTitle: p.title,
+          sku: skus.join(", ") || null,
+          currentQuantity: totalQty,
+          inventoryStatus: status,
+          imageUrl: p.featuredMedia?.preview?.image?.url ?? null,
+          imageAlt: p.featuredMedia?.preview?.image?.altText ?? null,
+        });
       }
 
       hasNextPage = page.pageInfo.hasNextPage;
@@ -332,8 +341,8 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         chunk.map((p) =>
           prisma.inventoryTracking.upsert({
             where: { shop_productId: { shop, productId: p.productId } },
-            update: { productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, lastCheckedAt: now },
-            create: { shop, productId: p.productId, productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, previousQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus },
+            update: { productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, imageUrl: p.imageUrl, imageAlt: p.imageAlt, lastCheckedAt: now },
+            create: { shop, productId: p.productId, productTitle: p.productTitle, sku: p.sku, currentQuantity: p.currentQuantity, previousQuantity: p.currentQuantity, inventoryStatus: p.inventoryStatus, imageUrl: p.imageUrl, imageAlt: p.imageAlt },
           }),
         ),
       );
