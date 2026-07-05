@@ -744,6 +744,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
       <SyncButton
         slot="primary-action"
         pct={syncPct}
+        busy={busy}
         onClick={() => { if (syncPct === null && !busy) { clearError(); submit({ intent: "sync" }, { method: "post" }); } }}
       />
 
@@ -1067,17 +1068,18 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function SyncButton({ pct, onClick, slot }: { pct: number | null; onClick: () => void; slot?: Lowercase<string> }) {
+function SyncButton({ pct, busy, onClick, slot }: { pct: number | null; busy: boolean; onClick: () => void; slot?: Lowercase<string> }) {
   const syncing = pct !== null;
   const displayPct = Math.round(pct ?? 0);
+  const active = syncing || busy;
   return (
     <s-button
       slot={slot}
       variant="primary"
-      disabled={syncing ? true : undefined}
-      onClick={!syncing ? onClick : undefined}
+      disabled={active ? true : undefined}
+      onClick={!active ? onClick : undefined}
     >
-      {syncing ? `Syncing ${displayPct}%` : "Sync Products"}
+      {syncing ? `Syncing ${displayPct}%` : busy ? "Syncing…" : "Sync Products"}
     </s-button>
   );
 }
