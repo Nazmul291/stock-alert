@@ -94,17 +94,21 @@ export default function LandingPage() {
   );
 
   useEffect(() => {
-    if (!hasEmbedParams) return; // already "ready" — no SSE call was made
+    if (!hasEmbedParams) return; 
+
+    if (new URLSearchParams(search).has("appLoadId")) {
+      setAppStatus("redirect");
+      window.location.replace(`/app${search}`);
+      return;
+    }
+
     if (entry?.embedded) {
       setAppStatus("redirect");
       window.location.replace(`/app${search}`);
-    } else if (entry) {
-      // Stream resolved but says not embedded — shouldn't happen (same params
-      // checked both here and in api.entry-stream.ts), but avoids a stuck
-      // skeleton instead of assuming "ready" merely because `entry` starts
-      // out null while the SSE call is still in flight.
-      setAppStatus("ready");
+      return
     }
+    setAppStatus("ready");
+
   }, [entry, search, hasEmbedParams]);
 
   // Embedded load: skeleton until the redirect above fires. If the stream
@@ -150,10 +154,10 @@ export default function LandingPage() {
 
       <header className="sa-header">
         <div className="sa-headerInner">
-          <div className="sa-brand">
+          <a href="/" className="sa-brand">
             <img src={logoMark} alt="" className="sa-brandLogo" loading="lazy" />
             <span>{APP_NAME}</span>
-          </div>
+          </a>
           <nav className="sa-nav">
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
