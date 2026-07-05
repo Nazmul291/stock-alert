@@ -140,18 +140,6 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
     })
     .filter(Boolean) as Array<{ inventoryItemId: string; locationId: string; quantity: number }>;
 
-  // Lets the server map each inventoryItemId's summed quantity back to the
-  // right per-variant tracking row (inventoryUpdates only carries
-  // inventoryItemId/locationId, not the variant's own numeric id).
-  const variantsMeta = latestVariants
-    .filter((v) => v.inventoryItemId)
-    .map((v) => ({
-      inventoryItemId: v.inventoryItemId as string,
-      variantId: v.id.includes("/") ? v.id.split("/").pop()! : v.id,
-      variantTitle: v.title,
-      sku: v.sku,
-    }));
-
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
@@ -191,7 +179,6 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
             <input type="hidden" name="productId" value={product.productId} />
             <input type="hidden" name="productTitle" value={product.productTitle ?? ""} />
             <input type="hidden" name="inventoryUpdates" value={JSON.stringify(inventoryUpdates)} />
-            <input type="hidden" name="variantsMeta" value={JSON.stringify(variantsMeta)} />
             <input type="hidden" name="shopifyInventoryItemId" value={latestVariants[0]?.inventoryItemId ?? ""} />
 
             <div style={{ marginBottom: 20 }}>

@@ -450,15 +450,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (raw) inventoryUpdates = JSON.parse(raw);
     } catch { /* ignore parse errors */ }
 
-    // Maps each inventoryItemId (one per variant) to its variant identity, so
-    // the summed inventoryUpdates quantities can be written to the right
-    // per-variant tracking row.
-    let variantsMeta: Array<{ inventoryItemId: string; variantId: string; variantTitle: string; sku: string | null }> = [];
-    try {
-      const raw = form.get("variantsMeta") as string;
-      if (raw) variantsMeta = JSON.parse(raw);
-    } catch { /* ignore parse errors */ }
-
     const errors: string[] = [];
 
     if (tracked && shopifyInventoryItemId) {
@@ -516,31 +507,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const rawRestockDate = ((form.get("expectedRestockDate") as string) ?? "").trim();
     const expectedRestockDate = rawRestockDate ? new Date(rawRestockDate) : null;
 
-    if (tracked && variantsMeta.length > 0) {
-      // inventoryUpdates carries per-location quantities keyed by
-      // inventoryItemId — sum each variant's locations to get its own total.
-      const qtyByInventoryItem = new Map<string, number>();
-      for (const u of inventoryUpdates) {
-        qtyByInventoryItem.set(u.inventoryItemId, (qtyByInventoryItem.get(u.inventoryItemId) ?? 0) + u.quantity);
+    if (tracked) {
+      // Re-derive the authoritative variant list straight from Shopify
+      // (rather than trusting a client-submitted snapshot) so this write
+      // never depends on the modal's inventory fetch having completed in
+      // time — that snapshot could be empty or stale, silently dropping the
+      // DB write while the Shopify-side mutations above still succeed.
+      let variantsFresh: Array<{ variantId: string; variantTitle: string | null; sku: string | null; qty: number }> = [];
+      let refreshSucceeded = false;
+      try {
+        const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
+          variables: { id: `gid://shopify/Product/${productId}` },
+        });
+        const json: any = await res.json();
+        if (json.errors?.length) throw new Error(json.errors.map((e: any) => e.message).join("; "));
+        const edges = json.data?.product?.variants?.edges ?? [];
+        variantsFresh = edges
+          .filter((e: any) => e.node.inventoryItem?.tracked !== false)
+          .map((e: any) => {
+            const v = e.node;
+            const qty = (v.inventoryItem?.inventoryLevels?.edges ?? []).reduce((sum: number, le: any) => {
+              const avail = (le.node.quantities ?? []).find((q: any) => q.name === "available");
+              return sum + (avail?.quantity ?? 0);
+            }, 0);
+            return { variantId: v.id.split("/").pop() as string, variantTitle: v.title ?? null, sku: v.sku || null, qty };
+          });
+        refreshSucceeded = true;
+      } catch (err) {
+        errors.push(`Failed to refresh inventory: ${err instanceof Error ? err.message : "Unknown"}`);
       }
+
       const existingByVariantId = new Map(existingRows.map((r) => [r.variantId.toString(), r]));
 
-      for (const vm of variantsMeta) {
-        const hasQtyUpdate = qtyByInventoryItem.has(vm.inventoryItemId);
-        const existingRow = existingByVariantId.get(vm.variantId);
-        const qty = hasQtyUpdate ? qtyByInventoryItem.get(vm.inventoryItemId)! : (existingRow?.currentQuantity ?? 0);
+      for (const v of variantsFresh) {
         const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
-          qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
+          v.qty <= 0 ? "out_of_stock" : v.qty <= threshold ? "low_stock" : "in_stock";
+        const existingRow = existingByVariantId.get(v.variantId);
         const effectiveSales = manualDailySales ?? existingRow?.avgDailySales ?? null;
-        const stockOutDays = effectiveSales ? Math.min(999, Math.ceil(qty / effectiveSales)) : undefined;
+        const stockOutDays = effectiveSales ? Math.min(999, Math.ceil(v.qty / effectiveSales)) : undefined;
 
         await prisma.inventoryTracking.upsert({
-          where: { shop_variantId: { shop, variantId: BigInt(vm.variantId) } },
+          where: { shop_variantId: { shop, variantId: BigInt(v.variantId) } },
           update: {
-            ...(hasQtyUpdate ? { currentQuantity: qty, inventoryStatus: invStatus } : {}),
+            currentQuantity: v.qty,
+            inventoryStatus: invStatus,
             productTitle,
-            variantTitle: vm.variantTitle,
-            sku: vm.sku,
+            variantTitle: v.variantTitle,
+            sku: v.sku,
             monitoringEnabled,
             lastCheckedAt: new Date(),
             manualDailySales,
@@ -550,12 +563,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           create: {
             shop,
             productId: BigInt(productId),
-            variantId: BigInt(vm.variantId),
+            variantId: BigInt(v.variantId),
             productTitle,
-            variantTitle: vm.variantTitle,
-            sku: vm.sku,
-            currentQuantity: qty,
-            previousQuantity: qty,
+            variantTitle: v.variantTitle,
+            sku: v.sku,
+            currentQuantity: v.qty,
+            previousQuantity: v.qty,
             inventoryStatus: invStatus,
             monitoringEnabled,
             manualDailySales,
@@ -563,15 +576,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
       }
-    } else if (tracked && existingRows.length > 0) {
-      // Inventory data hadn't loaded when saved — keep whole-product fields
-      // in sync rather than losing tracking; per-variant quantities are
-      // untouched.
-      await prisma.inventoryTracking.updateMany({
-        where: { shop, productId: BigInt(productId) },
-        data: { productTitle, monitoringEnabled, manualDailySales, expectedRestockDate },
-      });
-    } else if (!tracked && existingRows.length > 0) {
+
+      // Prune a variant only if the refresh actually succeeded and it's
+      // confirmed no longer trackable/present on the product — never prune
+      // off of an empty/failed fetch, or a transient error would wipe
+      // otherwise-valid tracking data.
+      if (refreshSucceeded) {
+        const freshIds = new Set(variantsFresh.map((v) => v.variantId));
+        const staleIds = existingRows.filter((r) => !freshIds.has(r.variantId.toString())).map((r) => r.variantId);
+        if (staleIds.length > 0) {
+          await prisma.inventoryTracking.deleteMany({ where: { shop, variantId: { in: staleIds } } });
+        }
+      }
+    } else if (existingRows.length > 0) {
       await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
     }
 
