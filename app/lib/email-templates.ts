@@ -3,11 +3,26 @@ export interface EmailTemplateData {
   shopDomain: string;
   productTitle: string;
   productId: string | number;
+  variantId?: string | null;
   sku?: string | null;
   currentQuantity?: number;
   threshold?: number;
   variantTitle?: string | null;
   imageUrl?: string | null;
+}
+
+// Deep-links to the specific variant's admin page when known, so merchants
+// land exactly where they need to act instead of the product's default
+// (first) variant.
+function productAdminUrl(data: EmailTemplateData): string {
+  const base = `https://${data.shopDomain}/admin/products/${data.productId}`;
+  return data.variantId ? `${base}/variants/${data.variantId}` : base;
+}
+
+// "Product — Variant" when the alert is for a specific variant, so subject
+// lines and preview text are unambiguous for multi-variant products.
+function displayTitle(data: EmailTemplateData): string {
+  return data.variantTitle ? `${data.productTitle} — ${data.variantTitle}` : data.productTitle;
 }
 
 export interface BrandConfig {
@@ -137,7 +152,7 @@ function productCard(
       <table role="presentation" cellpadding="0" cellspacing="0">
         <tr>
           <td style="border-radius:8px;${brandBg(brand.color)}">
-            <a href="https://${data.shopDomain}/admin/products/${data.productId}"
+            <a href="${productAdminUrl(data)}"
               style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
               ${esc(ctaLabel)} &rarr;
             </a>
@@ -162,10 +177,10 @@ function tip(text: string, bg: string, borderColor: string, color: string): stri
 
 export function getLowStockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `⚠️ Low Stock: ${data.productTitle} (${data.currentQuantity} left)`,
+    subject: `⚠️ Low Stock: ${displayTitle(data)} (${data.currentQuantity} left)`,
     html: shell(
-      `${data.productTitle} is running low — ${data.currentQuantity} units remaining`,
-      `${header('⚠️', 'Low Stock Alert', `${data.productTitle} needs your attention`, brand)}
+      `${displayTitle(data)} is running low — ${data.currentQuantity} units remaining`,
+      `${header('⚠️', 'Low Stock Alert', `${displayTitle(data)} needs your attention`, brand)}
        ${productCard(
          data,
          { text: '⚠️ Low Stock', bg: '#fef3c7', color: '#92400e' },
@@ -184,10 +199,10 @@ export function getLowStockEmailTemplate(data: EmailTemplateData, brand: BrandCo
 
 export function getOutOfStockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `❌ Out of Stock: ${data.productTitle}`,
+    subject: `❌ Out of Stock: ${displayTitle(data)}`,
     html: shell(
-      `${data.productTitle} is now out of stock`,
-      `${header('❌', 'Out of Stock', `${data.productTitle} has sold out`, brand)}
+      `${displayTitle(data)} is now out of stock`,
+      `${header('❌', 'Out of Stock', `${displayTitle(data)} has sold out`, brand)}
        ${productCard(
          data,
          { text: '❌ Sold Out', bg: '#fee2e2', color: '#991b1b' },
@@ -203,10 +218,10 @@ export function getOutOfStockEmailTemplate(data: EmailTemplateData, brand: Brand
 
 export function getRestockEmailTemplate(data: EmailTemplateData, brand: BrandConfig = {}): { subject: string; html: string } {
   return {
-    subject: `🎉 Back in Stock: ${data.productTitle} (${data.currentQuantity} units)`,
+    subject: `🎉 Back in Stock: ${displayTitle(data)} (${data.currentQuantity} units)`,
     html: shell(
-      `${data.productTitle} is back in stock — ${data.currentQuantity} units available`,
-      `${header('🎉', 'Back in Stock', `${data.productTitle} is available again`, brand)}
+      `${displayTitle(data)} is back in stock — ${data.currentQuantity} units available`,
+      `${header('🎉', 'Back in Stock', `${displayTitle(data)} is available again`, brand)}
        ${productCard(
          data,
          { text: '✅ In Stock', bg: '#d1fae5', color: '#065f46' },

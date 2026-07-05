@@ -55,6 +55,14 @@ async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, t
   }
 }
 
+// Deep-links to the specific variant's admin page when known, matching
+// email-templates.ts's productAdminUrl, so Slack/WhatsApp links land on the
+// exact variant instead of the product's default one.
+function adminProductUrl(shop: string, productId: string, variantId?: string): string {
+  const base = `https://${shop}/admin/products/${productId}`;
+  return variantId ? `${base}/variants/${variantId}` : base;
+}
+
 function fromAddress(settings: SettingsContext): { name: string; address: string } {
   return {
     name: settings.brandSenderName || 'Stock Alert',
@@ -127,6 +135,7 @@ export async function sendLowStockAlert(
     shopDomain: store.shop,
     productTitle: product.title,
     productId,
+    variantId: product.variantId,
     sku: product.sku,
     currentQuantity,
     threshold,
@@ -183,7 +192,7 @@ export async function sendLowStockAlert(
           },
           {
             type: 'actions',
-            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: `https://${store.shop}/admin/products/${productId}` }],
+            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: adminProductUrl(store.shop, productId, product.variantId) }],
           },
         ],
       });
@@ -200,7 +209,7 @@ export async function sendLowStockAlert(
         settings.whatsappPhoneNumberId,
         settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `⚠️ Low Stock Alert\n\n${product.title}${variantSuffix} has only *${currentQuantity} units* left (threshold: ${threshold}).\n\nhttps://${store.shop}/admin/products/${productId}`,
+        `⚠️ Low Stock Alert\n\n${product.title}${variantSuffix} has only *${currentQuantity} units* left (threshold: ${threshold}).\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
       );
       console.log(`[Notifications] Low stock WhatsApp sent for ${product.title}`);
     } catch (err) {
@@ -246,6 +255,7 @@ export async function sendOutOfStockAlert(
     shopDomain: store.shop,
     productTitle: product.title,
     productId,
+    variantId: product.variantId,
     sku: product.sku,
     variantTitle,
     imageUrl: product.imageUrl,
@@ -293,7 +303,7 @@ export async function sendOutOfStockAlert(
           },
           {
             type: 'actions',
-            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: `https://${store.shop}/admin/products/${productId}` }],
+            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: adminProductUrl(store.shop, productId, product.variantId) }],
           },
         ],
       });
@@ -310,7 +320,7 @@ export async function sendOutOfStockAlert(
         settings.whatsappPhoneNumberId,
         settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `❌ Out of Stock\n\n${product.title}${variantSuffix} is now *sold out*.\n\nhttps://${store.shop}/admin/products/${productId}`,
+        `❌ Out of Stock\n\n${product.title}${variantSuffix} is now *sold out*.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
       );
     } catch (err) {
       console.error('[Notifications] Out of stock WhatsApp failed:', err);
@@ -462,6 +472,7 @@ export async function sendRestockAlert(
     shopDomain: store.shop,
     productTitle: product.title,
     productId,
+    variantId: product.variantId,
     sku: product.sku,
     currentQuantity,
     variantTitle,
@@ -510,7 +521,7 @@ export async function sendRestockAlert(
           },
           {
             type: 'actions',
-            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: `https://${store.shop}/admin/products/${productId}` }],
+            elements: [{ type: 'button', text: { type: 'plain_text', text: 'View in Shopify' }, url: adminProductUrl(store.shop, productId, product.variantId) }],
           },
         ],
       });
@@ -527,7 +538,7 @@ export async function sendRestockAlert(
         settings.whatsappPhoneNumberId,
         settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `🎉 Back in Stock\n\n${product.title}${variantSuffix} is back with *${currentQuantity} units*.\n\nhttps://${store.shop}/admin/products/${productId}`,
+        `🎉 Back in Stock\n\n${product.title}${variantSuffix} is back with *${currentQuantity} units*.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
       );
     } catch (err) {
       console.error('[Notifications] Restock WhatsApp failed:', err);
