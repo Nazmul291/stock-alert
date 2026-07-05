@@ -19,7 +19,8 @@
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
     "dev:worker": "PROCESS_TYPE=worker tsx --env-file=.env --watch workers/inventory-buffer.worker.ts",
-    "start:worker": "PROCESS_TYPE=worker tsx workers/inventory-buffer.worker.ts"
+    "start:worker": "PROCESS_TYPE=worker tsx workers/inventory-buffer.worker.ts",
+    "cleanup:archived-products": "PROCESS_TYPE=worker tsx --env-file=.env scripts/cleanup-archived-products.ts"
   },
   "type": "module",
   "engines": {

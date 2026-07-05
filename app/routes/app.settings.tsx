@@ -109,7 +109,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { intent: "save", success: true, message: "Settings saved successfully." };
 };
 
-const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
+const THRESHOLD_OPTIONS = [1, 2, 3, 5, 10, 15, 20, 25, 50];
 
 export default function SettingsPage() {
   const { token } = useLoaderData<typeof loader>();

@@ -69,23 +69,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const productId = data?.id?.toString();
     if (!productId) return new Response(null, { status: 200 });
 
-    const title: string | undefined = data?.title;
-    const skus: string[] = (data?.variants ?? []).map((v: any) => v.sku).filter(Boolean);
+    const title: string = data?.title ?? "Unknown";
+    const variants: any[] = data?.variants ?? [];
+    const skus: string[] = variants.map((v: any) => v.sku).filter(Boolean);
     const shopifyStatus: string | undefined = data?.status; // "ACTIVE" | "ARCHIVED" | "DRAFT"
 
-    if (shopifyStatus === "ARCHIVED") {
-      // Disable monitoring — the product is no longer live in the store.
-      await prisma.inventoryTracking.updateMany({
+    if (shopifyStatus && shopifyStatus !== "ACTIVE") {
+      // Product is no longer active (archived or draft) — stop tracking it entirely.
+      await prisma.inventoryTracking.deleteMany({
         where: { shop, productId: BigInt(productId) },
-        data: { inventoryStatus: "deactivated", monitoringEnabled: false },
       });
-    } else if (shopifyStatus === "ACTIVE") {
-      // Only restore rows we explicitly deactivated — don't clobber a valid
-      // low_stock/out_of_stock status that an inventory webhook set.
-      await prisma.inventoryTracking.updateMany({
-        where: { shop, productId: BigInt(productId), inventoryStatus: "deactivated" },
-        data: { monitoringEnabled: true, inventoryStatus: "in_stock" },
+      return new Response(null, { status: 200 });
+    }
+
+    if (shopifyStatus === "ACTIVE") {
+      const existing = await prisma.inventoryTracking.findUnique({
+        where: { shop_productId: { shop, productId: BigInt(productId) } },
       });
+
+      if (!existing) {
+        // Product just became active — start tracking it again (mirrors PRODUCTS_CREATE).
+        const allUntracked = variants.length > 0 && variants.every((v: any) => v.inventory_management !== "shopify");
+        if (allUntracked) return new Response(null, { status: 200 });
+
+        const { canAdd } = await canAddProduct(shop);
+        if (!canAdd) {
+          console.log(`[Webhook] Product ${productId} not re-added — plan limit reached for ${shop}`);
+          return new Response(null, { status: 200 });
+        }
+
+        const totalQty: number = variants.reduce((sum: number, v: any) => sum + (v.inventory_quantity ?? 0), 0);
+
+        await prisma.inventoryTracking.create({
+          data: {
+            shop,
+            productId: BigInt(productId),
+            productTitle: title,
+            sku: skus.join(", ") || null,
+            currentQuantity: totalQty,
+            previousQuantity: totalQty,
+            // Seed with "in_stock" regardless of the REST payload quantity — see
+            // the PRODUCTS_CREATE comment above for why.
+            inventoryStatus: "in_stock",
+          },
+        });
+        console.log(`[Webhook] Re-added product ${productId} (${title}) for ${shop} after status change to ACTIVE`);
+        return new Response(null, { status: 200 });
+      }
     }
 
     // Always sync title and SKU regardless of status change.

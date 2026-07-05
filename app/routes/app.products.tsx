@@ -272,14 +272,15 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
   try {
     while (hasNextPage && allProducts.length < maxProducts) {
       const batchSize = Math.min(250, maxProducts - allProducts.length);
-      const syncQuery =
+      const filterQuery =
         monitoringFilter === "collection" && monitoringCollectionId
           ? `collection_id:${monitoringCollectionId}`
           : monitoringFilter === "tags" && monitoringTags
           ? monitoringTags.split(",").map((t) => `tag:${t.trim()}`).join(" OR ")
           : null;
+      const syncQuery = filterQuery ? `status:active AND (${filterQuery})` : "status:active";
       const gqlResponse = await admin.graphql(SYNC_PRODUCTS_GRAPHQL, {
-        variables: { first: batchSize, after: cursor, ...(syncQuery ? { query: syncQuery } : {}) },
+        variables: { first: batchSize, after: cursor, query: syncQuery },
       });
       const gqlJson: any = await gqlResponse.json();
 
