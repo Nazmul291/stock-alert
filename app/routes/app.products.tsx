@@ -516,7 +516,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // time — that snapshot could be empty or stale, silently dropping the
       // DB write while the Shopify-side mutations above still succeed.
       let variantsFresh: Array<{ variantId: string; variantTitle: string | null; sku: string | null; qty: number }> = [];
-      let refreshSucceeded = false;
       try {
         const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
           variables: { id: `gid://shopify/Product/${productId}` },
@@ -534,7 +533,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }, 0);
             return { variantId: v.id.split("/").pop() as string, variantTitle: v.title ?? null, sku: v.sku || null, qty };
           });
-        refreshSucceeded = true;
       } catch (err) {
         errors.push(`Failed to refresh inventory: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -578,18 +576,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
       }
-
-      // Prune a variant only if the refresh actually succeeded and it's
-      // confirmed no longer trackable/present on the product — never prune
-      // off of an empty/failed fetch, or a transient error would wipe
-      // otherwise-valid tracking data.
-      if (refreshSucceeded) {
-        const freshIds = new Set(variantsFresh.map((v) => v.variantId));
-        const staleIds = existingRows.filter((r) => !freshIds.has(r.variantId.toString())).map((r) => r.variantId);
-        if (staleIds.length > 0) {
-          await prisma.inventoryTracking.deleteMany({ where: { shop, variantId: { in: staleIds } } });
-        }
-      }
+      // Deliberately no pruning here. A single post-mutation re-fetch is
+      // exactly the kind of read that can catch Shopify's inventoryItem
+      // eventual-consistency window right after writing new inventory levels
+      // (variants missing or briefly reporting tracked:false) — the sync
+      // path hit this same class of bug when it tried to prune off of one
+      // fetch's result. Removing a variant's tracking is the sync's job,
+      // where it can be reasoned about across the whole catalog; a save on
+      // this one product should only ever add or update.
     } else if (existingRows.length > 0) {
       await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
     }
