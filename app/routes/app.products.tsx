@@ -359,11 +359,22 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
     if (allVariants.length > 0) {
       const syncedVariantIds = allVariants.map((v) => v.variantId);
+      // Scoped to products this sync actually saw, not "every product minus
+      // what we just fetched." products(query: "status:active") is backed by
+      // Shopify's search index, which can lag a moment behind real-time
+      // changes — a product whose index entry hasn't caught up yet would be
+      // silently absent from this batch, and a blanket prune would then
+      // delete its (still perfectly valid) tracking rows. Once a product IS
+      // returned by the search query, though, its variants(first:100)
+      // sub-selection is a direct, consistent read, so pruning a variant
+      // that's missing from an otherwise-present product (e.g. the merchant
+      // deleted that one variant) is still safe.
+      const seenProductIdsBigInt = [...seenProductIds].map(BigInt);
       const { count: pruned } = await prisma.inventoryTracking.deleteMany({
-        where: { shop, variantId: { notIn: syncedVariantIds } },
+        where: { shop, productId: { in: seenProductIdsBigInt }, variantId: { notIn: syncedVariantIds } },
       });
       if (pruned > 0) {
-        console.log(`[Sync] Pruned ${pruned} stale tracking row(s) for ${shop}`);
+        console.log(`[Sync] Pruned ${pruned} stale variant row(s) for ${shop}`);
       }
     }
 
