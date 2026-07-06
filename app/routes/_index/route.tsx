@@ -19,7 +19,7 @@ const DESCRIPTION =
 const FEATURES = [
   {
     title: "Real-time low & out-of-stock alerts",
-    body: "Get notified by email or Slack the instant inventory crosses your threshold — before you lose the sale.",
+    body: "Get notified by email, Slack, or WhatsApp the instant inventory crosses your threshold — before you lose the sale.",
   },
   {
     title: "Automatic back-in-stock notifications",
@@ -30,8 +30,8 @@ const FEATURES = [
     body: "Sold-out products are hidden from your storefront automatically, then brought back live the instant they restock.",
   },
   {
-    title: "Per-product thresholds",
-    body: "Set a global low-stock threshold store-wide, or fine-tune it product by product for fast or slow movers.",
+    title: "Per-product thresholds & filtering",
+    body: "Set a global low-stock threshold store-wide, fine-tune it per product, or scope monitoring by collection and tag.",
   },
   {
     title: "Stock-out predictions",
@@ -39,7 +39,19 @@ const FEATURES = [
   },
   {
     title: "Analytics dashboard",
-    body: "Track alert history, stock-out trends, and webhook health across your entire catalog in one place.",
+    body: "Track alert history, stock-out trends, and webhook health across your catalog — plus daily or weekly digest emails.",
+  },
+  {
+    title: "Klaviyo integration",
+    body: "Send low-stock and back-in-stock events straight into Klaviyo to power real marketing flows and segments.",
+  },
+  {
+    title: "Native Shopify Flow triggers",
+    body: "Build custom automations on low-stock, out-of-stock, or restock events — no code required.",
+  },
+  {
+    title: "Outbound webhooks",
+    body: "Pipe every alert into Zapier, Make, or your own ERP the moment stock changes.",
   },
 ];
 

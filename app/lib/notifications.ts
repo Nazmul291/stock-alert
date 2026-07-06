@@ -12,6 +12,8 @@ import {
 } from './email-templates';
 import { fireFlowTrigger } from './flow-trigger.server';
 import { sendKlaviyoEvent } from './klaviyo.server';
+import { sendWhatsAppTemplate } from './whatsapp.server';
+import { getValidAsanaAccessToken, createAsanaTask } from './asana.server';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
@@ -36,23 +38,45 @@ interface SettingsContext {
   brandSenderName?: string | null;
   whatsappNotifications?: boolean;
   whatsappPhone?: string | null;
-  whatsappPhoneNumberId?: string | null;
-  whatsappAccessToken?: string | null;
+  whatsappPhoneVerified?: boolean;
   klaviyoEnabled?: boolean;
   klaviyoApiKey?: string | null;
+  asanaEnabled?: boolean;
+  asanaAccessToken?: string | null;
+  asanaWorkspaceGid?: string | null;
 }
 
-async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, body: string): Promise<void> {
-  const phone = to.replace(/\D/g, "");
-  const res = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messaging_product: "whatsapp", to: phone, type: "text", text: { body } }),
-  });
-  if (!res.ok) {
-    const err: any = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `WhatsApp API error ${res.status}`);
-  }
+// Looked up directly (matches the existing direct-Prisma convention already
+// used in this file — see logAlert's $transaction and
+// sendBackInStockNotifications' subscriber lookup below) rather than being
+// threaded through SettingsContext, since mappings are per-event, not a flat
+// setting. Never throws — a missing/failed mapping just means no task, same
+// contract as every other channel here.
+async function createAsanaTaskForEvent(
+  shop: string,
+  eventType: 'low_stock' | 'out_of_stock' | 'restock',
+  workspaceGid: string,
+  name: string,
+  notes: string,
+): Promise<void> {
+  const mapping = await prisma.asanaEventMapping.findUnique({ where: { shop_eventType: { shop, eventType } } });
+  if (!mapping) return;
+
+  const accessToken = await getValidAsanaAccessToken(shop);
+  if (!accessToken) return;
+
+  await createAsanaTask(accessToken, workspaceGid, mapping.projectGid, mapping.sectionGid, name, notes);
+}
+
+// Stock alerts are proactive/business-initiated, so WhatsApp requires sending
+// through a pre-approved Message Template rather than free text (free text
+// only works within 24h of the recipient messaging first). "stock_alert" is
+// created once, manually, on Stock Alert's own shared WhatsApp Business
+// number — see app/lib/whatsapp.server.ts. Its single BODY component takes 3
+// params: title line, detail line, url — same three pieces of content every
+// call site below already builds.
+function sendWhatsAppMessage(to: string, titleLine: string, detailLine: string, url: string): Promise<void> {
+  return sendWhatsAppTemplate(to, "stock_alert", [titleLine, detailLine, url]);
 }
 
 // Deep-links to the specific variant's admin page when known, matching
@@ -202,18 +226,33 @@ export async function sendLowStockAlert(
     }
   }
 
-  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+  if (settings.whatsappNotifications && settings.whatsappPhoneVerified && settings.whatsappPhone) {
     try {
       const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
       await sendWhatsAppMessage(
-        settings.whatsappPhoneNumberId,
-        settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `⚠️ Low Stock Alert\n\n${product.title}${variantSuffix} has only *${currentQuantity} units* left (threshold: ${threshold}).\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+        '⚠️ Low Stock Alert',
+        `${product.title}${variantSuffix} has only ${currentQuantity} units left (threshold: ${threshold}).`,
+        adminProductUrl(store.shop, productId, product.variantId),
       );
       console.log(`[Notifications] Low stock WhatsApp sent for ${product.title}`);
     } catch (err) {
       console.error('[Notifications] Low stock WhatsApp failed:', err);
+    }
+  }
+
+  if (settings.asanaEnabled && settings.asanaAccessToken && settings.asanaWorkspaceGid) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await createAsanaTaskForEvent(
+        store.shop,
+        'low_stock',
+        settings.asanaWorkspaceGid,
+        `Low Stock: ${product.title}${variantSuffix}`,
+        `Only ${currentQuantity} units left (threshold: ${threshold}).\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Low stock Asana task failed:', err);
     }
   }
 
@@ -313,17 +352,32 @@ export async function sendOutOfStockAlert(
     }
   }
 
-  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+  if (settings.whatsappNotifications && settings.whatsappPhoneVerified && settings.whatsappPhone) {
     try {
       const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
       await sendWhatsAppMessage(
-        settings.whatsappPhoneNumberId,
-        settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `❌ Out of Stock\n\n${product.title}${variantSuffix} is now *sold out*.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+        '❌ Out of Stock',
+        `${product.title}${variantSuffix} is now sold out.`,
+        adminProductUrl(store.shop, productId, product.variantId),
       );
     } catch (err) {
       console.error('[Notifications] Out of stock WhatsApp failed:', err);
+    }
+  }
+
+  if (settings.asanaEnabled && settings.asanaAccessToken && settings.asanaWorkspaceGid) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await createAsanaTaskForEvent(
+        store.shop,
+        'out_of_stock',
+        settings.asanaWorkspaceGid,
+        `Out of Stock: ${product.title}${variantSuffix}`,
+        `This product is now sold out.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Out of stock Asana task failed:', err);
     }
   }
 
@@ -425,14 +479,14 @@ export async function sendTestNotification(
     }
   }
 
-  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+  if (settings.whatsappNotifications && settings.whatsappPhoneVerified && settings.whatsappPhone) {
     try {
-      console.log(`[Notifications] Sending WhatsApp test to ${settings.whatsappPhone} via Phone Number ID ${settings.whatsappPhoneNumberId}`);
+      console.log(`[Notifications] Sending WhatsApp test to ${settings.whatsappPhone}`);
       await sendWhatsAppMessage(
-        settings.whatsappPhoneNumberId,
-        settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `✅ Test — Stock Alert is connected for *${storeName}*. You'll receive WhatsApp alerts when inventory thresholds are triggered.`,
+        '✅ Test Notification',
+        `Stock Alert is connected for ${storeName}. You'll receive WhatsApp alerts when inventory thresholds are triggered.`,
+        `https://${store.shop}/admin`,
       );
       console.log(`[Notifications] WhatsApp test sent OK`);
       result.whatsapp = { sent: true };
@@ -441,7 +495,7 @@ export async function sendTestNotification(
       result.whatsapp = { sent: false, error: err instanceof Error ? err.message : 'Unknown error' };
     }
   } else {
-    console.log(`[Notifications] WhatsApp test skipped — enabled:${settings.whatsappNotifications} phone:${!!settings.whatsappPhone} phoneNumberId:${!!settings.whatsappPhoneNumberId} token:${!!settings.whatsappAccessToken}`);
+    console.log(`[Notifications] WhatsApp test skipped — enabled:${settings.whatsappNotifications} phone:${!!settings.whatsappPhone} verified:${!!settings.whatsappPhoneVerified}`);
   }
 
   if (settings.klaviyoEnabled && settings.klaviyoApiKey) {
@@ -531,17 +585,32 @@ export async function sendRestockAlert(
     }
   }
 
-  if (settings.whatsappNotifications && settings.whatsappPhone && settings.whatsappPhoneNumberId && settings.whatsappAccessToken) {
+  if (settings.whatsappNotifications && settings.whatsappPhoneVerified && settings.whatsappPhone) {
     try {
       const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
       await sendWhatsAppMessage(
-        settings.whatsappPhoneNumberId,
-        settings.whatsappAccessToken,
         settings.whatsappPhone,
-        `🎉 Back in Stock\n\n${product.title}${variantSuffix} is back with *${currentQuantity} units*.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+        '🎉 Back in Stock',
+        `${product.title}${variantSuffix} is back with ${currentQuantity} units.`,
+        adminProductUrl(store.shop, productId, product.variantId),
       );
     } catch (err) {
       console.error('[Notifications] Restock WhatsApp failed:', err);
+    }
+  }
+
+  if (settings.asanaEnabled && settings.asanaAccessToken && settings.asanaWorkspaceGid) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await createAsanaTaskForEvent(
+        store.shop,
+        'restock',
+        settings.asanaWorkspaceGid,
+        `Restock: ${product.title}${variantSuffix}`,
+        `Back in stock with ${currentQuantity} units.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Restock Asana task failed:', err);
     }
   }
 

@@ -1,3 +1,4 @@
+import prisma from "../db.server";
 import { getCachedSettings, getCachedSession } from "./shop-cache.server";
 
 type IntegrationsValues = {
@@ -8,27 +9,46 @@ type IntegrationsValues = {
   slackChannelName: string;
   whatsappNotifications: boolean;
   whatsappPhone: string;
-  whatsappPhoneNumberId: string;
-  whatsappAccessToken: string;
+  whatsappPhoneVerified: boolean;
   outboundWebhookUrl: string;
   klaviyoEnabled: boolean;
+  asanaConnected: boolean;
+  asanaUserName: string;
+  asanaWorkspaceName: string;
+};
+
+export type AsanaMapping = {
+  eventType: string;
+  projectGid: string;
+  projectName: string;
+  sectionGid: string | null;
+  sectionName: string | null;
 };
 
 export type IntegrationsData = {
   plan: string;
   storeEmail: string | null;
   settings: IntegrationsValues;
+  asanaMappings: AsanaMapping[];
 };
 
 export async function loadIntegrationsData(shop: string): Promise<IntegrationsData> {
-  const [settings, storeSession] = await Promise.all([
+  const [settings, storeSession, asanaMappings] = await Promise.all([
     getCachedSettings(shop),
     getCachedSession(shop),
+    prisma.asanaEventMapping.findMany({ where: { shop } }),
   ]);
 
   return {
     plan: storeSession?.plan ?? "basic",
     storeEmail: storeSession?.email ?? null,
+    asanaMappings: asanaMappings.map((m) => ({
+      eventType: m.eventType,
+      projectGid: m.projectGid,
+      projectName: m.projectName,
+      sectionGid: m.sectionGid,
+      sectionName: m.sectionName,
+    })),
     settings: settings
       ? {
           emailNotifications: settings.emailNotifications,
@@ -41,13 +61,17 @@ export async function loadIntegrationsData(shop: string): Promise<IntegrationsDa
           slackChannelName: settings.slackChannelName ?? "",
           whatsappNotifications: settings.whatsappNotifications,
           whatsappPhone: settings.whatsappPhone ?? "",
-          whatsappPhoneNumberId: settings.whatsappPhoneNumberId ?? "",
-          whatsappAccessToken: settings.whatsappAccessToken ?? "",
+          whatsappPhoneVerified: settings.whatsappPhoneVerified,
           outboundWebhookUrl: settings.outboundWebhookUrl ?? "",
           // Same reasoning as slackWebhookUrl above — the API key is entered
           // through a modal now and never needs to round-trip back to the
           // client, so only whether Klaviyo is connected is sent.
           klaviyoEnabled: settings.klaviyoEnabled,
+          // Never expose asanaAccessToken/asanaRefreshToken — same treatment
+          // as every other stored secret in this file.
+          asanaConnected: !!settings.asanaAccessToken,
+          asanaUserName: settings.asanaUserName ?? "",
+          asanaWorkspaceName: settings.asanaWorkspaceName ?? "",
         }
       : {
           emailNotifications: true,
@@ -57,10 +81,12 @@ export async function loadIntegrationsData(shop: string): Promise<IntegrationsDa
           slackChannelName: "",
           whatsappNotifications: false,
           whatsappPhone: "",
-          whatsappPhoneNumberId: "",
-          whatsappAccessToken: "",
+          whatsappPhoneVerified: false,
           outboundWebhookUrl: "",
           klaviyoEnabled: false,
+          asanaConnected: false,
+          asanaUserName: "",
+          asanaWorkspaceName: "",
         },
   };
 }
