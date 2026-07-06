@@ -1,7 +1,7 @@
 export default function PrivacyPolicy() {
   const appUrl = "https://stock-alert.nazmulcodes.org";
   const contactEmail = "nazmul291@gmail.com";
-  const lastUpdated = "June 14, 2026";
+  const lastUpdated = "July 6, 2026";
 
   return (
     <html lang="en">
@@ -36,7 +36,11 @@ export default function PrivacyPolicy() {
           <ul>
             <li><strong>Store information</strong> — your Shopify shop domain, access token, and account email, obtained via Shopify OAuth when you install the app.</li>
             <li><strong>Product and inventory data</strong> — product titles, SKUs, and inventory quantities synced from your Shopify store to power alert calculations.</li>
-            <li><strong>Notification settings</strong> — email addresses and Slack webhook URLs you provide for receiving alerts.</li>
+            <li><strong>Notification settings</strong> — email addresses you provide for receiving alerts, and your phone number if you verify it for WhatsApp alerts (coming soon).</li>
+            <li><strong>Slack</strong> — an access token and incoming-webhook URL obtained via Slack OAuth when you connect a Slack workspace, used only to post alerts to the channel you choose.</li>
+            <li><strong>Asana</strong> — an OAuth access token and refresh token, plus the workspace, project, and section names you select, used only to create a task in Asana for each stock event you map.</li>
+            <li><strong>Klaviyo</strong> — the private API key you provide, used only to send inventory event data to your own Klaviyo account.</li>
+            <li><strong>Outbound webhook</strong> — the URL you provide; we POST a JSON payload of the alert event to it. We do not store the payload beyond delivery.</li>
             <li><strong>Alert history</strong> — a log of notifications sent, including product name, alert type, and timestamp.</li>
             <li><strong>Back-in-stock subscribers</strong> — email addresses collected via the optional storefront widget from customers who opt in to restock notifications. These are collected with customer consent and are used solely to send a single restock email per product.</li>
             <li><strong>Order data (read-only)</strong> — aggregate sales counts from your last 30 days of orders, used only to calculate stock-out prediction ("days remaining"). Individual order details are not stored.</li>
@@ -44,7 +48,8 @@ export default function PrivacyPolicy() {
 
           <h2>2. How We Use Your Data</h2>
           <ul>
-            <li>To monitor your inventory and send low-stock, out-of-stock, and restock alerts.</li>
+            <li>To monitor your inventory and send low-stock, out-of-stock, and restock alerts by email or Slack (and WhatsApp, coming soon).</li>
+            <li>To create Asana tasks and/or send events to Klaviyo or your outbound webhook URL, for the channels you choose to connect.</li>
             <li>To calculate stock-out predictions and reorder dates.</li>
             <li>To send digest email summaries and back-in-stock notifications to subscribed customers.</li>
             <li>To display analytics about your alert history within the app.</li>
@@ -63,7 +68,8 @@ export default function PrivacyPolicy() {
             Your data is retained for as long as your store has the app installed.
             When you uninstall Stock Alert, Shopify sends us a <code>shop/redact</code> webhook
             within 48 hours, which permanently deletes all your store data from our systems —
-            including settings, product tracking records, alert history, and back-in-stock subscribers.
+            including settings, product tracking records, alert history, back-in-stock subscribers,
+            and any connected Slack, Asana, or Klaviyo tokens and configuration.
           </p>
 
           <h2>5. Third-Party Services</h2>
@@ -72,7 +78,11 @@ export default function PrivacyPolicy() {
             <li><strong>Supabase</strong> — database hosting. Subject to <a href="https://supabase.com/privacy" target="_blank" rel="noopener noreferrer">Supabase's Privacy Policy</a>.</li>
             <li><strong>Fly.io</strong> — application hosting. Subject to <a href="https://fly.io/legal/privacy-policy" target="_blank" rel="noopener noreferrer">Fly.io's Privacy Policy</a>.</li>
             <li><strong>SMTP provider</strong> — used to deliver email notifications. Email addresses are passed to our email provider only for the purpose of sending notifications.</li>
-            <li><strong>Slack</strong> — if you configure Slack notifications, alert payloads are sent to the webhook URL you provide. We do not store Slack workspace data.</li>
+            <li><strong>Slack</strong> — if you connect Slack, alert payloads are sent to the workspace and channel you authorize. Subject to <a href="https://slack.com/trust/privacy/privacy-policy" target="_blank" rel="noopener noreferrer">Slack's Privacy Policy</a>.</li>
+            <li><strong>WhatsApp (Meta)</strong> — coming soon. Once available, alerts to a verified WhatsApp number will be delivered via the WhatsApp Business Platform, subject to <a href="https://www.whatsapp.com/legal/privacy-policy" target="_blank" rel="noopener noreferrer">WhatsApp's Privacy Policy</a>.</li>
+            <li><strong>Asana</strong> — if you connect Asana, stock event data (product name, quantity) is sent to create tasks in the workspace and project you choose. Subject to <a href="https://asana.com/privacy" target="_blank" rel="noopener noreferrer">Asana's Privacy Policy</a>.</li>
+            <li><strong>Klaviyo</strong> — if you connect Klaviyo, inventory event data is sent to your own Klaviyo account. Subject to <a href="https://www.klaviyo.com/policies/privacy" target="_blank" rel="noopener noreferrer">Klaviyo's Privacy Policy</a>.</li>
+            <li><strong>Your outbound webhook endpoint</strong> — if you configure one, we POST alert event data to the URL you provide (e.g. Zapier, Make, or your own systems). You are responsible for how that destination handles the data.</li>
           </ul>
 
           <h2>6. GDPR and Your Rights</h2>

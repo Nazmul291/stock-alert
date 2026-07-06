@@ -1,6 +1,6 @@
 export default function TermsOfService() {
   const contactEmail = "nazmul291@gmail.com";
-  const lastUpdated = "June 14, 2026";
+  const lastUpdated = "July 6, 2026";
 
   return (
     <html lang="en">
@@ -34,9 +34,12 @@ export default function TermsOfService() {
           <h2>1. Description of Service</h2>
           <p>
             Stock Alert monitors your Shopify store's inventory levels and sends notifications
-            (email, Slack, or webhook) when products reach low-stock or out-of-stock thresholds.
-            Additional features include digest emails, back-in-stock customer signups, stock-out
-            predictions, and analytics. Features vary by plan (Basic / Professional).
+            (email or Slack, with WhatsApp coming soon) when products reach low-stock or
+            out-of-stock thresholds. You may also connect Asana (to create tasks per stock event), Klaviyo (to send events
+            into your marketing flows), Shopify Flow (to trigger your own workflows), or your own
+            outbound webhook endpoint. Additional features include digest emails, back-in-stock
+            customer signups, stock-out predictions, and analytics. Features vary by plan
+            (Basic / Professional).
           </p>
 
           <h2>2. Eligibility</h2>
@@ -70,20 +73,30 @@ export default function TermsOfService() {
             revoke access at any time by uninstalling the app.
           </p>
 
-          <h2>6. Data and Privacy</h2>
+          <h2>6. Third-Party Integrations</h2>
+          <p>
+            Stock Alert lets you optionally connect third-party services — Slack, WhatsApp, Asana,
+            Klaviyo, Shopify Flow, and outbound webhook endpoints you configure. Connecting these is
+            your choice, and your use of each is also subject to that provider's own terms. We are
+            not responsible for the availability, security, or handling of data by any third-party
+            service you connect, or for how a destination you configure (such as your own webhook
+            endpoint) uses data sent to it.
+          </p>
+
+          <h2>7. Data and Privacy</h2>
           <p>
             Our collection and use of your data is governed by our{" "}
             <a href="/privacy">Privacy Policy</a>, which is incorporated into these Terms by reference.
           </p>
 
-          <h2>7. Availability and Uptime</h2>
+          <h2>8. Availability and Uptime</h2>
           <p>
             We aim for high availability but do not guarantee uninterrupted service. We are not
             liable for missed alerts caused by downtime, Shopify API outages, email delivery
             failures, or network issues beyond our control.
           </p>
 
-          <h2>8. Disclaimer of Warranties</h2>
+          <h2>9. Disclaimer of Warranties</h2>
           <p>
             The Service is provided "as is" and "as available" without warranties of any kind,
             express or implied, including but not limited to merchantability, fitness for a
@@ -91,7 +104,7 @@ export default function TermsOfService() {
             error-free or that alerts will be delivered within any specific timeframe.
           </p>
 
-          <h2>9. Limitation of Liability</h2>
+          <h2>10. Limitation of Liability</h2>
           <p>
             To the maximum extent permitted by law, our total liability to you for any claim
             arising from your use of the Service shall not exceed the fees you paid us in the
@@ -100,34 +113,34 @@ export default function TermsOfService() {
             value, even if we have been advised of the possibility of such damages.
           </p>
 
-          <h2>10. Indemnification</h2>
+          <h2>11. Indemnification</h2>
           <p>
             You agree to indemnify and hold us harmless from any claims, damages, or expenses
             (including reasonable legal fees) arising from your use of the Service or violation
             of these Terms.
           </p>
 
-          <h2>11. Termination</h2>
+          <h2>12. Termination</h2>
           <p>
             Either party may terminate the agreement at any time. You may terminate by
             uninstalling the app. We may suspend or terminate your access if you violate these
             Terms. Upon termination, your data will be deleted per our Privacy Policy.
           </p>
 
-          <h2>12. Changes to These Terms</h2>
+          <h2>13. Changes to These Terms</h2>
           <p>
             We may update these Terms from time to time. The "last updated" date at the top
             reflects any changes. Continued use of the Service after changes constitutes
             acceptance of the updated Terms.
           </p>
 
-          <h2>13. Governing Law</h2>
+          <h2>14. Governing Law</h2>
           <p>
             These Terms are governed by the laws of the jurisdiction in which we operate,
             without regard to conflict of law provisions.
           </p>
 
-          <h2>14. Contact</h2>
+          <h2>15. Contact</h2>
           <p>
             For questions about these Terms, contact us at:{" "}
             <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
