@@ -13,6 +13,11 @@ import { invalidateShopCache } from "../lib/shop-cache.server";
 // getEmbeddedAppUrl() does (see @shopify/shopify-api's get-embedded-app-url.js
 // — decodeHost is a plain atob()), just with our own path appended.
 function embeddedAdminUrl(host: string, path: string, extra = ""): string {
+  // Empty `host` decodes to an empty string, which would otherwise produce
+  // `https:///apps/{key}...` — browsers collapse that missing authority and
+  // treat "apps" as the hostname, landing on a dead `https://apps/...` URL.
+  // Fall back to the bare (non-embedded) app path instead.
+  if (!host) return `${path}${extra}`;
   const decodedHost = Buffer.from(host, "base64").toString("utf-8");
   return `https://${decodedHost}/apps/${process.env.SHOPIFY_API_KEY}${path}${extra}`;
 }
