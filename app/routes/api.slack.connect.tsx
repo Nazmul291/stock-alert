@@ -13,7 +13,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const token = url.searchParams.get("token");
 
   const ctx = token ? await resolveSlackOAuthState(token) : null;
-  if (!ctx) {
+  // `host` is required to build the embedded admin.shopify.com redirect at
+  // the end of the round-trip (see api.slack.callback.tsx's embeddedAdminUrl)
+  // — if the Integrations page was loaded without it (e.g. hit outside the
+  // normal embedded Shopify admin iframe), bail out now rather than
+  // completing an OAuth grant we can't cleanly return the merchant from.
+  if (!ctx || !ctx.host) {
     return redirect("/app/integrations?slack_error=1");
   }
 
