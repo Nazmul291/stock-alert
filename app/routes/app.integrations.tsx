@@ -754,7 +754,7 @@ function IntegrationsContent({
               connected={isPro && settings.asanaConnected}
               locked={!isPro}
               lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
-              connectLabel="Connect to Asana"
+              connectLabel="Connect"
               hideEdit
               onConnect={() => {
                 window.open(`/api/asana/connect?token=${encodeURIComponent(asanaConnectToken)}`, "_blank", "noopener,noreferrer");
