@@ -69,12 +69,12 @@ const BASIC_FEATURES = [
 const PRO_FEATURES = [
   "Everything in Basic, plus:",
   "One-click Slack Connect",
+  "Asana task creation",
   "Klaviyo integration",
   "Outbound webhook (Zapier/Make/ERP)",
   "Per-product thresholds",
   "Auto-republish when restocked",
   "Multiple notification recipients",
-  "White-label branded emails",
 ];
 
 // Full side-by-side breakdown shown below the plan cards — includes rows
@@ -88,6 +88,7 @@ const FEATURE_COMPARISON: { label: string; basic: string | boolean; pro: string 
   { label: "Back-in-stock storefront widget", basic: true, pro: true },
   { label: "Global threshold settings", basic: true, pro: true },
   { label: "One-click Slack Connect", basic: false, pro: true },
+  { label: "Asana task creation", basic: false, pro: true },
   { label: "Klaviyo integration", basic: false, pro: true },
   { label: "Outbound webhook (Zapier/Make/ERP)", basic: false, pro: true },
   { label: "Per-product thresholds", basic: false, pro: true },
