@@ -8,8 +8,7 @@ type IntegrationsValues = {
   slackChannelName: string;
   whatsappNotifications: boolean;
   whatsappPhone: string;
-  whatsappPhoneNumberId: string;
-  whatsappAccessToken: string;
+  whatsappPhoneVerified: boolean;
   outboundWebhookUrl: string;
   klaviyoEnabled: boolean;
 };
@@ -41,8 +40,7 @@ export async function loadIntegrationsData(shop: string): Promise<IntegrationsDa
           slackChannelName: settings.slackChannelName ?? "",
           whatsappNotifications: settings.whatsappNotifications,
           whatsappPhone: settings.whatsappPhone ?? "",
-          whatsappPhoneNumberId: settings.whatsappPhoneNumberId ?? "",
-          whatsappAccessToken: settings.whatsappAccessToken ?? "",
+          whatsappPhoneVerified: settings.whatsappPhoneVerified,
           outboundWebhookUrl: settings.outboundWebhookUrl ?? "",
           // Same reasoning as slackWebhookUrl above — the API key is entered
           // through a modal now and never needs to round-trip back to the
@@ -57,8 +55,7 @@ export async function loadIntegrationsData(shop: string): Promise<IntegrationsDa
           slackChannelName: "",
           whatsappNotifications: false,
           whatsappPhone: "",
-          whatsappPhoneNumberId: "",
-          whatsappAccessToken: "",
+          whatsappPhoneVerified: false,
           outboundWebhookUrl: "",
           klaviyoEnabled: false,
         },

@@ -81,8 +81,9 @@ model StoreSettings {
   monitoringTags         String?  @map("monitoring_tags") @db.VarChar(500)
   whatsappNotifications  Boolean  @default(false) @map("whatsapp_notifications")
   whatsappPhone          String?  @map("whatsapp_phone") @db.VarChar(30)
-  whatsappPhoneNumberId  String?  @map("whatsapp_phone_number_id") @db.VarChar(50)
-  whatsappAccessToken    String?  @map("whatsapp_access_token") @db.VarChar(500)
+  whatsappPhoneVerified          Boolean   @default(false) @map("whatsapp_phone_verified")
+  whatsappVerificationCode       String?   @map("whatsapp_verification_code") @db.VarChar(10)
+  whatsappVerificationExpiresAt  DateTime? @map("whatsapp_verification_expires_at") @db.Timestamptz
   klaviyoEnabled         Boolean  @default(false) @map("klaviyo_enabled")
   klaviyoApiKey          String?  @map("klaviyo_api_key") @db.VarChar(500)
   slackTeamName          String?  @map("slack_team_name") @db.VarChar(200)

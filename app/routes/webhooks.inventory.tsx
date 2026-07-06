@@ -276,6 +276,9 @@ async function processInventoryUpdate(
     brandSenderName: settings.brandSenderName,
     klaviyoEnabled: settings.klaviyoEnabled,
     klaviyoApiKey: settings.klaviyoApiKey,
+    whatsappNotifications: settings.whatsappNotifications,
+    whatsappPhone: settings.whatsappPhone,
+    whatsappPhoneVerified: settings.whatsappPhoneVerified,
   };
   const productCtx = {
     id: productId,

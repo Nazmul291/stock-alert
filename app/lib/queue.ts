@@ -22,6 +22,9 @@ export interface SettingsCtx {
   brandLogoUrl?: string | null;
   brandColor?: string | null;
   brandSenderName?: string | null;
+  whatsappNotifications?: boolean;
+  whatsappPhone?: string | null;
+  whatsappPhoneVerified?: boolean;
 }
 
 export interface ProductCtx {

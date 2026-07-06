@@ -7,12 +7,13 @@ import prisma from "../db.server";
 import { sendTestNotification } from "../lib/notifications";
 import { getCachedSettings, getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { revokeSlackToken, mintSlackOAuthState } from "../lib/slack-oauth.server";
+import { sendWhatsAppTemplate } from "../lib/whatsapp.server";
 import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { IntegrationsData } from "../lib/integrations-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import {
-  ChannelCard, ConnectRow, ConnectModal, TestResultBanner, inputStyle, fieldLabel, helpText,
+  ConnectRow, ConnectModal, TestResultBanner, inputStyle, fieldLabel, helpText,
   type TestResult,
 } from "../components/IntegrationControls";
 
@@ -82,8 +83,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         slackWebhookUrl: settings.slackWebhookUrl,
         whatsappNotifications: settings.whatsappNotifications,
         whatsappPhone: settings.whatsappPhone,
-        whatsappPhoneNumberId: settings.whatsappPhoneNumberId,
-        whatsappAccessToken: settings.whatsappAccessToken,
+        whatsappPhoneVerified: settings.whatsappPhoneVerified,
         klaviyoEnabled: settings.klaviyoEnabled,
         klaviyoApiKey: settings.klaviyoApiKey,
       },
@@ -110,6 +110,79 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     invalidateShopCache(shop);
     await syncNotificationsConfigured(shop);
     return { intent: "disconnect_slack", success: true };
+  }
+
+  // WhatsApp — one number Stock Alert owns sends to whatever personal phone
+  // the merchant enters, so "connecting" is just proving they own that number:
+  // send a code, they type it back. No Meta login involved at all.
+  if (intent === "send_whatsapp_code") {
+    const phone = ((form.get("phone") as string) ?? "").trim();
+    if (!phone) {
+      return { intent: "send_whatsapp_code", success: false as const, error: "Enter a WhatsApp number." };
+    }
+
+    const settings = await getCachedSettings(shop);
+    // A code was already sent less than a minute ago (expiry is now+10min) —
+    // block hammering "resend" rather than firing a fresh WhatsApp message
+    // every click.
+    if (settings?.whatsappVerificationExpiresAt && settings.whatsappVerificationExpiresAt.getTime() - Date.now() > 9 * 60 * 1000) {
+      return { intent: "send_whatsapp_code", success: false as const, error: "Please wait a moment before requesting another code." };
+    }
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    try {
+      await sendWhatsAppTemplate(phone, "stock_alert_otp", [code]);
+    } catch (err) {
+      return { intent: "send_whatsapp_code", success: false as const, error: err instanceof Error ? err.message : "Could not send the verification code." };
+    }
+
+    await prisma.storeSettings.upsert({
+      where: { shop },
+      update: { whatsappPhone: phone, whatsappVerificationCode: code, whatsappVerificationExpiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+      create: { shop, whatsappPhone: phone, whatsappVerificationCode: code, whatsappVerificationExpiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+    });
+    invalidateShopCache(shop);
+    return { intent: "send_whatsapp_code", success: true };
+  }
+
+  if (intent === "verify_whatsapp_code") {
+    const code = ((form.get("code") as string) ?? "").trim();
+    const settings = await getCachedSettings(shop);
+    const codeMatches = !!code && !!settings?.whatsappVerificationCode && code === settings.whatsappVerificationCode;
+    const notExpired = !!settings?.whatsappVerificationExpiresAt && settings.whatsappVerificationExpiresAt.getTime() > Date.now();
+    if (!codeMatches || !notExpired) {
+      return { intent: "verify_whatsapp_code", success: false as const, error: "Incorrect or expired code." };
+    }
+
+    await prisma.storeSettings.update({
+      where: { shop },
+      data: {
+        whatsappPhoneVerified: true,
+        whatsappNotifications: true,
+        whatsappVerificationCode: null,
+        whatsappVerificationExpiresAt: null,
+      },
+    });
+    invalidateShopCache(shop);
+    await syncNotificationsConfigured(shop);
+    return { intent: "verify_whatsapp_code", success: true };
+  }
+
+  if (intent === "disconnect_whatsapp") {
+    await prisma.storeSettings.upsert({
+      where: { shop },
+      update: {
+        whatsappNotifications: false,
+        whatsappPhoneVerified: false,
+        whatsappPhone: null,
+        whatsappVerificationCode: null,
+        whatsappVerificationExpiresAt: null,
+      },
+      create: { shop, whatsappNotifications: false },
+    });
+    invalidateShopCache(shop);
+    await syncNotificationsConfigured(shop);
+    return { intent: "disconnect_whatsapp", success: true };
   }
 
   if (intent === "save_email") {
@@ -180,23 +253,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { intent: "disconnect_klaviyo", success: true };
   }
 
-  // General save — WhatsApp + Outbound Webhook only. Email, Slack, and
-  // Klaviyo are each managed by their own scoped connect/disconnect intents
-  // above via modals, not this form.
+  // General save — Outbound Webhook only. Email, Slack, Klaviyo, and WhatsApp
+  // are each managed by their own scoped connect/disconnect intents above, not
+  // this form.
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? "basic";
   const isPro = plan === "pro";
 
-  const bool = (key: string) => form.get(key) === "true";
-  const rawWhatsappPhone = ((form.get("whatsappPhone") as string) ?? "").trim();
-  const rawWhatsappPhoneNumberId = ((form.get("whatsappPhoneNumberId") as string) ?? "").trim();
-  const rawWhatsappAccessToken = ((form.get("whatsappAccessToken") as string) ?? "").trim();
-
   const data = {
-    whatsappNotifications: bool("whatsappNotifications"),
-    whatsappPhone: rawWhatsappPhone || null,
-    whatsappPhoneNumberId: rawWhatsappPhoneNumberId || null,
-    whatsappAccessToken: rawWhatsappAccessToken || null,
     ...(isPro ? { outboundWebhookUrl: ((form.get("outboundWebhookUrl") as string) ?? "").trim() || null } : {}),
   };
 
@@ -243,7 +307,13 @@ export default function IntegrationsPage() {
   );
 }
 
-function IntegrationsContent({ data, slackConnectToken, retry }: { data: IntegrationsData; slackConnectToken: string; retry: () => void }) {
+function IntegrationsContent({
+  data, slackConnectToken, retry,
+}: {
+  data: IntegrationsData;
+  slackConnectToken: string;
+  retry: () => void;
+}) {
   const { plan, storeEmail, settings } = data;
   const isPro = plan === "pro";
 
@@ -251,9 +321,6 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
   const saving = saveFetcher.state !== "idle";
   const formRef = useRef<HTMLFormElement>(null);
 
-  const [whatsappPhone, setWhatsappPhone] = useState(settings.whatsappPhone);
-  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState(settings.whatsappPhoneNumberId);
-  const [whatsappAccessToken, setWhatsappAccessToken] = useState(settings.whatsappAccessToken);
   const [outboundWebhookUrl, setOutboundWebhookUrl] = useState(settings.outboundWebhookUrl);
   const [isDirty, setIsDirty] = useState(false);
 
@@ -262,9 +329,6 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
   }
 
   function handleDiscard() {
-    setWhatsappPhone(settings.whatsappPhone);
-    setWhatsappPhoneNumberId(settings.whatsappPhoneNumberId);
-    setWhatsappAccessToken(settings.whatsappAccessToken);
     setOutboundWebhookUrl(settings.outboundWebhookUrl);
     formRef.current?.reset();
     setIsDirty(false);
@@ -279,6 +343,20 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
 
   const disconnectFetcher = useFetcher<typeof action>();
   const disconnecting = disconnectFetcher.state !== "idle";
+
+  // WhatsApp — connect/disconnect via modal, same pattern as Email/Klaviyo,
+  // but with an extra step: phone number, then the code sent to it.
+  const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
+  const [whatsappStep, setWhatsappStep] = useState<"phone" | "code">("phone");
+  const [whatsappPhoneInput, setWhatsappPhoneInput] = useState(settings.whatsappPhone);
+  const [whatsappCodeInput, setWhatsappCodeInput] = useState("");
+  const [whatsappError, setWhatsappError] = useState<string | null>(null);
+  const whatsappSendFetcher = useFetcher<typeof action>();
+  const whatsappSending = whatsappSendFetcher.state !== "idle";
+  const whatsappVerifyFetcher = useFetcher<typeof action>();
+  const whatsappVerifying = whatsappVerifyFetcher.state !== "idle";
+  const whatsappDisconnectFetcher = useFetcher<typeof action>();
+  const whatsappDisconnecting = whatsappDisconnectFetcher.state !== "idle";
 
   // Email — connect/disconnect via modal, same pattern as Slack/Klaviyo below.
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -353,6 +431,38 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
     if (d?.intent === "disconnect_klaviyo" && d?.success) retry();
   }, [klaviyoDisconnectFetcher.data]);
 
+  useEffect(() => {
+    const d = whatsappSendFetcher.data as any;
+    if (d?.intent === "send_whatsapp_code") {
+      if (d.success) {
+        setWhatsappStep("code");
+        setWhatsappError(null);
+      } else {
+        setWhatsappError(d.error ?? "Something went wrong.");
+      }
+    }
+  }, [whatsappSendFetcher.data]);
+
+  useEffect(() => {
+    const d = whatsappVerifyFetcher.data as any;
+    if (d?.intent === "verify_whatsapp_code") {
+      if (d.success) {
+        setWhatsappModalOpen(false);
+        setWhatsappError(null);
+        setWhatsappStep("phone");
+        setWhatsappCodeInput("");
+        retry();
+      } else {
+        setWhatsappError(d.error ?? "Incorrect or expired code.");
+      }
+    }
+  }, [whatsappVerifyFetcher.data]);
+
+  useEffect(() => {
+    const d = whatsappDisconnectFetcher.data as any;
+    if (d?.intent === "disconnect_whatsapp" && d?.success) retry();
+  }, [whatsappDisconnectFetcher.data]);
+
   const saveData = saveFetcher.data as any;
   const saveSuccess = saveData && saveData.intent === "save" && saveData.success;
 
@@ -363,15 +473,15 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
 
   function handleSave() {
     const fd = new FormData(formRef.current ?? undefined);
-    fd.set("whatsappNotifications", "false");
-    fd.set("whatsappPhone", whatsappPhone);
-    fd.set("whatsappPhoneNumberId", whatsappPhoneNumberId);
-    fd.set("whatsappAccessToken", whatsappAccessToken);
     fd.set("outboundWebhookUrl", outboundWebhookUrl);
     saveFetcher.submit(fd, { method: "post" });
   }
 
-  const noChannelsConfigured = !settings.emailNotifications && !(settings.slackConnected && isPro) && !(settings.klaviyoEnabled && isPro);
+  const noChannelsConfigured =
+    !settings.emailNotifications &&
+    !(settings.slackConnected && isPro) &&
+    !(settings.klaviyoEnabled && isPro) &&
+    !settings.whatsappPhoneVerified;
 
   return (
     <>
@@ -423,7 +533,7 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
             connected={isPro && settings.slackConnected}
             locked={!isPro}
             lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
-            connectLabel="Connect to Slack"
+            connectLabel="Connect"
             hideEdit
             onConnect={() => {
               window.open(`/api/slack/connect?token=${encodeURIComponent(slackConnectToken)}`, "_blank", "noopener,noreferrer");
@@ -439,8 +549,9 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
             }
           />
 
-          {/* WhatsApp channel card */}
-          <ChannelCard
+          {/* WhatsApp — one number Stock Alert owns; "connecting" just proves
+              the merchant owns the personal phone they want alerts sent to */}
+          <ConnectRow
             icon={
               <img
                 src="https://static.whatsapp.net/rsrc.php/y1/r/FJbTMJqMap7.svg"
@@ -452,61 +563,27 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
               />
             }
             title="WhatsApp"
-            badge="Coming Soon"
-            badgeColor="#6b7280"
-            enabled={false}
-            disabled={true}
-            onToggle={undefined}
-          >
-            <div>
-              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "14px 16px", marginBottom: 12 }}>
-                <p style={{ fontWeight: 600, fontSize: 13, color: "#166534", margin: "0 0 8px" }}>How to set up WhatsApp Business API</p>
-                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#4b5563", lineHeight: 1.8 }}>
-                  <li>Go to <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>developers.facebook.com</a> → create an app</li>
-                  <li>Add the <strong>WhatsApp</strong> product to your app</li>
-                  <li>Copy your <strong>Phone Number ID</strong> and generate a <strong>permanent access token</strong></li>
-                  <li>Enter the number you want alerts sent to below (include country code, e.g. 14155552671)</li>
-                </ol>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-                <div>
-                  <label style={fieldLabel}>Phone Number ID</label>
-                  <input
-                    type="text"
-                    value={whatsappPhoneNumberId}
-                    onChange={(e) => { setWhatsappPhoneNumberId(e.target.value); markDirty(); }}
-                    placeholder="123456789012345"
-                    style={inputStyle()}
-                  />
-                  <p style={helpText}>From Meta Developer Console → WhatsApp → API Setup.</p>
-                </div>
-                <div>
-                  <label style={fieldLabel}>Recipient phone</label>
-                  <input
-                    type="text"
-                    value={whatsappPhone}
-                    onChange={(e) => { setWhatsappPhone(e.target.value); markDirty(); }}
-                    placeholder="14155552671"
-                    style={inputStyle()}
-                  />
-                  <p style={helpText}>Your WhatsApp number with country code, no +.</p>
-                </div>
-              </div>
-
-              <div>
-                <label style={fieldLabel}>Access token</label>
-                <input
-                  type="password"
-                  value={whatsappAccessToken}
-                  onChange={(e) => { setWhatsappAccessToken(e.target.value); markDirty(); }}
-                  placeholder="EAAxxxxx…"
-                  style={inputStyle()}
-                />
-                <p style={helpText}>Permanent token from Meta System User or Developer Console.</p>
-              </div>
-            </div>
-          </ChannelCard>
+            connected={settings.whatsappPhoneVerified}
+            locked
+            lockedNode={<span style={{ color: "#9ca3af", fontSize: 13 }}>Coming Soon</span>}
+            hideEdit
+            onConnect={() => {
+              setWhatsappPhoneInput(settings.whatsappPhone);
+              setWhatsappCodeInput("");
+              setWhatsappStep("phone");
+              setWhatsappError(null);
+              setWhatsappModalOpen(true);
+            }}
+            onDisconnect={() => {
+              if (confirm("Disconnect WhatsApp? Alerts will stop sending until you reconnect.")) {
+                whatsappDisconnectFetcher.submit({ intent: "disconnect_whatsapp" }, { method: "post" });
+              }
+            }}
+            disconnecting={whatsappDisconnecting}
+            connectedLabel={
+              <>Connected to <strong>{settings.whatsappPhone}</strong>.</>
+            }
+          />
 
           {/* Test notification — plain button to avoid nested-form issue */}
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -707,6 +784,61 @@ function IntegrationsContent({ data, slackConnectToken, retry }: { data: Integra
             Create one in Klaviyo under <strong>Settings → API Keys → Create Private API Key</strong>. Needs
             write access to Events and Profiles.
           </p>
+        </ConnectModal>
+      )}
+
+      {whatsappModalOpen && (
+        <ConnectModal
+          title="WhatsApp"
+          icon={
+            <img
+              src="https://static.whatsapp.net/rsrc.php/y1/r/FJbTMJqMap7.svg"
+              alt=""
+              width={20}
+              height={20}
+              loading="lazy"
+              style={{ display: "block" }}
+            />
+          }
+          onClose={() => setWhatsappModalOpen(false)}
+          onSubmit={() => {
+            if (whatsappStep === "phone") {
+              whatsappSendFetcher.submit({ intent: "send_whatsapp_code", phone: whatsappPhoneInput }, { method: "post" });
+            } else {
+              whatsappVerifyFetcher.submit({ intent: "verify_whatsapp_code", code: whatsappCodeInput }, { method: "post" });
+            }
+          }}
+          submitting={whatsappStep === "phone" ? whatsappSending : whatsappVerifying}
+          submitLabel={whatsappStep === "phone" ? "Send code" : "Verify"}
+          error={whatsappError}
+        >
+          {whatsappStep === "phone" ? (
+            <>
+              <label style={fieldLabel}>WhatsApp number</label>
+              <input
+                type="text"
+                value={whatsappPhoneInput}
+                onChange={(e) => setWhatsappPhoneInput(e.target.value)}
+                placeholder="14155552671"
+                style={inputStyle(!!whatsappError)}
+                autoFocus
+              />
+              <p style={helpText}>Include country code, no +. We&apos;ll text you a verification code on WhatsApp.</p>
+            </>
+          ) : (
+            <>
+              <label style={fieldLabel}>Verification code</label>
+              <input
+                type="text"
+                value={whatsappCodeInput}
+                onChange={(e) => setWhatsappCodeInput(e.target.value)}
+                placeholder="123456"
+                style={inputStyle(!!whatsappError)}
+                autoFocus
+              />
+              <p style={helpText}>Sent to {whatsappPhoneInput} via WhatsApp. Expires in 10 minutes.</p>
+            </>
+          )}
         </ConnectModal>
       )}
 
