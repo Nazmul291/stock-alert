@@ -1116,7 +1116,7 @@ function AsanaEventRow({
 }) {
   const [projectGid, setProjectGid] = useState(mapping?.projectGid ?? "");
   const [sectionGid, setSectionGid] = useState(mapping?.sectionGid ?? "");
-  const sectionsFetcher = useFetcher<{ sections: { gid: string; name: string }[] }>();
+  const sectionsFetcher = useFetcher<{ sections: { gid: string; name: string }[]; error?: string }>();
   const saveFetcher = useFetcher<typeof action>();
 
   useEffect(() => {
@@ -1128,6 +1128,7 @@ function AsanaEventRow({
   }, [projectGid]);
 
   const sections = sectionsFetcher.data?.sections ?? [];
+  const sectionsError = sectionsFetcher.data?.error;
 
   function save(newProjectGid: string, newSectionGid: string) {
     const project = projects.find((p) => p.gid === newProjectGid);
@@ -1183,6 +1184,9 @@ function AsanaEventRow({
             ))}
           </select>
         </div>
+      )}
+      {projectGid && sections.length === 0 && sectionsError && (
+        <p style={{ ...helpText, color: "#b91c1c", gridColumn: "1 / -1", margin: 0 }}>{sectionsError}</p>
       )}
     </div>
   );

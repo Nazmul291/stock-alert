@@ -32,19 +32,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   authorizeUrl.searchParams.set("client_id", process.env.ASANA_CLIENT_ID ?? "");
   authorizeUrl.searchParams.set("redirect_uri", redirectUri);
   authorizeUrl.searchParams.set("state", state);
-  // Required once the app is configured with granular Permission Scopes in
-  // Asana's developer console (rather than the legacy default/identity
-  // grant) — omitting this causes Asana to fall back to requesting default
-  // identity scopes, which such apps are no longer allowed to request,
-  // surfacing as a "forbidden_scopes" error. There's no standalone
-  // "sections" scope — GET /projects/{gid}/sections is covered by
-  // projects:read and POST /sections/{gid}/addTask by tasks:write (see
-  // https://developers.asana.com/docs/oauth-scopes), so these five plus
-  // users:read/workspaces:read are everything this app needs.
-  authorizeUrl.searchParams.set(
-    "scope",
-    "users:read workspaces:read projects:read tasks:read tasks:write",
-  );
+  // No `scope` param here on purpose. GET /projects/{gid}/sections (used to
+  // populate the per-event "Group" picker) isn't available under Asana's
+  // granular Permission Scopes at all — it 400s with "Full permissions are
+  // required to use this endpoint" regardless of which scopes are granted.
+  // So this app is configured in Asana's developer console with "Full
+  // permissions" (legacy default grant) instead of granular scopes — and
+  // Asana rejects the authorize request as forbidden_scopes if a `scope`
+  // param is present while the app is in that mode.
 
   return redirect(authorizeUrl.toString());
 };
