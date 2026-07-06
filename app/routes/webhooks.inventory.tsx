@@ -279,6 +279,9 @@ async function processInventoryUpdate(
     whatsappNotifications: settings.whatsappNotifications,
     whatsappPhone: settings.whatsappPhone,
     whatsappPhoneVerified: settings.whatsappPhoneVerified,
+    asanaEnabled: settings.asanaEnabled,
+    asanaAccessToken: settings.asanaAccessToken,
+    asanaWorkspaceGid: settings.asanaWorkspaceGid,
   };
   const productCtx = {
     id: productId,

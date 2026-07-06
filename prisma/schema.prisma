@@ -89,6 +89,13 @@ model StoreSettings {
   slackTeamName          String?  @map("slack_team_name") @db.VarChar(200)
   slackChannelName       String?  @map("slack_channel_name") @db.VarChar(200)
   slackAccessToken       String?  @map("slack_access_token") @db.VarChar(500)
+  asanaEnabled           Boolean   @default(false) @map("asana_enabled")
+  asanaAccessToken       String?   @map("asana_access_token") @db.VarChar(500)
+  asanaRefreshToken      String?   @map("asana_refresh_token") @db.VarChar(500)
+  asanaTokenExpiresAt    DateTime? @map("asana_token_expires_at") @db.Timestamptz
+  asanaUserName          String?   @map("asana_user_name") @db.VarChar(200)
+  asanaWorkspaceGid      String?   @map("asana_workspace_gid") @db.VarChar(50)
+  asanaWorkspaceName     String?   @map("asana_workspace_name") @db.VarChar(200)
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -96,6 +103,22 @@ model StoreSettings {
 
   @@index([shop])
   @@map("store_settings")
+}
+
+model AsanaEventMapping {
+  id          String   @id @default(uuid()) @db.Uuid
+  shop        String
+  eventType   String   @db.VarChar(20) // "low_stock" | "out_of_stock" | "restock"
+  projectGid  String   @map("project_gid") @db.VarChar(50)
+  projectName String   @map("project_name") @db.VarChar(200)
+  sectionGid  String?  @map("section_gid") @db.VarChar(50)
+  sectionName String?  @map("section_name") @db.VarChar(200)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([shop, eventType])
+  @@index([shop])
+  @@map("asana_event_mapping")
 }
 
 model InventoryTracking {

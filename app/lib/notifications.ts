@@ -13,6 +13,7 @@ import {
 import { fireFlowTrigger } from './flow-trigger.server';
 import { sendKlaviyoEvent } from './klaviyo.server';
 import { sendWhatsAppTemplate } from './whatsapp.server';
+import { getValidAsanaAccessToken, createAsanaTask } from './asana.server';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
@@ -40,6 +41,31 @@ interface SettingsContext {
   whatsappPhoneVerified?: boolean;
   klaviyoEnabled?: boolean;
   klaviyoApiKey?: string | null;
+  asanaEnabled?: boolean;
+  asanaAccessToken?: string | null;
+  asanaWorkspaceGid?: string | null;
+}
+
+// Looked up directly (matches the existing direct-Prisma convention already
+// used in this file — see logAlert's $transaction and
+// sendBackInStockNotifications' subscriber lookup below) rather than being
+// threaded through SettingsContext, since mappings are per-event, not a flat
+// setting. Never throws — a missing/failed mapping just means no task, same
+// contract as every other channel here.
+async function createAsanaTaskForEvent(
+  shop: string,
+  eventType: 'low_stock' | 'out_of_stock' | 'restock',
+  workspaceGid: string,
+  name: string,
+  notes: string,
+): Promise<void> {
+  const mapping = await prisma.asanaEventMapping.findUnique({ where: { shop_eventType: { shop, eventType } } });
+  if (!mapping) return;
+
+  const accessToken = await getValidAsanaAccessToken(shop);
+  if (!accessToken) return;
+
+  await createAsanaTask(accessToken, workspaceGid, mapping.projectGid, mapping.sectionGid, name, notes);
 }
 
 // Stock alerts are proactive/business-initiated, so WhatsApp requires sending
@@ -215,6 +241,21 @@ export async function sendLowStockAlert(
     }
   }
 
+  if (settings.asanaEnabled && settings.asanaAccessToken && settings.asanaWorkspaceGid) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await createAsanaTaskForEvent(
+        store.shop,
+        'low_stock',
+        settings.asanaWorkspaceGid,
+        `Low Stock: ${product.title}${variantSuffix}`,
+        `Only ${currentQuantity} units left (threshold: ${threshold}).\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Low stock Asana task failed:', err);
+    }
+  }
+
   // Flow is its own independent notification channel — fire it regardless of
   // whether email/Slack are configured or succeeded.
   await fireFlowTrigger(store.shop, 'low-stock', {
@@ -322,6 +363,21 @@ export async function sendOutOfStockAlert(
       );
     } catch (err) {
       console.error('[Notifications] Out of stock WhatsApp failed:', err);
+    }
+  }
+
+  if (settings.asanaEnabled && settings.asanaAccessToken && settings.asanaWorkspaceGid) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await createAsanaTaskForEvent(
+        store.shop,
+        'out_of_stock',
+        settings.asanaWorkspaceGid,
+        `Out of Stock: ${product.title}${variantSuffix}`,
+        `This product is now sold out.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Out of stock Asana task failed:', err);
     }
   }
 
@@ -540,6 +596,21 @@ export async function sendRestockAlert(
       );
     } catch (err) {
       console.error('[Notifications] Restock WhatsApp failed:', err);
+    }
+  }
+
+  if (settings.asanaEnabled && settings.asanaAccessToken && settings.asanaWorkspaceGid) {
+    try {
+      const variantSuffix = variantTitle ? ` (${variantTitle})` : '';
+      await createAsanaTaskForEvent(
+        store.shop,
+        'restock',
+        settings.asanaWorkspaceGid,
+        `Restock: ${product.title}${variantSuffix}`,
+        `Back in stock with ${currentQuantity} units.\n\n${adminProductUrl(store.shop, productId, product.variantId)}`,
+      );
+    } catch (err) {
+      console.error('[Notifications] Restock Asana task failed:', err);
     }
   }
 
