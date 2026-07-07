@@ -13,7 +13,7 @@ import {
 import { fireFlowTrigger } from './flow-trigger.server';
 import { sendKlaviyoEvent } from './klaviyo.server';
 import { sendWhatsAppTemplate } from './whatsapp.server';
-import { getValidAsanaAccessToken, createAsanaTask } from './asana.server';
+import { getValidAsanaAccessToken, createAsanaTask, createAsanaSubtask, AsanaApiError } from './asana.server';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
@@ -46,12 +46,28 @@ interface SettingsContext {
   asanaWorkspaceGid?: string | null;
 }
 
+const ASANA_EVENT_LABELS: Record<'low_stock' | 'out_of_stock' | 'restock', string> = {
+  low_stock: 'Low Stock',
+  out_of_stock: 'Out of Stock',
+  restock: 'Restock',
+};
+
 // Looked up directly (matches the existing direct-Prisma convention already
 // used in this file — see logAlert's $transaction and
 // sendBackInStockNotifications' subscriber lookup below) rather than being
 // threaded through SettingsContext, since mappings are per-event, not a flat
 // setting. Never throws — a missing/failed mapping just means no task, same
 // contract as every other channel here.
+//
+// taskMode controls how the event lands in Asana:
+//  - "multi_task" (default): a standalone task per event, same as always.
+//  - "daily": one task per calendar day (UTC) named "<Label> - <date>", with
+//    each event appended as a subtask.
+//  - "lifetime": one task ever, named "<Label>" (no date), reused forever
+//    with each event appended as a subtask.
+// There's a small race window if two events for the same shop/eventType land
+// at nearly the same instant while no parent task exists yet — both could
+// create one. Not worth locking for; worst case is one extra parent task.
 async function createAsanaTaskForEvent(
   shop: string,
   eventType: 'low_stock' | 'out_of_stock' | 'restock',
@@ -65,7 +81,42 @@ async function createAsanaTaskForEvent(
   const accessToken = await getValidAsanaAccessToken(shop);
   if (!accessToken) return;
 
-  await createAsanaTask(accessToken, workspaceGid, mapping.projectGid, mapping.sectionGid, name, notes);
+  const mode = mapping.taskMode ?? 'multi_task';
+  if (mode === 'multi_task') {
+    await createAsanaTask(accessToken, workspaceGid, mapping.projectGid, mapping.sectionGid, name, notes);
+    return;
+  }
+
+  const today = new Date().toISOString().slice(0, 10); // UTC "YYYY-MM-DD"
+  const parentName = mode === 'daily'
+    ? `${ASANA_EVENT_LABELS[eventType]} - ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
+    : ASANA_EVENT_LABELS[eventType];
+
+  async function createNewParent(): Promise<string> {
+    const gid = await createAsanaTask(accessToken!, workspaceGid, mapping!.projectGid, mapping!.sectionGid, parentName, '');
+    await prisma.asanaEventMapping.update({
+      where: { shop_eventType: { shop, eventType } },
+      data: { currentTaskGid: gid, currentTaskDate: mode === 'daily' ? today : null },
+    });
+    return gid;
+  }
+
+  const needsNewParent = mode === 'daily'
+    ? !mapping.currentTaskGid || mapping.currentTaskDate !== today
+    : !mapping.currentTaskGid;
+
+  let parentTaskGid = needsNewParent ? await createNewParent() : mapping.currentTaskGid!;
+
+  try {
+    await createAsanaSubtask(accessToken, parentTaskGid, name, notes);
+  } catch (err) {
+    // The merchant may have deleted/archived the parent task in Asana out
+    // from under us — recreate it once and retry rather than silently
+    // failing every event until someone notices and resets the mapping.
+    if (!(err instanceof AsanaApiError) || err.status !== 404) throw err;
+    parentTaskGid = await createNewParent();
+    await createAsanaSubtask(accessToken, parentTaskGid, name, notes);
+  }
 }
 
 // Stock alerts are proactive/business-initiated, so WhatsApp requires sending

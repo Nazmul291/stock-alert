@@ -23,6 +23,7 @@ export type AsanaMapping = {
   projectName: string;
   sectionGid: string | null;
   sectionName: string | null;
+  taskMode: string;
 };
 
 export type IntegrationsData = {
@@ -48,6 +49,7 @@ export async function loadIntegrationsData(shop: string): Promise<IntegrationsDa
       projectName: m.projectName,
       sectionGid: m.sectionGid,
       sectionName: m.sectionName,
+      taskMode: m.taskMode,
     })),
     settings: settings
       ? {

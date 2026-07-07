@@ -315,13 +315,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const projectName = (form.get("projectName") as string) ?? "";
     const sectionGid = ((form.get("sectionGid") as string) ?? "").trim() || null;
     const sectionName = ((form.get("sectionName") as string) ?? "").trim() || null;
+    const taskModeRaw = (form.get("taskMode") as string) ?? "multi_task";
+    const taskMode = ["multi_task", "daily", "lifetime"].includes(taskModeRaw) ? taskModeRaw : "multi_task";
     if (!["low_stock", "out_of_stock", "restock"].includes(eventType) || !projectGid) {
       return { intent: "save_asana_mapping", success: false as const, error: "Missing project selection." };
     }
     await prisma.asanaEventMapping.upsert({
       where: { shop_eventType: { shop, eventType } },
-      update: { projectGid, projectName, sectionGid, sectionName },
-      create: { shop, eventType, projectGid, projectName, sectionGid, sectionName },
+      // Reset the tracked parent task on any change — a stale gid from
+      // before a mode/project/section change would otherwise get reused.
+      update: { projectGid, projectName, sectionGid, sectionName, taskMode, currentTaskGid: null, currentTaskDate: null },
+      create: { shop, eventType, projectGid, projectName, sectionGid, sectionName, taskMode },
     });
     return { intent: "save_asana_mapping", success: true, eventType };
   }
@@ -1101,9 +1105,10 @@ function IntegrationsContent({
   );
 }
 
-// One row per stock event — project is always required, the "Group" select
-// only appears once a project with sections is picked (an empty sections
-// list means the task is just created directly in the project). Each row
+// One row per stock event — project is always required. The "Group" select
+// is always visible but stays disabled until a project with sections is
+// picked (an empty sections list means the task is just created directly in
+// the project), so the layout doesn't jump around while it loads. Each row
 // auto-saves on change via its own fetcher, independent of the big
 // dirty-tracking Form used for outboundWebhookUrl.
 function AsanaEventRow({
@@ -1116,6 +1121,7 @@ function AsanaEventRow({
 }) {
   const [projectGid, setProjectGid] = useState(mapping?.projectGid ?? "");
   const [sectionGid, setSectionGid] = useState(mapping?.sectionGid ?? "");
+  const [taskMode, setTaskMode] = useState(mapping?.taskMode ?? "multi_task");
   const sectionsFetcher = useFetcher<{ sections: { gid: string; name: string }[]; error?: string }>();
   const saveFetcher = useFetcher<typeof action>();
 
@@ -1129,8 +1135,15 @@ function AsanaEventRow({
 
   const sections = sectionsFetcher.data?.sections ?? [];
   const sectionsError = sectionsFetcher.data?.error;
+  const sectionsLoading = !!projectGid && sectionsFetcher.state !== "idle" && !sectionsFetcher.data;
+  const groupDisabled = !projectGid || sectionsLoading || sections.length === 0;
+  const groupPlaceholder = !projectGid
+    ? "Pick a project first"
+    : sectionsLoading
+    ? "Loading groups…"
+    : "No group (top of project)";
 
-  function save(newProjectGid: string, newSectionGid: string) {
+  function save(newProjectGid: string, newSectionGid: string, newTaskMode: string) {
     const project = projects.find((p) => p.gid === newProjectGid);
     const section = sections.find((s) => s.gid === newSectionGid);
     saveFetcher.submit(
@@ -1141,13 +1154,14 @@ function AsanaEventRow({
         projectName: project?.name ?? "",
         sectionGid: newSectionGid,
         sectionName: section?.name ?? "",
+        taskMode: newTaskMode,
       },
       { method: "post" },
     );
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: sections.length > 0 ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 12 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
       <div>
         <label style={fieldLabel}>{label} — Project</label>
         <select
@@ -1157,7 +1171,7 @@ function AsanaEventRow({
             const newProjectGid = e.target.value;
             setProjectGid(newProjectGid);
             setSectionGid("");
-            save(newProjectGid, "");
+            save(newProjectGid, "", taskMode);
           }}
         >
           <option value="">Not set</option>
@@ -1166,25 +1180,40 @@ function AsanaEventRow({
           ))}
         </select>
       </div>
-      {projectGid && sections.length > 0 && (
-        <div>
-          <label style={fieldLabel}>Group</label>
-          <select
-            style={inputStyle()}
-            value={sectionGid}
-            onChange={(e) => {
-              const newSectionGid = e.target.value;
-              setSectionGid(newSectionGid);
-              save(projectGid, newSectionGid);
-            }}
-          >
-            <option value="">No group (top of project)</option>
-            {sections.map((s) => (
-              <option key={s.gid} value={s.gid}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div>
+        <label style={fieldLabel}>Group</label>
+        <select
+          style={{ ...inputStyle(), ...(groupDisabled ? { background: "#f3f4f6", color: "#9ca3af", cursor: "not-allowed" } : {}) }}
+          value={sectionGid}
+          disabled={groupDisabled}
+          onChange={(e) => {
+            const newSectionGid = e.target.value;
+            setSectionGid(newSectionGid);
+            save(projectGid, newSectionGid, taskMode);
+          }}
+        >
+          <option value="">{groupPlaceholder}</option>
+          {sections.map((s) => (
+            <option key={s.gid} value={s.gid}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label style={fieldLabel}>Task creation</label>
+        <select
+          style={inputStyle()}
+          value={taskMode}
+          onChange={(e) => {
+            const newTaskMode = e.target.value;
+            setTaskMode(newTaskMode);
+            save(projectGid, sectionGid, newTaskMode);
+          }}
+        >
+          <option value="multi_task">One task per event</option>
+          <option value="daily">One task per day (events as subtasks)</option>
+          <option value="lifetime">One task forever (events as subtasks)</option>
+        </select>
+      </div>
       {projectGid && sections.length === 0 && sectionsError && (
         <p style={{ ...helpText, color: "#b91c1c", gridColumn: "1 / -1", margin: 0 }}>{sectionsError}</p>
       )}

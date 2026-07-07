@@ -113,6 +113,14 @@ model AsanaEventMapping {
   projectName String   @map("project_name") @db.VarChar(200)
   sectionGid  String?  @map("section_gid") @db.VarChar(50)
   sectionName String?  @map("section_name") @db.VarChar(200)
+  // "multi_task" (default, one task per event) | "daily" (one task per day,
+  // named with the date, events appended as subtasks) | "lifetime" (one task
+  // ever, no date, events appended as subtasks forever).
+  taskMode        String   @default("multi_task") @map("task_mode") @db.VarChar(20)
+  // gid of the currently-active parent task for "daily"/"lifetime" modes.
+  currentTaskGid  String?  @map("current_task_gid") @db.VarChar(50)
+  // "YYYY-MM-DD" (UTC) the current parent task was created for — "daily" mode only.
+  currentTaskDate String?  @map("current_task_date") @db.VarChar(10)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
