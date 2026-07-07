@@ -25,6 +25,7 @@ const SYNC_PRODUCTS_GRAPHQL = `
         node {
           id title status
           featuredMedia { preview { image { url altText } } }
+          customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { value }
           variants(first: 100) {
             edges {
               node {
@@ -307,6 +308,10 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         const imageUrl = p.featuredMedia?.preview?.image?.url ?? null;
         const imageAlt = p.featuredMedia?.preview?.image?.altText ?? null;
 
+        // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
+        const productThreshold =
+          plan === "pro" && p.customThreshold?.value ? parseInt(p.customThreshold.value) : threshold;
+
         for (const ve of p.variants.edges) {
           const v = ve.node;
           // Skip untracked variants individually rather than skipping the
@@ -316,7 +321,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
           const qty = v.inventoryQuantity ?? 0;
           const status: "in_stock" | "low_stock" | "out_of_stock" =
-            qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
+            qty <= 0 ? "out_of_stock" : qty <= productThreshold ? "low_stock" : "in_stock";
 
           allVariants.push({
             productId: BigInt(productId),
@@ -509,6 +514,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const rawRestockDate = ((form.get("expectedRestockDate") as string) ?? "").trim();
     const expectedRestockDate = rawRestockDate ? new Date(rawRestockDate) : null;
 
+    // Per-product custom thresholds are a Pro feature; ignore the submitted
+    // value for basic stores. Read from the form (rather than re-fetching the
+    // metafield) since this same submission is about to write it below.
+    const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
+    const plan = storeSession?.plan ?? "basic";
+    const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
+    const parsedCustomThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
+    const effectiveThreshold =
+      plan === "pro" && !isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0
+        ? parsedCustomThreshold
+        : threshold;
+
     if (tracked) {
       // Re-derive the authoritative variant list straight from Shopify
       // (rather than trusting a client-submitted snapshot) so this write
@@ -541,7 +558,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       for (const v of variantsFresh) {
         const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
-          v.qty <= 0 ? "out_of_stock" : v.qty <= threshold ? "low_stock" : "in_stock";
+          v.qty <= 0 ? "out_of_stock" : v.qty <= effectiveThreshold ? "low_stock" : "in_stock";
         const existingRow = existingByVariantId.get(v.variantId);
         const effectiveSales = manualDailySales ?? existingRow?.avgDailySales ?? null;
         const stockOutDays = effectiveSales ? Math.min(999, Math.ceil(v.qty / effectiveSales)) : undefined;
@@ -589,7 +606,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (tracked) {
-      const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
       const autoHide = form.get("autoHide") === "true";
       const autoRepublish = form.get("autoRepublish") === "true";
       const customThresholdMetafieldId = ((form.get("customThresholdMetafieldId") as string) ?? "").trim() || null;
@@ -600,9 +616,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         { ownerId, namespace: "stock_alert", key: "auto_republish", value: String(autoRepublish), type: "boolean" },
       ];
 
-      const parsedThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
-      if (!isNaN(parsedThreshold) && parsedThreshold >= 0) {
-        metafieldsToSet.push({ ownerId, namespace: "stock_alert", key: "custom_threshold", value: String(parsedThreshold), type: "number_integer" });
+      if (!isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0) {
+        metafieldsToSet.push({ ownerId, namespace: "stock_alert", key: "custom_threshold", value: String(parsedCustomThreshold), type: "number_integer" });
       }
 
       try {
@@ -1010,7 +1025,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                         </div>
                       </td>
                       <td style={{ padding: "10px 12px", color: "#6b7280" }}>{hasVariants ? `${p.variantCount} variants` : (p.sku ?? "—")}</td>
-                      <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.currentQuantity <= 0 ? "#dc2626" : p.currentQuantity <= 5 ? "#d97706" : "#059669" }}>
+                      <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.inventoryStatus === "out_of_stock" ? "#dc2626" : p.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
                         {isNotTracked ? "—" : p.currentQuantity}
                       </td>
                       <td style={{ padding: "10px 12px", width: 130, minWidth: 130 }}>
@@ -1069,7 +1084,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                                 <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "#fff", borderRadius: 6, border: "1px solid #f0f0f0" }}>
                                   <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{v.variantTitle ?? "—"}</span>
                                   <span style={{ fontSize: 12, color: "#9ca3af" }}>{v.sku ?? "—"}</span>
-                                  <span style={{ fontWeight: 600, fontSize: 13, width: 50, textAlign: "right", color: v.currentQuantity <= 0 ? "#dc2626" : v.currentQuantity <= 5 ? "#d97706" : "#059669" }}>
+                                  <span style={{ fontWeight: 600, fontSize: 13, width: 50, textAlign: "right", color: v.inventoryStatus === "out_of_stock" ? "#dc2626" : v.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
                                     {v.currentQuantity}
                                   </span>
                                   <span style={{ background: vs.bg, color: vs.color, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", width: 90, textAlign: "center" }}>
