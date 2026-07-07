@@ -557,41 +557,57 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const existingByVariantId = new Map(existingRows.map((r) => [r.variantId.toString(), r]));
 
       for (const v of variantsFresh) {
-        const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
-          v.qty <= 0 ? "out_of_stock" : v.qty <= effectiveThreshold ? "low_stock" : "in_stock";
         const existingRow = existingByVariantId.get(v.variantId);
-        const effectiveSales = manualDailySales ?? existingRow?.avgDailySales ?? null;
-        const stockOutDays = effectiveSales ? Math.min(999, Math.ceil(v.qty / effectiveSales)) : undefined;
 
-        await prisma.inventoryTracking.upsert({
-          where: { shop_variantId: { shop, variantId: BigInt(v.variantId) } },
-          update: {
-            currentQuantity: v.qty,
-            inventoryStatus: invStatus,
-            productTitle,
-            variantTitle: v.variantTitle,
-            sku: v.sku,
-            monitoringEnabled,
-            lastCheckedAt: new Date(),
-            manualDailySales,
-            expectedRestockDate,
-            ...(stockOutDays !== undefined ? { stockOutDays } : {}),
-          },
-          create: {
-            shop,
-            productId: BigInt(productId),
-            variantId: BigInt(v.variantId),
-            productTitle,
-            variantTitle: v.variantTitle,
-            sku: v.sku,
-            currentQuantity: v.qty,
-            previousQuantity: v.qty,
-            inventoryStatus: invStatus,
-            monitoringEnabled,
-            manualDailySales,
-            expectedRestockDate,
-          },
-        });
+        if (existingRow) {
+          // currentQuantity/inventoryStatus are deliberately left untouched
+          // here — writing them directly made the real inventory webhook see
+          // "no change" right after a manual edit, silently swallowing its
+          // alert (the webhook is the only place that decides whether to
+          // notify). The webhook is now the sole source of truth for
+          // quantity/status; this save only touches fields it doesn't own.
+          // stockOutDays is recomputed off the currently-stored quantity so
+          // it still updates immediately when just the sales estimate changes.
+          const effectiveSales = manualDailySales ?? existingRow.avgDailySales ?? null;
+          const stockOutDays = effectiveSales
+            ? Math.min(999, Math.ceil(existingRow.currentQuantity / effectiveSales))
+            : undefined;
+          await prisma.inventoryTracking.update({
+            where: { id: existingRow.id },
+            data: {
+              productTitle,
+              variantTitle: v.variantTitle,
+              sku: v.sku,
+              monitoringEnabled,
+              manualDailySales,
+              expectedRestockDate,
+              ...(stockOutDays !== undefined ? { stockOutDays } : {}),
+            },
+          });
+        } else {
+          // First time this variant is tracked — no webhook history exists
+          // yet to fall back on, so seed its baseline quantity/status now
+          // (same reasoning as the PRODUCTS_CREATE webhook: nothing to
+          // compare against yet, so no transition alert is expected here).
+          const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
+            v.qty <= 0 ? "out_of_stock" : v.qty <= effectiveThreshold ? "low_stock" : "in_stock";
+          await prisma.inventoryTracking.create({
+            data: {
+              shop,
+              productId: BigInt(productId),
+              variantId: BigInt(v.variantId),
+              productTitle,
+              variantTitle: v.variantTitle,
+              sku: v.sku,
+              currentQuantity: v.qty,
+              previousQuantity: v.qty,
+              inventoryStatus: invStatus,
+              monitoringEnabled,
+              manualDailySales,
+              expectedRestockDate,
+            },
+          });
+        }
       }
       // Deliberately no pruning here. A single post-mutation re-fetch is
       // exactly the kind of read that can catch Shopify's inventoryItem
