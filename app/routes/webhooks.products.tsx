@@ -3,8 +3,49 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { canAddProduct } from "../lib/plan-enforcement";
 
+// The REST payload's inventory_quantity is only a single location's count,
+// unreliable for multi-location stores — inventoryQuantity on a GraphQL
+// variant is the reliable cross-location total (same field
+// webhooks.inventory.tsx uses). Fetched once per product so a freshly
+// (re)created product is seeded with its true quantity/status instead of
+// guessing — see the PRODUCTS_CREATE handler below for why that matters.
+const PRODUCT_VARIANTS_INVENTORY_QUERY = `
+  query getProductVariantsInventory($id: ID!) {
+    product(id: $id) {
+      customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { value }
+      variants(first: 100) {
+        edges {
+          node { legacyResourceId inventoryQuantity }
+        }
+      }
+    }
+  }
+`;
+
+async function fetchTrueInventory(
+  admin: any,
+  productId: string,
+): Promise<{ qtyByVariantId: Map<string, number>; customThreshold: number | null } | null> {
+  try {
+    const res = await admin.graphql(PRODUCT_VARIANTS_INVENTORY_QUERY, {
+      variables: { id: `gid://shopify/Product/${productId}` },
+    });
+    const json: any = await res.json();
+    const p = json.data?.product;
+    if (!p) return null;
+    const qtyByVariantId = new Map<string, number>();
+    for (const edge of p.variants?.edges ?? []) {
+      qtyByVariantId.set(edge.node.legacyResourceId, edge.node.inventoryQuantity ?? 0);
+    }
+    const customThreshold = p.customThreshold?.value ? parseInt(p.customThreshold.value) : null;
+    return { qtyByVariantId, customThreshold };
+  } catch {
+    return null;
+  }
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { topic, shop, payload } = await authenticate.webhook(request);
+  const { topic, shop, payload, admin } = await authenticate.webhook(request);
   const data = payload as any;
 
   try {
@@ -30,19 +71,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const imageUrl: string | null = data?.image?.src ?? null;
     const imageAlt: string | null = data?.image?.alt ?? null;
 
+    // Seed the true status from the reliable cross-location quantity rather
+    // than the REST payload's (single-location, unreliable) inventory_quantity
+    // or a hardcoded "in_stock" — a product created while already out of
+    // stock would otherwise sit mislabeled "in_stock" until its next real
+    // inventory change, silently swallowing that eventual restock alert
+    // (previousStatus already "in_stock" == no transition == no alert).
+    const [settings, storeSession, trueInventory] = await Promise.all([
+      prisma.storeSettings.findUnique({ where: { shop } }),
+      prisma.session.findFirst({ where: { shop, isOnline: false } }),
+      fetchTrueInventory(admin, productId),
+    ]);
+    const globalThreshold = settings?.lowStockThreshold ?? 5;
+    const effectiveThreshold =
+      storeSession?.plan === "pro" && trueInventory?.customThreshold != null
+        ? trueInventory.customThreshold
+        : globalThreshold;
+    const statusFor = (qty: number): "in_stock" | "low_stock" | "out_of_stock" =>
+      qty <= 0 ? "out_of_stock" : qty <= effectiveThreshold ? "low_stock" : "in_stock";
+
     for (const v of trackedVariants) {
       const variantId = v.id?.toString();
       if (!variantId) continue;
-      const qty = v.inventory_quantity ?? 0;
+      const qty = trueInventory?.qtyByVariantId.get(variantId) ?? (v.inventory_quantity ?? 0);
+      const status = statusFor(qty);
 
       await prisma.inventoryTracking.upsert({
         where: { shop_variantId: { shop, variantId: BigInt(variantId) } },
         update: { productTitle: title, variantTitle: v.title ?? null, sku: v.sku || null, imageUrl, imageAlt },
-        // Seed with "in_stock" regardless of the REST payload quantity.
-        // The REST webhook only carries single-location qty which is unreliable for
-        // multi-location stores. Starting optimistically means the first real
-        // inventory_levels/update transitions in_stock→out_of_stock (correct alert)
-        // rather than out_of_stock→in_stock (false restock alert).
         create: {
           shop,
           productId: BigInt(productId),
@@ -52,7 +108,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           sku: v.sku || null,
           currentQuantity: qty,
           previousQuantity: qty,
-          inventoryStatus: "in_stock",
+          inventoryStatus: status,
           imageUrl,
           imageAlt,
         },
@@ -113,10 +169,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return new Response(null, { status: 200 });
         }
 
+        // Seed the true status from the reliable cross-location quantity —
+        // see the PRODUCTS_CREATE handler above for why hardcoding "in_stock"
+        // silently swallows a real restock alert.
+        const [settings, storeSession, trueInventory] = await Promise.all([
+          prisma.storeSettings.findUnique({ where: { shop } }),
+          prisma.session.findFirst({ where: { shop, isOnline: false } }),
+          fetchTrueInventory(admin, productId),
+        ]);
+        const globalThreshold = settings?.lowStockThreshold ?? 5;
+        const effectiveThreshold =
+          storeSession?.plan === "pro" && trueInventory?.customThreshold != null
+            ? trueInventory.customThreshold
+            : globalThreshold;
+        const statusFor = (qty: number): "in_stock" | "low_stock" | "out_of_stock" =>
+          qty <= 0 ? "out_of_stock" : qty <= effectiveThreshold ? "low_stock" : "in_stock";
+
         for (const v of trackedVariants) {
           const variantId = v.id?.toString();
           if (!variantId) continue;
-          const qty = v.inventory_quantity ?? 0;
+          const qty = trueInventory?.qtyByVariantId.get(variantId) ?? (v.inventory_quantity ?? 0);
 
           await prisma.inventoryTracking.create({
             data: {
@@ -128,9 +200,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               sku: v.sku || null,
               currentQuantity: qty,
               previousQuantity: qty,
-              // Seed with "in_stock" regardless of the REST payload quantity — see
-              // the PRODUCTS_CREATE comment above for why.
-              inventoryStatus: "in_stock",
+              inventoryStatus: statusFor(qty),
               imageUrl,
               imageAlt,
             },
