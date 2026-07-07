@@ -348,7 +348,7 @@ export function getDigestEmailTemplate(data: DigestEmailData, brand: BrandConfig
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
           <tr>
             <td style="border-radius:8px;${brandBg(brand.color)}">
-              <a href="https://admin.shopify.com/store/${storeName}/apps/stock-alert/app/products?filter=out_of_stock"
+              <a href="https://admin.shopify.com/store/${storeName}/apps/${process.env.SHOPIFY_API_KEY}/app/products?filter=out_of_stock"
                 style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
                 View At-Risk Products &rarr;
               </a>
