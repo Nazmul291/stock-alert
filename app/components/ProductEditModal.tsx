@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useFetcher } from "react-router";
 import { InventorySection } from "./InventorySection";
 import type { VariantInventory } from "./InventorySection";
@@ -41,6 +41,38 @@ type ProductSettings = {
   autoRepublish: boolean | null;
 };
 
+// Emitted right after a successful save so the products table can update
+// its display instantly instead of waiting on a page reload — the real
+// inventory webhook is still the only thing that writes currentQuantity/
+// inventoryStatus to the DB (see webhooks.inventory.tsx), this is purely a
+// client-side reflection of what was just submitted.
+export type OptimisticPatch = {
+  monitoringEnabled: boolean;
+  expectedRestockDate: string | null;
+  manualDailySales: number | null;
+  isTracked: boolean;
+  // Present only when tracked and inventory data was loaded — per-variant
+  // quantity/status keyed by variantId, computed from the same threshold
+  // logic the server uses (see webhooks.inventory.tsx's status calc).
+  variantPatches?: Record<string, { currentQuantity: number; inventoryStatus: string }>;
+};
+
+function statusForQty(qty: number, threshold: number): string {
+  return qty <= 0 ? "out_of_stock" : qty <= threshold ? "low_stock" : "in_stock";
+}
+
+// Client-safe duplicate of inventory-rollup.server.ts's classifyProductStatus
+// (that one is .server.ts and gets stripped from the client bundle) — must
+// stay in sync with it. Worst-case status across a product's variants.
+export function rollupVariantStatuses(variantStatuses: string[]): string {
+  if (variantStatuses.length === 0) return "in_stock";
+  if (variantStatuses.every((s) => s === "deactivated")) return "deactivated";
+  const relevant = variantStatuses.filter((s) => s !== "deactivated");
+  if (relevant.every((s) => s === "out_of_stock")) return "out_of_stock";
+  if (relevant.some((s) => s === "out_of_stock" || s === "low_stock")) return "low_stock";
+  return "in_stock";
+}
+
 const SHOPIFY_STATUSES = [
   { value: "ACTIVE", label: "Active" },
   { value: "DRAFT", label: "Draft" },
@@ -54,9 +86,14 @@ type Props = {
   autoHideEnabled: boolean;
   autoRepublishEnabled: boolean;
   onClose: () => void;
+  onSaved?: (patch: OptimisticPatch) => void;
+  // Called if the real response turns out to be an error and arrives after
+  // the modal has already force-closed (see the 1s close timer below) — the
+  // merchant can no longer see the modal's own error banner at that point.
+  onSaveError?: (message: string) => void;
 };
 
-export function ProductEditModal({ product, plan, threshold, autoHideEnabled, autoRepublishEnabled, onClose }: Props) {
+export function ProductEditModal({ product, plan, threshold, autoHideEnabled, autoRepublishEnabled, onClose, onSaved, onSaveError }: Props) {
   const saveFetcher = useFetcher<any>();
   const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
   const enableTrackingFetcher = useFetcher<{ enabledInventory?: { variants: VariantInventory[] }; error?: string }>();
@@ -71,6 +108,8 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
   const [editAutoHide, setEditAutoHide] = useState(autoHideEnabled);
   const [editAutoRepublish, setEditAutoRepublish] = useState(autoRepublishEnabled);
   const [customThresholdMetafieldId, setCustomThresholdMetafieldId] = useState<string | null>(null);
+  const [editRestockDate, setEditRestockDate] = useState(product.expectedRestockDate ?? "");
+  const [editManualSales, setEditManualSales] = useState(product.manualDailySales != null ? String(product.manualDailySales) : "");
 
   // Load inventory and settings on mount
   useEffect(() => {
@@ -91,12 +130,78 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
     setCustomThresholdMetafieldId(s.customThresholdId);
   }, [settingsFetcher.data]);
 
-  // Close on successful save
+  // Closes immediately on a real success, or forcibly after 1s regardless of
+  // whether the request has finished — the save almost always succeeds, and
+  // the optimistic patch already reflects the change, so there's no reason
+  // to make the merchant wait on the round-trip. Guarded so only the first
+  // of "real response" / "1s timer" actually closes things.
+  const closedRef = useRef(false);
+  const forceCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function closeOnce() {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    if (forceCloseTimerRef.current) clearTimeout(forceCloseTimerRef.current);
+    onSaved?.(buildOptimisticPatch());
+    onClose();
+  }
+
   useEffect(() => {
-    if (saveFetcher.state === "idle" && saveFetcher.data && "success" in saveFetcher.data) {
-      onClose();
+    if (saveFetcher.state === "submitting" && !forceCloseTimerRef.current && !closedRef.current) {
+      forceCloseTimerRef.current = setTimeout(closeOnce, 1000);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveFetcher.state]);
+
+  useEffect(() => {
+    if (saveFetcher.state !== "idle" || !saveFetcher.data) return;
+    if ("success" in saveFetcher.data) {
+      closeOnce();
+    } else if ("error" in saveFetcher.data && closedRef.current) {
+      // Already force-closed — the modal's own error banner is gone, so
+      // surface it at the page level instead of losing it silently.
+      onSaveError?.(saveFetcher.data.error as string);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveFetcher.state, saveFetcher.data]);
+
+  useEffect(() => {
+    return () => { if (forceCloseTimerRef.current) clearTimeout(forceCloseTimerRef.current); };
+  }, []);
+
+  function buildOptimisticPatch(): OptimisticPatch {
+    const base = {
+      monitoringEnabled: editMonitoring && editTracked,
+      expectedRestockDate: editRestockDate || null,
+      manualDailySales: editManualSales.trim() !== "" && !isNaN(parseFloat(editManualSales)) ? parseFloat(editManualSales) : null,
+      isTracked: editTracked,
+    };
+
+    if (!editTracked || latestVariants.length === 0) return base;
+
+    const parsedCustom = editCustomThreshold.trim() !== "" ? parseInt(editCustomThreshold) : NaN;
+    const effectiveThreshold = plan === "pro" && !isNaN(parsedCustom) && parsedCustom >= 0 ? parsedCustom : threshold;
+
+    // Group the edited per-location quantities back into a per-variant total —
+    // mirrors the cross-location sum the server treats as a variant's real quantity.
+    const totalsByInventoryItemId = new Map<string, number>();
+    for (const [key, val] of Object.entries(inventoryEdits)) {
+      const [inventoryItemId] = key.split("__");
+      const parsed = parseInt(val);
+      const qty = isNaN(parsed) || val.trim() === "" ? 0 : Math.max(0, parsed);
+      totalsByInventoryItemId.set(inventoryItemId, (totalsByInventoryItemId.get(inventoryItemId) ?? 0) + qty);
+    }
+
+    const variantPatches: Record<string, { currentQuantity: number; inventoryStatus: string }> = {};
+    for (const v of latestVariants) {
+      if (!v.inventoryItemId) continue;
+      const qty = totalsByInventoryItemId.get(v.inventoryItemId) ?? 0;
+      const variantId = v.id.split("/").pop() as string;
+      variantPatches[variantId] = { currentQuantity: qty, inventoryStatus: statusForQty(qty, effectiveThreshold) };
+    }
+
+    return { ...base, variantPatches };
+  }
 
   // Initialise edits when inventory data arrives from either fetcher
   useEffect(() => {
@@ -388,7 +493,8 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
               <input
                 type="date"
                 name="expectedRestockDate"
-                defaultValue={product.expectedRestockDate ?? ""}
+                value={editRestockDate}
+                onChange={(e) => setEditRestockDate(e.target.value)}
                 style={{ border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
               />
               <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
@@ -405,17 +511,18 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
                 <input
                   type="number"
                   name="manualDailySales"
-                  defaultValue={product.manualDailySales ?? ""}
+                  value={editManualSales}
+                  onChange={(e) => setEditManualSales(e.target.value)}
                   min={0}
                   step={0.1}
                   placeholder={product.manualDailySales == null ? "Auto" : ""}
                   style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
                 />
                 <span style={{ fontSize: 13, color: "#374151" }}>units / day</span>
-                {product.manualDailySales != null && (
+                {editManualSales !== "" && (
                   <button
                     type="button"
-                    onClick={(e) => { const inp = (e.currentTarget.previousElementSibling?.previousElementSibling as HTMLInputElement); if (inp) inp.value = ""; }}
+                    onClick={() => setEditManualSales("")}
                     style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
                   >
                     Clear

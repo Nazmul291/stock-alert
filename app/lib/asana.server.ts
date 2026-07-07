@@ -97,14 +97,24 @@ export async function createAsanaTask(
   const taskGid = json?.data?.gid;
 
   if (sectionGid) {
-    const sectionRes = await fetch(`${API_BASE}/sections/${sectionGid}/addTask`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ data: { task: taskGid } }),
-    });
-    if (!sectionRes.ok) {
-      const err = await sectionRes.json().catch(() => ({}));
-      throw new AsanaApiError(err?.errors?.[0]?.message || `Asana API error ${sectionRes.status}`, sectionRes.status);
+    // Best-effort: the task already exists in Asana at this point, so a
+    // failure placing it in the section (transient error, stale/deleted
+    // section, etc.) shouldn't throw away the task itself — that previously
+    // meant the caller never learned the gid, so "daily"/"lifetime" modes
+    // could never persist it or attach the event as a subtask, leaving a
+    // bare parent task sitting in Asana with nothing under it.
+    try {
+      const sectionRes = await fetch(`${API_BASE}/sections/${sectionGid}/addTask`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ data: { task: taskGid } }),
+      });
+      if (!sectionRes.ok) {
+        const err = await sectionRes.json().catch(() => ({}));
+        console.error(`[Asana] Failed to place task ${taskGid} in section ${sectionGid}:`, err?.errors?.[0]?.message ?? sectionRes.status);
+      }
+    } catch (err) {
+      console.error(`[Asana] Failed to place task ${taskGid} in section ${sectionGid}:`, err);
     }
   }
 

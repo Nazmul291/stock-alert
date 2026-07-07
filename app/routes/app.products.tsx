@@ -11,8 +11,8 @@ import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { calcSalesVelocity, computeStockOutDays } from "../lib/velocity.server";
-import { ProductEditModal } from "../components/ProductEditModal";
-import type { ProductRow } from "../components/ProductEditModal";
+import { ProductEditModal, rollupVariantStatuses } from "../components/ProductEditModal";
+import type { ProductRow, OptimisticPatch } from "../components/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/InventorySection";
 import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
@@ -745,6 +745,55 @@ const FILTER_TABS = [
   { key: "not_tracked",   label: "Not Tracked" },
 ];
 
+// Overlays a just-saved product-edit modal's OptimisticPatch onto its server
+// row so the table reflects the change instantly instead of waiting for a
+// page reload. Purely a display overlay — the real DB write (and any alert)
+// still comes from the inventory webhook; see ProductEditModal.tsx.
+function applyOptimisticPatch(p: ProductRow, patch: OptimisticPatch): ProductRow {
+  if (!patch.isTracked) {
+    return {
+      ...p,
+      isTracked: false,
+      inventoryStatus: "not_tracked",
+      currentQuantity: 0,
+      monitoringEnabled: false,
+      expectedRestockDate: patch.expectedRestockDate,
+      manualDailySales: patch.manualDailySales,
+      variants: [],
+      variantCount: 0,
+      variantsAtRiskCount: 0,
+    };
+  }
+
+  if (!patch.variantPatches) {
+    // Inventory data hadn't loaded when saved (e.g. a very fast save) — only
+    // the non-quantity fields are safe to reflect optimistically.
+    return {
+      ...p,
+      monitoringEnabled: patch.monitoringEnabled,
+      expectedRestockDate: patch.expectedRestockDate,
+      manualDailySales: patch.manualDailySales,
+    };
+  }
+
+  const variants = (p.variants ?? []).map((v) => {
+    const vPatch = patch.variantPatches![v.variantId];
+    return vPatch ? { ...v, ...vPatch } : v;
+  });
+  const statuses = variants.map((v) => v.inventoryStatus);
+
+  return {
+    ...p,
+    monitoringEnabled: patch.monitoringEnabled,
+    expectedRestockDate: patch.expectedRestockDate,
+    manualDailySales: patch.manualDailySales,
+    variants,
+    currentQuantity: variants.reduce((sum, v) => sum + v.currentQuantity, 0),
+    inventoryStatus: rollupVariantStatuses(statuses),
+    variantsAtRiskCount: statuses.filter((s) => s === "low_stock" || s === "out_of_stock").length,
+  };
+}
+
 export default function ProductsPage() {
   const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as any;
   const { data, error, retry } = useSSEData<ProductsData>(
@@ -817,7 +866,17 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
     });
   };
 
-  const selectableIds = (products as ProductRow[]).filter((p) => p.isTracked).map((p) => p.productId);
+  // Local display overlay applied on top of server data after a product-edit
+  // save — see applyOptimisticPatch above. There's no auto-refresh after a
+  // save (use-sse-data.ts loads once and closes), so without this the table
+  // would show stale values until the next full page reload.
+  const [localOverrides, setLocalOverrides] = useState<Record<string, OptimisticPatch>>({});
+  const [saveErrorAfterClose, setSaveErrorAfterClose] = useState<string | null>(null);
+  const displayProducts = (products as ProductRow[]).map((p) =>
+    localOverrides[p.productId] ? applyOptimisticPatch(p, localOverrides[p.productId]) : p,
+  );
+
+  const selectableIds = displayProducts.filter((p) => p.isTracked).map((p) => p.productId);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
 
   const toggleSelectAll = () => {
@@ -866,6 +925,14 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
       {actionData && "error" in actionData && (
         <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#991b1b" }}>
           {actionData.error}
+        </div>
+      )}
+      {saveErrorAfterClose && (
+        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#991b1b", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span>{saveErrorAfterClose}</span>
+          <button onClick={() => setSaveErrorAfterClose(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#991b1b", fontSize: 16, lineHeight: 1, padding: 0 }} aria-label="Dismiss">
+            ✕
+          </button>
         </div>
       )}
       {(actionData && "message" in actionData || bulkFetcher.data && "message" in bulkFetcher.data) && (
@@ -942,22 +1009,33 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
           </div>
           <button
             onClick={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
+            disabled={csvFetcher.state !== "idle"}
             style={{
               display: "inline-flex", alignItems: "center", gap: 5,
               padding: "5px 12px", borderRadius: 6, border: "1px solid #d1d5db",
-              background: "#fff", color: "#374151", fontSize: 13, cursor: "pointer",
+              background: "#fff", color: "#374151", fontSize: 13,
+              cursor: csvFetcher.state !== "idle" ? "not-allowed" : "pointer",
+              opacity: csvFetcher.state !== "idle" ? 0.7 : 1,
               whiteSpace: "nowrap", marginBottom: 1,
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            Export CSV
+            {csvFetcher.state !== "idle" ? (
+              <span style={{
+                width: 12, height: 12, borderRadius: "50%",
+                border: "2px solid #d1d5db", borderTopColor: "#374151",
+                animation: "btn-spin 0.6s linear infinite", flexShrink: 0,
+              }} />
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            )}
+            {csvFetcher.state !== "idle" ? "Exporting…" : "Export CSV"}
           </button>
         </div>
         <div style={{ marginBottom: 16 }} />
 
-        {products.length === 0 ? (
+        {displayProducts.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>
             <p style={{ fontSize: 16, marginBottom: 8 }}>No products found.</p>
             <p style={{ fontSize: 14 }}>
@@ -996,7 +1074,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                 </tr>
               </thead>
               <tbody>
-                {products.map((p: ProductRow) => {
+                {displayProducts.map((p: ProductRow) => {
                   const s = STATUS_STYLE[p.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
                   const isNotTracked = p.inventoryStatus === "not_tracked";
                   const hasVariants = (p.variantCount ?? 0) > 1;
@@ -1193,6 +1271,11 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
           autoHideEnabled={autoHideEnabled}
           autoRepublishEnabled={autoRepublishEnabled}
           onClose={() => setEditProduct(null)}
+          onSaved={(patch) => {
+            const productId = editProduct.productId;
+            setLocalOverrides((prev) => ({ ...prev, [productId]: patch }));
+          }}
+          onSaveError={(message) => setSaveErrorAfterClose(message)}
         />
       )}
     </>
