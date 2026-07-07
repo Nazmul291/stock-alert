@@ -52,6 +52,91 @@ const ASANA_EVENT_LABELS: Record<'low_stock' | 'out_of_stock' | 'restock', strin
   restock: 'Restock',
 };
 
+// Sentinel stored in currentTaskGid while a parent task is being created in
+// Asana, so concurrent events for the same shop/eventType can tell "no
+// parent yet" apart from "someone's already creating one" (see
+// claimAsanaParentTask below). Never a real Asana gid (those are numeric).
+const ASANA_PENDING_TASK_GID = '__pending__';
+const ASANA_PENDING_STALE_MS = 15_000;
+
+// Atomically claims the right to create today's (or the lifetime) parent
+// task for a shop/eventType, so a burst of near-simultaneous events (e.g.
+// several products going low-stock in the same sync) can't each read
+// currentTaskGid as null and each create their own parent task. The
+// conditional updateMany acts as a compare-and-swap: only one concurrent
+// caller's WHERE clause can match, since the winner's write immediately
+// makes every other caller's WHERE clause stop matching.
+async function claimAsanaParentTask(
+  shop: string,
+  eventType: 'low_stock' | 'out_of_stock' | 'restock',
+  mode: 'daily' | 'lifetime',
+  today: string,
+): Promise<boolean> {
+  const staleCutoff = new Date(Date.now() - ASANA_PENDING_STALE_MS);
+  const result = await prisma.asanaEventMapping.updateMany({
+    where: {
+      shop,
+      eventType,
+      OR: [
+        { currentTaskGid: null },
+        ...(mode === 'daily' ? [{ currentTaskDate: { not: today } }] : []),
+        // Recover if a previous claimant crashed before finishing creation.
+        { currentTaskGid: ASANA_PENDING_TASK_GID, updatedAt: { lt: staleCutoff } },
+      ],
+    },
+    data: { currentTaskGid: ASANA_PENDING_TASK_GID, currentTaskDate: mode === 'daily' ? today : null },
+  });
+  return result.count === 1;
+}
+
+// Resolves the shared parent task's gid for "daily"/"lifetime" modes,
+// creating it in Asana exactly once even under concurrent callers.
+async function getOrCreateAsanaParentTask(
+  shop: string,
+  eventType: 'low_stock' | 'out_of_stock' | 'restock',
+  mode: 'daily' | 'lifetime',
+  projectGid: string,
+  sectionGid: string | null,
+  accessToken: string,
+  workspaceGid: string,
+): Promise<string> {
+  const today = new Date().toISOString().slice(0, 10); // UTC "YYYY-MM-DD"
+  const parentName = mode === 'daily'
+    ? `${ASANA_EVENT_LABELS[eventType]} - ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
+    : ASANA_EVENT_LABELS[eventType];
+
+  for (let round = 0; round < 3; round++) {
+    const won = await claimAsanaParentTask(shop, eventType, mode, today);
+    if (won) {
+      try {
+        const gid = await createAsanaTask(accessToken, workspaceGid, projectGid, sectionGid, parentName, '');
+        await prisma.asanaEventMapping.update({ where: { shop_eventType: { shop, eventType } }, data: { currentTaskGid: gid } });
+        return gid;
+      } catch (err) {
+        // Creation failed — release the claim so the next event can retry
+        // instead of being stuck on the pending sentinel forever.
+        await prisma.asanaEventMapping.updateMany({
+          where: { shop, eventType, currentTaskGid: ASANA_PENDING_TASK_GID },
+          data: { currentTaskGid: null, currentTaskDate: null },
+        });
+        throw err;
+      }
+    }
+
+    // Someone else is creating it (or already has) — poll briefly for the gid.
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const row = await prisma.asanaEventMapping.findUnique({ where: { shop_eventType: { shop, eventType } } });
+      if (row?.currentTaskGid && row.currentTaskGid !== ASANA_PENDING_TASK_GID) {
+        if (mode !== 'daily' || row.currentTaskDate === today) return row.currentTaskGid;
+        break; // stale daily task from a previous day — fall through to reclaim
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  throw new Error(`[Asana] Timed out waiting for parent task (shop=${shop}, eventType=${eventType})`);
+}
+
 // Looked up directly (matches the existing direct-Prisma convention already
 // used in this file — see logAlert's $transaction and
 // sendBackInStockNotifications' subscriber lookup below) rather than being
@@ -65,9 +150,6 @@ const ASANA_EVENT_LABELS: Record<'low_stock' | 'out_of_stock' | 'restock', strin
 //    each event appended as a subtask.
 //  - "lifetime": one task ever, named "<Label>" (no date), reused forever
 //    with each event appended as a subtask.
-// There's a small race window if two events for the same shop/eventType land
-// at nearly the same instant while no parent task exists yet — both could
-// create one. Not worth locking for; worst case is one extra parent task.
 async function createAsanaTaskForEvent(
   shop: string,
   eventType: 'low_stock' | 'out_of_stock' | 'restock',
@@ -81,40 +163,26 @@ async function createAsanaTaskForEvent(
   const accessToken = await getValidAsanaAccessToken(shop);
   if (!accessToken) return;
 
-  const mode = mapping.taskMode ?? 'multi_task';
-  if (mode === 'multi_task') {
+  if (mapping.taskMode !== 'daily' && mapping.taskMode !== 'lifetime') {
     await createAsanaTask(accessToken, workspaceGid, mapping.projectGid, mapping.sectionGid, name, notes);
     return;
   }
+  const mode = mapping.taskMode;
 
-  const today = new Date().toISOString().slice(0, 10); // UTC "YYYY-MM-DD"
-  const parentName = mode === 'daily'
-    ? `${ASANA_EVENT_LABELS[eventType]} - ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
-    : ASANA_EVENT_LABELS[eventType];
-
-  async function createNewParent(): Promise<string> {
-    const gid = await createAsanaTask(accessToken!, workspaceGid, mapping!.projectGid, mapping!.sectionGid, parentName, '');
-    await prisma.asanaEventMapping.update({
-      where: { shop_eventType: { shop, eventType } },
-      data: { currentTaskGid: gid, currentTaskDate: mode === 'daily' ? today : null },
-    });
-    return gid;
-  }
-
-  const needsNewParent = mode === 'daily'
-    ? !mapping.currentTaskGid || mapping.currentTaskDate !== today
-    : !mapping.currentTaskGid;
-
-  let parentTaskGid = needsNewParent ? await createNewParent() : mapping.currentTaskGid!;
+  let parentTaskGid = await getOrCreateAsanaParentTask(shop, eventType, mode, mapping.projectGid, mapping.sectionGid, accessToken, workspaceGid);
 
   try {
     await createAsanaSubtask(accessToken, parentTaskGid, name, notes);
   } catch (err) {
     // The merchant may have deleted/archived the parent task in Asana out
-    // from under us — recreate it once and retry rather than silently
-    // failing every event until someone notices and resets the mapping.
+    // from under us — reset the mapping and recreate it once rather than
+    // silently failing every event until someone notices.
     if (!(err instanceof AsanaApiError) || err.status !== 404) throw err;
-    parentTaskGid = await createNewParent();
+    await prisma.asanaEventMapping.updateMany({
+      where: { shop, eventType, currentTaskGid: parentTaskGid },
+      data: { currentTaskGid: null, currentTaskDate: null },
+    });
+    parentTaskGid = await getOrCreateAsanaParentTask(shop, eventType, mode, mapping.projectGid, mapping.sectionGid, accessToken, workspaceGid);
     await createAsanaSubtask(accessToken, parentTaskGid, name, notes);
   }
 }
