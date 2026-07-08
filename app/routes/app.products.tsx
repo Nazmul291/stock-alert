@@ -6,7 +6,7 @@ import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getMaxProducts } from "../lib/plan-limits";
+import { getMaxProducts, canUseFeature } from "../lib/plan-limits";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
@@ -310,7 +310,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
         // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
         const productThreshold =
-          plan === "pro" && p.customThreshold?.value ? parseInt(p.customThreshold.value) : threshold;
+          canUseFeature(plan, "perProductThresholds") && p.customThreshold?.value ? parseInt(p.customThreshold.value) : threshold;
 
         for (const ve of p.variants.edges) {
           const v = ve.node;
@@ -522,7 +522,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
     const parsedCustomThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
     const effectiveThreshold =
-      plan === "pro" && !isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0
+      canUseFeature(plan, "perProductThresholds") && !isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0
         ? parsedCustomThreshold
         : threshold;
 
@@ -734,6 +734,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   low_stock: { bg: "#fef3c7", color: "#92400e", label: "Low Stock" },
   out_of_stock: { bg: "#fee2e2", color: "#991b1b", label: "Out of Stock" },
   deactivated: { bg: "#f3f4f6", color: "#374151", label: "Deactivated" },
+  requires_upgrade: { bg: "#ede9fe", color: "#6d28d9", label: "Requires Pro" },
   not_tracked: { bg: "#ede9fe", color: "#5b21b6", label: "Not Tracked" },
 };
 

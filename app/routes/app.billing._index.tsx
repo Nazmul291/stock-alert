@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import { getIsTestStore } from "../services/billing.server";
 import { getCachedSession } from "../lib/shop-cache.server";
+import { PLAN_LIMITS } from "../lib/plan-limits";
 
 // session.plan is kept in sync by the app_subscriptions/update webhook handler
 // and by the billing confirm action — no Shopify billing API call needed here.
@@ -77,25 +78,38 @@ const PRO_FEATURES = [
   "Multiple notification recipients",
 ];
 
+// Restriction-backed rows are generated from PLAN_LIMITS itself (single
+// source of truth shared with every server-side canUseFeature() gate) so
+// this table can't drift from what's actually enforced. Baseline rows below
+// (available on both plans, no restriction key) stay hand-written since
+// there's nothing in PLAN_LIMITS to derive them from.
+const RESTRICTION_ROWS: { key: keyof typeof PLAN_LIMITS.basic.restrictions; label: string }[] = [
+  { key: "slackNotifications", label: "One-click Slack Connect" },
+  { key: "asanaTaskCreation", label: "Asana task creation" },
+  { key: "klaviyoIntegration", label: "Klaviyo integration" },
+  { key: "outboundWebhook", label: "Outbound webhook (Zapier/Make/ERP)" },
+  { key: "perProductThresholds", label: "Per-product thresholds" },
+  { key: "autoRepublish", label: "Auto-republish when restocked" },
+  { key: "multipleRecipients", label: "Multiple notification recipients" },
+  { key: "whiteLabelEmails", label: "White-label branded emails" },
+  { key: "prioritySupport", label: "Priority support" },
+];
+
 // Full side-by-side breakdown shown below the plan cards — includes rows
 // (like product limits and priority support) that were trimmed from the
 // per-card bullet lists above to keep those short and scannable.
 const FEATURE_COMPARISON: { label: string; basic: string | boolean; pro: string | boolean }[] = [
-  { label: "Products tracked", basic: "1,000", pro: "10,000" },
+  { label: "Products tracked", basic: PLAN_LIMITS.basic.maxProducts.toLocaleString(), pro: PLAN_LIMITS.pro.maxProducts.toLocaleString() },
   { label: "Email notifications", basic: true, pro: true },
   { label: "Auto-hide sold-out products", basic: true, pro: true },
   { label: "Shopify Flow triggers", basic: true, pro: true },
   { label: "Back-in-stock storefront widget", basic: true, pro: true },
   { label: "Global threshold settings", basic: true, pro: true },
-  { label: "One-click Slack Connect", basic: false, pro: true },
-  { label: "Asana task creation", basic: false, pro: true },
-  { label: "Klaviyo integration", basic: false, pro: true },
-  { label: "Outbound webhook (Zapier/Make/ERP)", basic: false, pro: true },
-  { label: "Per-product thresholds", basic: false, pro: true },
-  { label: "Auto-republish when restocked", basic: false, pro: true },
-  { label: "Multiple notification recipients", basic: false, pro: true },
-  { label: "White-label branded emails", basic: false, pro: true },
-  { label: "Priority support", basic: false, pro: true },
+  ...RESTRICTION_ROWS.map(({ key, label }) => ({
+    label,
+    basic: PLAN_LIMITS.basic.restrictions[key],
+    pro: PLAN_LIMITS.pro.restrictions[key],
+  })),
 ];
 
 export default function BillingPage() {

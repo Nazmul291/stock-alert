@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { canAddProduct } from "../lib/plan-enforcement";
+import { canUseFeature } from "../lib/plan-limits";
 
 // The REST payload's inventory_quantity is only a single location's count,
 // unreliable for multi-location stores — inventoryQuantity on a GraphQL
@@ -84,7 +85,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     ]);
     const globalThreshold = settings?.lowStockThreshold ?? 5;
     const effectiveThreshold =
-      storeSession?.plan === "pro" && trueInventory?.customThreshold != null
+      canUseFeature(storeSession?.plan, "perProductThresholds") && trueInventory?.customThreshold != null
         ? trueInventory.customThreshold
         : globalThreshold;
     const statusFor = (qty: number): "in_stock" | "low_stock" | "out_of_stock" =>
@@ -179,7 +180,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ]);
         const globalThreshold = settings?.lowStockThreshold ?? 5;
         const effectiveThreshold =
-          storeSession?.plan === "pro" && trueInventory?.customThreshold != null
+          canUseFeature(storeSession?.plan, "perProductThresholds") && trueInventory?.customThreshold != null
             ? trueInventory.customThreshold
             : globalThreshold;
         const statusFor = (qty: number): "in_stock" | "low_stock" | "out_of_stock" =>

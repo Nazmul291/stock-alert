@@ -17,6 +17,7 @@ import {
   ConnectRow, ConnectModal, TestResultBanner, inputStyle, fieldLabel, helpText,
   type TestResult,
 } from "../components/IntegrationControls";
+import { canUseFeature } from "../lib/plan-limits";
 
 // Only the auth check blocks the response — integrations data loads entirely in
 // the background via api.integrations-stream.ts and is pushed to the client
@@ -203,7 +204,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (bad) {
         return { intent: "save_email", success: false as const, error: `"${bad}" is not a valid email address.` };
       }
-      if (plan !== "pro" && addresses.length > 1) {
+      if (!canUseFeature(plan, "multipleRecipients") && addresses.length > 1) {
         return { intent: "save_email", success: false as const, error: "Multiple recipients require the Professional plan." };
       }
     }
@@ -231,7 +232,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "save_klaviyo") {
     const storeSession = await getCachedSession(shop);
-    if (storeSession?.plan !== "pro") {
+    if (!canUseFeature(storeSession?.plan, "klaviyoIntegration")) {
       return { intent: "save_klaviyo", success: false as const, error: "Klaviyo is a Professional plan feature." };
     }
     const rawKlaviyoApiKey = ((form.get("klaviyoApiKey") as string) ?? "").trim();
@@ -287,7 +288,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "select_asana_workspace") {
     const storeSessionForAsana = await getCachedSession(shop);
-    if (storeSessionForAsana?.plan !== "pro") {
+    if (!canUseFeature(storeSessionForAsana?.plan, "asanaTaskCreation")) {
       return { intent: "select_asana_workspace", success: false as const, error: "Asana is a Professional plan feature." };
     }
     const workspaceGid = (form.get("workspaceGid") as string) ?? "";
@@ -307,7 +308,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "save_asana_mapping") {
     const storeSessionForAsana = await getCachedSession(shop);
-    if (storeSessionForAsana?.plan !== "pro") {
+    if (!canUseFeature(storeSessionForAsana?.plan, "asanaTaskCreation")) {
       return { intent: "save_asana_mapping", success: false as const, error: "Asana is a Professional plan feature." };
     }
     const eventType = (form.get("eventType") as string) ?? "";
@@ -335,10 +336,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // this form.
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? "basic";
-  const isPro = plan === "pro";
 
   const data = {
-    ...(isPro ? { outboundWebhookUrl: ((form.get("outboundWebhookUrl") as string) ?? "").trim() || null } : {}),
+    ...(canUseFeature(plan, "outboundWebhook") ? { outboundWebhookUrl: ((form.get("outboundWebhookUrl") as string) ?? "").trim() || null } : {}),
   };
 
   await prisma.storeSettings.upsert({
@@ -399,7 +399,11 @@ function IntegrationsContent({
   retry: () => void;
 }) {
   const { plan, storeEmail, settings, asanaMappings } = data;
-  const isPro = plan === "pro";
+  const canSlack = canUseFeature(plan, "slackNotifications");
+  const canAsana = canUseFeature(plan, "asanaTaskCreation");
+  const canKlaviyo = canUseFeature(plan, "klaviyoIntegration");
+  const canOutboundWebhook = canUseFeature(plan, "outboundWebhook");
+  const canMultipleRecipients = canUseFeature(plan, "multipleRecipients");
   const asanaMappingByEvent = Object.fromEntries(asanaMappings.map((m) => [m.eventType, m]));
 
   const saveFetcher = useFetcher<typeof action>();
@@ -597,8 +601,8 @@ function IntegrationsContent({
 
   const noChannelsConfigured =
     !settings.emailNotifications &&
-    !(settings.slackConnected && isPro) &&
-    !(settings.klaviyoEnabled && isPro) &&
+    !(settings.slackConnected && canSlack) &&
+    !(settings.klaviyoEnabled && canKlaviyo) &&
     !settings.whatsappPhoneVerified;
 
   return (
@@ -647,9 +651,9 @@ function IntegrationsContent({
               />
             }
             title="Slack"
-            badge={!isPro ? "Pro" : null}
-            connected={isPro && settings.slackConnected}
-            locked={!isPro}
+            badge={!canSlack ? "Pro" : null}
+            connected={canSlack && settings.slackConnected}
+            locked={!canSlack}
             lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
             connectLabel="Connect"
             hideEdit
@@ -739,7 +743,7 @@ function IntegrationsContent({
           <s-section heading="Asana">
             <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
               Create a task for each stock event in an Asana project of your choice.{" "}
-              {!isPro && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
+              {!canAsana && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
             </p>
 
             <ConnectRow
@@ -754,9 +758,9 @@ function IntegrationsContent({
                 />
               }
               title="Asana"
-              badge={!isPro ? "Pro" : null}
-              connected={isPro && settings.asanaConnected}
-              locked={!isPro}
+              badge={!canAsana ? "Pro" : null}
+              connected={canAsana && settings.asanaConnected}
+              locked={!canAsana}
               lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
               connectLabel="Connect"
               hideEdit
@@ -786,7 +790,7 @@ function IntegrationsContent({
               }
             />
 
-            {isPro && settings.asanaConnected && asanaWorkspacePickerOpen && (
+            {canAsana && settings.asanaConnected && asanaWorkspacePickerOpen && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
                 <select
                   style={{ ...inputStyle(), width: "auto", flex: 1 }}
@@ -810,7 +814,7 @@ function IntegrationsContent({
               </div>
             )}
 
-            {isPro && settings.asanaConnected && (
+            {canAsana && settings.asanaConnected && (
               <div style={{ marginTop: 8 }}>
                 <AsanaEventRow
                   eventType="low_stock"
@@ -862,9 +866,9 @@ function IntegrationsContent({
                 />
               }
               title="Klaviyo"
-              badge={!isPro ? "Pro" : null}
-              connected={isPro && settings.klaviyoEnabled}
-              locked={!isPro}
+              badge={!canKlaviyo ? "Pro" : null}
+              connected={canKlaviyo && settings.klaviyoEnabled}
+              locked={!canKlaviyo}
               lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
               connectLabel="Connect"
               onConnect={() => { setKlaviyoInput(""); setKlaviyoError(null); setKlaviyoModalOpen(true); }}
@@ -904,10 +908,10 @@ function IntegrationsContent({
           <s-section heading="Outbound Webhook">
             <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
               Fire a JSON POST to any URL on every stock event. Connect Zapier, Make, or your own ERP.{" "}
-              {!isPro && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
+              {!canOutboundWebhook && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
             </p>
 
-            <div style={{ opacity: isPro ? 1 : 0.45, pointerEvents: isPro ? "auto" : "none" }}>
+            <div style={{ opacity: canOutboundWebhook ? 1 : 0.45, pointerEvents: canOutboundWebhook ? "auto" : "none" }}>
               <label style={fieldLabel}>Webhook URL</label>
               <input
                 type="url"
@@ -915,12 +919,12 @@ function IntegrationsContent({
                 value={outboundWebhookUrl}
                 onChange={(e) => { setOutboundWebhookUrl(e.target.value); markDirty(); }}
                 placeholder="https://hooks.zapier.com/hooks/catch/..."
-                disabled={!isPro}
+                disabled={!canOutboundWebhook}
                 style={inputStyle()}
               />
               <p style={helpText}>Stock Alert will POST a JSON payload to this URL whenever an alert is triggered.</p>
 
-              {isPro && outboundWebhookUrl && (
+              {canOutboundWebhook && outboundWebhookUrl && (
                 <div style={{ marginTop: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
                   <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", margin: "0 0 6px" }}>Example payload</p>
                   <pre style={{ fontSize: 11, color: "#4b5563", margin: 0, overflow: "auto" }}>{JSON.stringify({
@@ -951,18 +955,18 @@ function IntegrationsContent({
           error={emailError}
         >
           <label style={fieldLabel}>
-            Notification email{isPro ? " — multiple allowed" : ""}
+            Notification email{canMultipleRecipients ? " — multiple allowed" : ""}
           </label>
           <input
             type="text"
             value={emailInput}
             onChange={(e) => setEmailInput(e.target.value)}
-            placeholder={isPro ? "alerts@example.com, team@example.com" : "alerts@example.com"}
+            placeholder={canMultipleRecipients ? "alerts@example.com, team@example.com" : "alerts@example.com"}
             style={inputStyle(!!emailError)}
             autoFocus
           />
           <p style={helpText}>
-            {isPro
+            {canMultipleRecipients
               ? "Separate multiple addresses with commas."
               : storeEmail
               ? `Leave empty to use store email (${storeEmail}).`

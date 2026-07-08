@@ -10,6 +10,7 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { Toggle, inputStyle, fieldLabel, helpText } from "../components/IntegrationControls";
+import { canUseFeature, getMaxProducts } from "../lib/plan-limits";
 
 // Only the auth check blocks the response — settings data loads entirely in
 // the background via api.settings-stream.ts and is pushed to the client over
@@ -62,12 +63,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     autoRepublishEnabled: bool("autoRepublishEnabled"),
     lowStockThreshold: rawThreshold,
     digestEnabled: bool("digestEnabled"),
-    digestFrequency: plan === "pro" && rawDigestFrequency === "daily" ? "daily" : "weekly",
+    digestFrequency: canUseFeature(plan, "dailyDigest") && rawDigestFrequency === "daily" ? "daily" : "weekly",
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
     monitoringFilter: (["all", "collection", "tags"] as const).includes(form.get("monitoringFilter") as any) ? form.get("monitoringFilter") as string : "all",
     monitoringCollectionId: ((form.get("monitoringCollectionId") as string) ?? "").trim() || null,
     monitoringTags: ((form.get("monitoringTags") as string) ?? "").trim() || null,
-    ...(plan === "pro" ? {
+    ...(canUseFeature(plan, "whiteLabelEmails") ? {
       brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
       brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
       brandSenderName: ((form.get("brandSenderName") as string) ?? "").trim() || null,
@@ -247,7 +248,9 @@ function SettingsContent({ data }: { data: SettingsData }) {
     saveFetcher.submit(fd, { method: "post" });
   }
 
-  const isPro = plan === "pro";
+  const canAutoRepublish = canUseFeature(plan, "autoRepublish");
+  const canDailyDigest = canUseFeature(plan, "dailyDigest");
+  const canWhiteLabelEmails = canUseFeature(plan, "whiteLabelEmails");
 
   function markDirty() {
     setIsDirty(true);
@@ -280,7 +283,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
 
         {/* ── Inventory Settings ── */}
         <s-section heading="Inventory Settings">
-          {!isPro && (
+          {!canAutoRepublish && (
             <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <span>Some features require the Professional plan.</span>
               <s-link href="/app/billing">Upgrade to Pro →</s-link>
@@ -296,9 +299,9 @@ function SettingsContent({ data }: { data: SettingsData }) {
             />
             <Toggle
               label="Auto-republish when restocked"
-              description={!isPro ? "Requires Professional plan." : "Products are automatically republished when inventory is restored."}
-              checked={autoRepublishEnabled && isPro}
-              disabled={!isPro}
+              description={!canAutoRepublish ? "Requires Professional plan." : "Products are automatically republished when inventory is restored."}
+              checked={autoRepublishEnabled && canAutoRepublish}
+              disabled={!canAutoRepublish}
               onChange={(v) => { setAutoRepublishEnabled(v); markDirty(); }}
             />
           </div>
@@ -345,7 +348,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
               A periodic summary of at-risk and out-of-stock products sent to your notification email —
               set that (and Slack, WhatsApp, Klaviyo, Shopify Flow) on{" "}
               <s-link href="/app/integrations">Integrations</s-link>.{" "}
-              {isPro ? "Pro plan: choose daily or weekly." : "Basic plan: weekly every Monday."}
+              {canDailyDigest ? "Pro plan: choose daily or weekly." : "Basic plan: weekly every Monday."}
             </p>
 
             <Toggle
@@ -358,7 +361,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
             {digestEnabled && (
               <div style={{ marginTop: 16, marginLeft: 0 }}>
                 <label style={fieldLabel}>Frequency</label>
-                {isPro ? (
+                {canDailyDigest ? (
                   <div style={{ display: "flex", gap: 10 }}>
                     {(["daily", "weekly"] as const).map((freq) => (
                       <label
@@ -404,10 +407,10 @@ function SettingsContent({ data }: { data: SettingsData }) {
           <s-section heading="Email Branding">
             <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
               Customize how outgoing alert emails look. Applied to all notifications.{" "}
-              {!isPro && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
+              {!canWhiteLabelEmails && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
             </p>
 
-            <div style={{ opacity: isPro ? 1 : 0.45, pointerEvents: isPro ? "auto" : "none" }}>
+            <div style={{ opacity: canWhiteLabelEmails ? 1 : 0.45, pointerEvents: canWhiteLabelEmails ? "auto" : "none" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
                 <div>
                   <label style={fieldLabel}>Sender name</label>
@@ -417,7 +420,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
                     value={brandSenderName}
                     onChange={(e) => { setBrandSenderName(e.target.value); markDirty(); }}
                     placeholder="Stock Alert"
-                    disabled={!isPro}
+                    disabled={!canWhiteLabelEmails}
                     style={inputStyle()}
                   />
                   <p style={helpText}>Shown as "From" name in email clients.</p>
@@ -429,8 +432,8 @@ function SettingsContent({ data }: { data: SettingsData }) {
                       type="color"
                       value={brandColor || "#4f46e5"}
                       onChange={(e) => { setBrandColor(e.target.value); markDirty(); }}
-                      disabled={!isPro}
-                      style={{ width: 40, height: 38, border: "1.5px solid #d1d5db", borderRadius: 8, cursor: isPro ? "pointer" : "not-allowed", padding: 2, flexShrink: 0 }}
+                      disabled={!canWhiteLabelEmails}
+                      style={{ width: 40, height: 38, border: "1.5px solid #d1d5db", borderRadius: 8, cursor: canWhiteLabelEmails ? "pointer" : "not-allowed", padding: 2, flexShrink: 0 }}
                     />
                     <input
                       type="text"
@@ -438,7 +441,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
                       value={brandColor || "#4f46e5"}
                       onChange={(e) => { setBrandColor(e.target.value); markDirty(); }}
                       placeholder="#4f46e5"
-                      disabled={!isPro}
+                      disabled={!canWhiteLabelEmails}
                       style={{ ...inputStyle(), width: 110, fontFamily: "monospace" }}
                     />
                     <div style={{ width: 38, height: 38, borderRadius: 8, background: brandColor || "#4f46e5", border: "1px solid #e5e7eb", flexShrink: 0 }} />
@@ -450,7 +453,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
               <LogoUrlField
                 value={brandLogoUrl}
                 brandColor={brandColor}
-                disabled={!isPro}
+                disabled={!canWhiteLabelEmails}
                 onChange={(v) => { setBrandLogoUrl(v); markDirty(); }}
               />
             </div>
@@ -895,19 +898,19 @@ function LogoUrlField({
 /* ── Plan card ── */
 function PlanCard({ plan }: { plan: string }) {
   const isPro = plan === "pro";
-  const features = [
-    { label: "Email alerts",                   pro: false },
-    { label: "Inventory monitoring",            pro: false },
-    { label: "Auto-hide out-of-stock",          pro: false },
-    { label: "Shopify Flow triggers",           pro: false },
-    { label: `Up to ${isPro ? "10,000" : "1,000"} products`, pro: false },
-    { label: "Slack Connect",                   pro: true  },
-    { label: "Klaviyo integration",             pro: true  },
-    { label: "Multiple email recipients",       pro: true  },
-    { label: "Auto-republish on restock",       pro: true  },
-    { label: "Per-product thresholds",          pro: true  },
-    { label: "Outbound webhook / Zapier",       pro: true  },
-    { label: "Email branding",                  pro: true  },
+  const features: { label: string; active: boolean }[] = [
+    { label: "Email alerts",                   active: true },
+    { label: "Inventory monitoring",            active: true },
+    { label: "Auto-hide out-of-stock",          active: true },
+    { label: "Shopify Flow triggers",           active: true },
+    { label: `Up to ${getMaxProducts(plan).toLocaleString()} products`, active: true },
+    { label: "Slack Connect",                   active: canUseFeature(plan, "slackNotifications") },
+    { label: "Klaviyo integration",             active: canUseFeature(plan, "klaviyoIntegration") },
+    { label: "Multiple email recipients",       active: canUseFeature(plan, "multipleRecipients") },
+    { label: "Auto-republish on restock",       active: canUseFeature(plan, "autoRepublish") },
+    { label: "Per-product thresholds",          active: canUseFeature(plan, "perProductThresholds") },
+    { label: "Outbound webhook / Zapier",       active: canUseFeature(plan, "outboundWebhook") },
+    { label: "Email branding",                  active: canUseFeature(plan, "whiteLabelEmails") },
   ];
 
   return (
@@ -926,7 +929,7 @@ function PlanCard({ plan }: { plan: string }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "6px 12px" }}>
         {features.map((f) => {
-          const active = !f.pro || isPro;
+          const active = f.active;
           return (
             <div key={f.label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: active ? "#374151" : "#9ca3af" }}>
               <span style={{ fontSize: 14, flexShrink: 0 }}>{active ? "✓" : "🔒"}</span>

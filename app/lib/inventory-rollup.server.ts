@@ -7,20 +7,26 @@ import { Prisma } from "@prisma/client";
 // DB-driven and in-memory code paths (products-data.server.ts has both)
 // always agree on what counts as "at risk".
 
-export type RollupStatus = "in_stock" | "low_stock" | "out_of_stock" | "deactivated";
+export type RollupStatus = "in_stock" | "low_stock" | "out_of_stock" | "deactivated" | "requires_upgrade";
 
 // Worst-case status across a product's variants:
-// - "deactivated" only when every variant is deactivated (plan-limit enforcement).
-// - "out_of_stock" only when every non-deactivated variant is out of stock —
-//   matches the auto-hide semantics in webhooks.inventory.tsx (archiving only
-//   happens when the whole product has nothing left to sell).
+// - "deactivated" only when every variant was manually turned off by the merchant.
+// - "requires_upgrade" only when every variant was benched by plan-limit
+//   enforcement (see plan-enforcement.ts) — distinct from "deactivated" so the
+//   UI can tell "merchant turned this off" apart from "over the plan limit".
+//   A product's variants are always moved between these together (grouped by
+//   productId), so "every" is safe here — never a partial mix.
+// - "out_of_stock" only when every other variant is out of stock — matches
+//   the auto-hide semantics in webhooks.inventory.tsx (archiving only happens
+//   when the whole product has nothing left to sell).
 // - "low_stock" when any variant is low/out but not all are out.
 // - "in_stock" otherwise.
 export function classifyProductStatus(variantStatuses: string[]): RollupStatus {
   if (variantStatuses.length === 0) return "in_stock";
   if (variantStatuses.every((s) => s === "deactivated")) return "deactivated";
+  if (variantStatuses.every((s) => s === "requires_upgrade")) return "requires_upgrade";
 
-  const relevant = variantStatuses.filter((s) => s !== "deactivated");
+  const relevant = variantStatuses.filter((s) => s !== "deactivated" && s !== "requires_upgrade");
   if (relevant.every((s) => s === "out_of_stock")) return "out_of_stock";
   if (relevant.some((s) => s === "out_of_stock" || s === "low_stock")) return "low_stock";
   return "in_stock";
@@ -33,7 +39,8 @@ export async function rollupStatusCounts(shop: string): Promise<Map<RollupStatus
       SELECT product_id,
         CASE
           WHEN bool_and(inventory_status = 'deactivated') THEN 'deactivated'
-          WHEN bool_and(inventory_status IN ('out_of_stock', 'deactivated')) THEN 'out_of_stock'
+          WHEN bool_and(inventory_status = 'requires_upgrade') THEN 'requires_upgrade'
+          WHEN bool_and(inventory_status IN ('out_of_stock', 'deactivated', 'requires_upgrade')) THEN 'out_of_stock'
           WHEN bool_or(inventory_status IN ('out_of_stock', 'low_stock')) THEN 'low_stock'
           ELSE 'in_stock'
         END AS status
@@ -93,14 +100,16 @@ export async function paginatedProductIdsByStatus(
   take: number,
 ): Promise<{ productIds: bigint[]; total: number }> {
   const searchFilter = search ? Prisma.sql`AND product_title ILIKE ${"%" + search + "%"}` : Prisma.empty;
-  const statusFilter = filter === "tracked" ? Prisma.sql`status != 'deactivated'` : Prisma.sql`status = ${filter}`;
+  const statusFilter =
+    filter === "tracked" ? Prisma.sql`status NOT IN ('deactivated', 'requires_upgrade')` : Prisma.sql`status = ${filter}`;
 
   const rows = await prisma.$queryRaw<{ product_id: bigint; total: bigint }[]>`
     SELECT product_id, COUNT(*) OVER()::bigint AS total FROM (
       SELECT product_id,
         CASE
           WHEN bool_and(inventory_status = 'deactivated') THEN 'deactivated'
-          WHEN bool_and(inventory_status IN ('out_of_stock', 'deactivated')) THEN 'out_of_stock'
+          WHEN bool_and(inventory_status = 'requires_upgrade') THEN 'requires_upgrade'
+          WHEN bool_and(inventory_status IN ('out_of_stock', 'deactivated', 'requires_upgrade')) THEN 'out_of_stock'
           WHEN bool_or(inventory_status IN ('out_of_stock', 'low_stock')) THEN 'low_stock'
           ELSE 'in_stock'
         END AS status

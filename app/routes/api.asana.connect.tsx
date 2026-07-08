@@ -1,6 +1,8 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { resolveAsanaOAuthState, mintAsanaOAuthState } from "../lib/asana-oauth.server";
+import { getCachedSession } from "../lib/shop-cache.server";
+import { canUseFeature } from "../lib/plan-limits";
 
 // Hit via a plain <a target="_blank"> link from app.integrations.tsx — opened
 // in a new tab, not a fetch — since Asana's OAuth consent screen can't render
@@ -18,6 +20,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // normal embedded Shopify admin iframe), bail out now rather than
   // completing an OAuth grant we can't cleanly return the merchant from.
   if (!ctx || !ctx.host) {
+    return redirect("/app/integrations?asana_error=1");
+  }
+
+  // The Integrations page already hides/locks this control for non-Pro shops,
+  // but that's UI-only — this route is a plain top-level link a merchant could
+  // hit directly, so the plan has to be re-checked server-side here too.
+  const session = await getCachedSession(ctx.shop);
+  if (!canUseFeature(session?.plan, "asanaTaskCreation")) {
     return redirect("/app/integrations?asana_error=1");
   }
 
