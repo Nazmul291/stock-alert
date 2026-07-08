@@ -141,3 +141,26 @@ export async function getCachedHasActivePaymentOffline(shop: string, isTest: boo
   cacheSet(cacheKey, hasActivePayment ? "1" : "0", BILLING_STATUS_TTL_SECONDS);
   return hasActivePayment;
 }
+
+// Used by the subscriptions_update webhook to confirm a shop's true plan
+// before clearing it. A lapsed/cancelled subscription event can arrive after
+// the merchant already switched to a different plan (e.g. upgrading Basic ->
+// Pro cancels the old Basic subscription, which then reports EXPIRED here
+// after the new one is already ACTIVE) — so this always hits Shopify live
+// rather than trusting the event in isolation.
+export async function getActiveSubscriptionPlan(shop: string): Promise<"basic" | "pro" | null> {
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    const res = await admin.graphql(
+      `#graphql
+      query { currentAppInstallation { activeSubscriptions { name } } }`,
+    );
+    const data = await res.json();
+    const subs: { name: string }[] = data.data?.currentAppInstallation?.activeSubscriptions ?? [];
+    if (subs.some((s) => s.name === BILLING_PLAN_PRO)) return "pro";
+    if (subs.some((s) => s.name === BILLING_PLAN_BASIC)) return "basic";
+    return null;
+  } catch {
+    return null;
+  }
+}

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useFetcher } from "react-router";
 import { InventorySection } from "./InventorySection";
 import type { VariantInventory } from "./InventorySection";
+import { canUseFeature } from "../lib/plan-limits";
 
 export type VariantStatusRow = {
   id: string;
@@ -67,7 +68,8 @@ function statusForQty(qty: number, threshold: number): string {
 export function rollupVariantStatuses(variantStatuses: string[]): string {
   if (variantStatuses.length === 0) return "in_stock";
   if (variantStatuses.every((s) => s === "deactivated")) return "deactivated";
-  const relevant = variantStatuses.filter((s) => s !== "deactivated");
+  if (variantStatuses.every((s) => s === "requires_upgrade")) return "requires_upgrade";
+  const relevant = variantStatuses.filter((s) => s !== "deactivated" && s !== "requires_upgrade");
   if (relevant.every((s) => s === "out_of_stock")) return "out_of_stock";
   if (relevant.some((s) => s === "out_of_stock" || s === "low_stock")) return "low_stock";
   return "in_stock";
@@ -94,6 +96,7 @@ type Props = {
 };
 
 export function ProductEditModal({ product, plan, threshold, autoHideEnabled, autoRepublishEnabled, onClose, onSaved, onSaveError }: Props) {
+  const canPerProductThreshold = canUseFeature(plan, "perProductThresholds");
   const saveFetcher = useFetcher<any>();
   const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
   const enableTrackingFetcher = useFetcher<{ enabledInventory?: { variants: VariantInventory[] }; error?: string }>();
@@ -180,7 +183,7 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
     if (!editTracked || latestVariants.length === 0) return base;
 
     const parsedCustom = editCustomThreshold.trim() !== "" ? parseInt(editCustomThreshold) : NaN;
-    const effectiveThreshold = plan === "pro" && !isNaN(parsedCustom) && parsedCustom >= 0 ? parsedCustom : threshold;
+    const effectiveThreshold = canPerProductThreshold && !isNaN(parsedCustom) && parsedCustom >= 0 ? parsedCustom : threshold;
 
     // Group the edited per-location quantities back into a per-variant total —
     // mirrors the cross-location sum the server treats as a variant's real quantity.
@@ -427,7 +430,7 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
                 <div>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>
                     Low-Stock Threshold
-                    {plan !== "pro" && (
+                    {!canPerProductThreshold && (
                       <span style={{ marginLeft: 6, fontSize: 11, background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: 4 }}>
                         Pro only
                       </span>
@@ -440,16 +443,16 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
                       value={editCustomThreshold}
                       onChange={(e) => setEditCustomThreshold(e.target.value)}
                       placeholder={`Store default (${threshold})`}
-                      disabled={plan !== "pro"}
+                      disabled={!canPerProductThreshold}
                       style={{
                         width: 150, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13,
-                        background: plan !== "pro" ? "#f3f4f6" : "#fff",
-                        color: plan !== "pro" ? "#9ca3af" : "#111827",
-                        cursor: plan !== "pro" ? "not-allowed" : "text",
+                        background: !canPerProductThreshold ? "#f3f4f6" : "#fff",
+                        color: !canPerProductThreshold ? "#9ca3af" : "#111827",
+                        cursor: !canPerProductThreshold ? "not-allowed" : "text",
                       }}
                       aria-label="Custom threshold"
                     />
-                    {editCustomThreshold && plan === "pro" && (
+                    {editCustomThreshold && canPerProductThreshold && (
                       <button type="button" onClick={() => setEditCustomThreshold("")}
                         style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", padding: "4px 6px" }}>
                         Reset to default

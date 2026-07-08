@@ -14,6 +14,7 @@ import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { syncState } from "../lib/sync-state.server";
 import { computeStockOutDays } from "../lib/velocity.server";
 import { fireOutboundWebhook } from "../lib/outbound-webhook.server";
+import { canUseFeature } from "../lib/plan-limits";
 
 // inventoryQuantity on a variant is already the cross-location total, so a
 // specific variant's own quantity is all that's needed — no need to walk
@@ -180,7 +181,7 @@ async function processInventoryUpdate(
   // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
   // Compared against this variant's own quantity, not the old product-wide total.
   const threshold =
-    (storeSession?.plan === "pro" && productMeta.customThreshold !== null)
+    (canUseFeature(storeSession?.plan, "perProductThresholds") && productMeta.customThreshold !== null)
       ? productMeta.customThreshold
       : settings.lowStockThreshold;
   const newStatus: "in_stock" | "low_stock" | "out_of_stock" =
@@ -190,8 +191,8 @@ async function processInventoryUpdate(
     `[Webhook] Variant ${variantId} (${existingTracking.productTitle}): qty ${previousQty}→${newQty} (changed:${qtyChanged}), status ${previousStatus}→${newStatus}, threshold ${threshold}`,
   );
 
-  if (previousStatus === "deactivated") {
-    console.log(`[Webhook] Variant ${variantId} is deactivated — skipping`);
+  if (previousStatus === "deactivated" || previousStatus === "requires_upgrade") {
+    console.log(`[Webhook] Variant ${variantId} is ${previousStatus} — skipping`);
     return;
   }
 
@@ -328,7 +329,7 @@ async function processInventoryUpdate(
   }
 
   // ── 8b. Outbound webhook (Pro, non-blocking) ──────────────────────────────
-  if (storeSession?.plan === "pro" && settings.outboundWebhookUrl) {
+  if (canUseFeature(storeSession?.plan, "outboundWebhook") && settings.outboundWebhookUrl) {
     fireOutboundWebhook(settings.outboundWebhookUrl, {
       event: alertType as "low_stock" | "out_of_stock" | "restock",
       shop,
@@ -385,7 +386,7 @@ async function processInventoryUpdate(
   if (
     newStatus === "in_stock" &&
     effectiveAutoRepublish &&
-    storeSession?.plan === "pro" &&
+    canUseFeature(storeSession?.plan, "autoRepublish") &&
     existingTracking.isHidden
   ) {
     const siblings = await prisma.inventoryTracking.findMany({

@@ -110,6 +110,7 @@ function DashboardContent({ shop, data }: { shop: string; data: DashboardData })
             { label: "Out of Stock", value: stats.outOfStock, color: "#dc2626", href: stats.outOfStock > 0 ? "/app/products?filter=out_of_stock" : null },
             { label: "Hidden", value: stats.hidden, color: "#6b7280", href: null },
             { label: "Deactivated", value: stats.deactivated, color: "#9ca3af", href: null },
+            { label: "Requires Pro", value: stats.requiresUpgrade, color: "#4338ca", href: stats.requiresUpgrade > 0 ? "/app/billing" : null },
             { label: "Alerts Today", value: alertsToday, color: alertsToday > 0 ? "#d97706" : "#6b7280", href: alertsToday > 0 ? "/app/alert-history" : null },
             { label: "Analytics", value: "→", color: "#4f46e5", href: "/app/analytics" },
           ].map((s) => {

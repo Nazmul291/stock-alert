@@ -133,7 +133,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
       productIds.length > 0
         ? prisma.inventoryTracking.findMany({ where: { shop, productId: { in: productIds } } })
         : Promise.resolve([]),
-      countDistinctProducts({ shop, inventoryStatus: { not: "deactivated" } }),
+      countDistinctProducts({ shop, inventoryStatus: { notIn: ["deactivated", "requires_upgrade"] } }),
     ]);
 
     const rowsByProduct = new Map<string, InventoryTracking[]>();

@@ -6,7 +6,7 @@ import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getMaxProducts } from "../lib/plan-limits";
+import { getMaxProducts, canUseFeature, formatMaxProducts, PLAN_LIMITS } from "../lib/plan-limits";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
@@ -275,6 +275,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
   const seenProductIds = new Set<string>();
   let cursor: string | null = null;
   let hasNextPage = true;
+  let pageCount = 0;
 
   try {
     while (hasNextPage && seenProductIds.size < maxProducts) {
@@ -310,7 +311,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
         // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
         const productThreshold =
-          plan === "pro" && p.customThreshold?.value ? parseInt(p.customThreshold.value) : threshold;
+          canUseFeature(plan, "perProductThresholds") && p.customThreshold?.value ? parseInt(p.customThreshold.value) : threshold;
 
         for (const ve of p.variants.edges) {
           const v = ve.node;
@@ -339,8 +340,15 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
       hasNextPage = page.pageInfo.hasNextPage;
       cursor = page.pageInfo.endCursor;
+      pageCount += 1;
 
-      const fetchPct = Math.min(80, 5 + Math.round((seenProductIds.size / maxProducts) * 75));
+      // An unlimited plan (maxProducts: Infinity) has no known total to
+      // measure progress against — seenProductIds.size / Infinity is always
+      // 0, which would freeze the bar at 5% for the whole fetch. Fall back
+      // to a page-count heuristic that keeps inching toward 80% instead.
+      const fetchPct = Number.isFinite(maxProducts)
+        ? Math.min(80, 5 + Math.round((seenProductIds.size / maxProducts) * 75))
+        : Math.min(80, Math.round(80 - 75 / (pageCount + 1)));
       await syncState.progress(shop, fetchPct);
     }
 
@@ -522,7 +530,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
     const parsedCustomThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
     const effectiveThreshold =
-      plan === "pro" && !isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0
+      canUseFeature(plan, "perProductThresholds") && !isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0
         ? parsedCustomThreshold
         : threshold;
 
@@ -572,15 +580,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           const stockOutDays = effectiveSales
             ? Math.min(999, Math.ceil(existingRow.currentQuantity / effectiveSales))
             : undefined;
+
+          // A product benched by plan-limit enforcement can't be re-enabled
+          // from here — that would let a merchant self-service past their
+          // plan's product cap without upgrading.
+          const isPlanBenched = existingRow.inventoryStatus === "requires_upgrade";
+          const effectiveMonitoringEnabled = isPlanBenched ? false : monitoringEnabled;
+
+          // inventoryStatus is the one exception to "leave it untouched"
+          // above: the monitoring toggle owns it at the exact moment it
+          // flips, so plan-limit enforcement can tell "merchant turned this
+          // off" apart from "benched for being over the cap" (see
+          // BENCHED_STATUSES in plan-enforcement.ts). Turning back on
+          // recomputes the real stock status immediately — otherwise it
+          // would stay stuck 'deactivated' forever, since the inventory
+          // webhook skips any row whose previous status was 'deactivated'.
+          const monitoringChanged = !isPlanBenched && effectiveMonitoringEnabled !== existingRow.monitoringEnabled;
+          const recomputedStatus: "in_stock" | "low_stock" | "out_of_stock" =
+            existingRow.currentQuantity <= 0
+              ? "out_of_stock"
+              : existingRow.currentQuantity <= effectiveThreshold
+              ? "low_stock"
+              : "in_stock";
+          const statusPatch = !monitoringChanged
+            ? {}
+            : effectiveMonitoringEnabled
+            ? { inventoryStatus: recomputedStatus }
+            : { inventoryStatus: "deactivated" as const };
+
           await prisma.inventoryTracking.update({
             where: { id: existingRow.id },
             data: {
               productTitle,
               variantTitle: v.variantTitle,
               sku: v.sku,
-              monitoringEnabled,
+              monitoringEnabled: effectiveMonitoringEnabled,
               manualDailySales,
               expectedRestockDate,
+              ...statusPatch,
               ...(stockOutDays !== undefined ? { stockOutDays } : {}),
             },
           });
@@ -696,13 +733,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "bulk_monitoring") {
     const productIds = JSON.parse((form.get("productIds") as string) ?? "[]") as string[];
     const enabled = form.get("monitoringEnabled") === "true";
+    let updatedCount = productIds.length;
     if (productIds.length > 0) {
-      await prisma.inventoryTracking.updateMany({
-        where: { shop, productId: { in: productIds.map(BigInt) } },
-        data: { monitoringEnabled: enabled },
-      });
+      const ids = productIds.map(BigInt);
+      if (enabled) {
+        // Recompute each row's real stock status since it was overwritten
+        // with 'deactivated' while off (see the single-product save above).
+        // Rows benched by plan-limit enforcement ('requires_upgrade') are
+        // skipped — bulk-enabling can't be used to bypass the plan's
+        // product cap without upgrading.
+        const settings = await prisma.storeSettings.findUnique({ where: { shop } });
+        const threshold = settings?.lowStockThreshold ?? 5;
+        const rows = await prisma.inventoryTracking.findMany({
+          where: { shop, productId: { in: ids }, inventoryStatus: { not: "requires_upgrade" } },
+          select: { id: true, productId: true, currentQuantity: true },
+        });
+        await Promise.all(
+          rows.map((r) =>
+            prisma.inventoryTracking.update({
+              where: { id: r.id },
+              data: {
+                monitoringEnabled: true,
+                inventoryStatus: r.currentQuantity <= 0 ? "out_of_stock" : r.currentQuantity <= threshold ? "low_stock" : "in_stock",
+              },
+            }),
+          ),
+        );
+        updatedCount = new Set(rows.map((r) => r.productId.toString())).size;
+      } else {
+        // inventoryStatus is the one exception to the manual-edit-path
+        // "leave it untouched" rule — see the single-product save above for
+        // why: it's what lets plan-limit enforcement tell "merchant turned
+        // this off" apart from "benched for being over the cap".
+        await prisma.inventoryTracking.updateMany({
+          where: { shop, productId: { in: ids } },
+          data: { monitoringEnabled: false, inventoryStatus: "deactivated" },
+        });
+      }
     }
-    return { success: true, message: `Monitoring ${enabled ? "enabled" : "disabled"} for ${productIds.length} product(s).` };
+    return { success: true, message: `Monitoring ${enabled ? "enabled" : "disabled"} for ${updatedCount} product(s).` };
   }
 
   if (intent === "sync") {
@@ -734,6 +803,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   low_stock: { bg: "#fef3c7", color: "#92400e", label: "Low Stock" },
   out_of_stock: { bg: "#fee2e2", color: "#991b1b", label: "Out of Stock" },
   deactivated: { bg: "#f3f4f6", color: "#374151", label: "Deactivated" },
+  requires_upgrade: { bg: "#e0e7ff", color: "#4338ca", label: "Requires Pro" },
   not_tracked: { bg: "#ede9fe", color: "#5b21b6", label: "Not Tracked" },
 };
 
@@ -956,9 +1026,9 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
         </div>
       )}
 
-      {plan !== "pro" && (
+      {Number.isFinite(maxProducts) && plan !== "pro" && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
-          Basic plan: monitoring up to {maxProducts} products. {trackedCount} of {maxProducts} tracked.{" "}
+          {PLAN_LIMITS[plan === "basic" ? "basic" : "none"].name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
           <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}
@@ -1146,18 +1216,25 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span style={{
-                          background: p.monitoringEnabled ? "#d1fae5" : "#f3f4f6",
-                          color: p.monitoringEnabled ? "#065f46" : "#6b7280",
+                          background: p.monitoringEnabled ? "#d1fae5" : p.inventoryStatus === "requires_upgrade" ? "#e0e7ff" : "#f3f4f6",
+                          color: p.monitoringEnabled ? "#065f46" : p.inventoryStatus === "requires_upgrade" ? "#4338ca" : "#6b7280",
                           padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500,
                         }}>
-                          {p.monitoringEnabled ? "Active" : "Disabled"}
+                          {p.monitoringEnabled ? "Active" : p.inventoryStatus === "requires_upgrade" ? "Requires Pro" : "Disabled"}
                         </span>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <button
                           onClick={() => setEditProduct(p)}
-                          title="Edit product"
-                          style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: "#374151", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13 }}
+                          disabled={p.inventoryStatus === "requires_upgrade"}
+                          title={p.inventoryStatus === "requires_upgrade" ? "Upgrade to Pro to edit this product" : "Edit product"}
+                          style={{
+                            background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "5px 8px",
+                            cursor: p.inventoryStatus === "requires_upgrade" ? "not-allowed" : "pointer",
+                            color: p.inventoryStatus === "requires_upgrade" ? "#9ca3af" : "#374151",
+                            opacity: p.inventoryStatus === "requires_upgrade" ? 0.6 : 1,
+                            display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13,
+                          }}
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />

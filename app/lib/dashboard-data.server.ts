@@ -12,6 +12,7 @@ export type DashboardData = {
     inStock: number;
     hidden: number;
     deactivated: number;
+    requiresUpgrade: number;
   };
   setupProgress: {
     appInstalled: boolean;
@@ -67,6 +68,7 @@ export async function loadDashboardData(shop: string): Promise<DashboardData> {
     inStock: statusCounts.get("in_stock") ?? 0,
     hidden: hiddenCount,
     deactivated: statusCounts.get("deactivated") ?? 0,
+    requiresUpgrade: statusCounts.get("requires_upgrade") ?? 0,
   };
 
   const setupSteps = [
