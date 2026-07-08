@@ -105,7 +105,7 @@ export const PLAN_LIMITS = {
   enterprise: {
     name: 'Enterprise',
     price: '$19.99/month',
-    maxProducts: 10000,
+    maxProducts: Infinity,
     status: 'coming_soon' as PlanStatus,
     features: [
       'Everything in Professional, plus:',
@@ -146,6 +146,14 @@ export function getMaxProducts(plan?: string | null): number {
   return getPlanLimits(plan).maxProducts;
 }
 
+// maxProducts is Infinity for unlimited tiers (Enterprise) — arithmetic and
+// comparisons (>, >=, -) all behave correctly against Infinity on their own,
+// but display and anything that needs a concrete integer (e.g. Prisma's
+// `take`) must special-case it explicitly.
+export function formatMaxProducts(maxProducts: number): string {
+  return Number.isFinite(maxProducts) ? maxProducts.toLocaleString() : 'Unlimited';
+}
+
 export function canUseFeature(
   plan: string | null | undefined,
   feature: keyof typeof PLAN_LIMITS.basic.restrictions,
@@ -164,7 +172,9 @@ export function validateProductLimit(
     currentCount: currentProductCount,
     maxProducts: limits.maxProducts,
     message: canAdd
-      ? `You can track ${limits.maxProducts - currentProductCount} more products on the ${limits.name} plan`
+      ? Number.isFinite(limits.maxProducts)
+        ? `You can track ${limits.maxProducts - currentProductCount} more products on the ${limits.name} plan`
+        : `You can track unlimited products on the ${limits.name} plan`
       : limits.maxProducts === 0
       ? `Select a plan to start tracking products.`
       : `You've reached the ${limits.maxProducts} product limit on the ${limits.name} plan. Upgrade to Professional to track up to 10,000 products.`,

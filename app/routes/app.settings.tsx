@@ -10,7 +10,7 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { Toggle, inputStyle, fieldLabel, helpText } from "../components/IntegrationControls";
-import { canUseFeature, getMaxProducts } from "../lib/plan-limits";
+import { canUseFeature, getMaxProducts, formatMaxProducts } from "../lib/plan-limits";
 
 // Only the auth check blocks the response — settings data loads entirely in
 // the background via api.settings-stream.ts and is pushed to the client over
@@ -898,12 +898,14 @@ function LogoUrlField({
 /* ── Plan card ── */
 function PlanCard({ plan }: { plan: string }) {
   const isPro = plan === "pro";
+  const maxProducts = getMaxProducts(plan);
+  const productsLabel = Number.isFinite(maxProducts) ? `Up to ${formatMaxProducts(maxProducts)} products` : "Unlimited products";
   const features: { label: string; active: boolean }[] = [
     { label: "Email alerts",                   active: true },
     { label: "Inventory monitoring",            active: true },
     { label: "Auto-hide out-of-stock",          active: true },
     { label: "Shopify Flow triggers",           active: true },
-    { label: `Up to ${getMaxProducts(plan).toLocaleString()} products`, active: true },
+    { label: productsLabel, active: true },
     { label: "Slack Connect",                   active: canUseFeature(plan, "slackNotifications") },
     { label: "Klaviyo integration",             active: canUseFeature(plan, "klaviyoIntegration") },
     { label: "Multiple email recipients",       active: canUseFeature(plan, "multipleRecipients") },

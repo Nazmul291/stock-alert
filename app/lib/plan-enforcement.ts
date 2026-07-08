@@ -52,7 +52,10 @@ export async function enforcePlanLimits(shop: string, plan: string | null) {
     where: { shop, inventoryStatus: 'requires_upgrade' },
     _min: { createdAt: true },
     orderBy: { _min: { createdAt: 'asc' } },
-    take: freeSlots,
+    // freeSlots is Infinity for an unlimited plan (Enterprise) — Prisma's
+    // `take` needs a concrete integer, so omit it entirely to mean
+    // "no limit" instead.
+    ...(Number.isFinite(freeSlots) ? { take: freeSlots } : {}),
   });
 
   if (benchedGroups.length === 0) {

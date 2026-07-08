@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import { getIsTestStore } from "../services/billing.server";
 import { getCachedSession } from "../lib/shop-cache.server";
-import { PLAN_LIMITS } from "../lib/plan-limits";
+import { PLAN_LIMITS, formatMaxProducts } from "../lib/plan-limits";
 
 // session.plan is kept in sync by the app_subscriptions/update webhook handler
 // and by the billing confirm action — no Shopify billing API call needed here.
@@ -75,9 +75,9 @@ const RESTRICTION_ROWS: { key: keyof typeof PLAN_LIMITS.basic.restrictions; labe
 const FEATURE_COMPARISON: { label: string; basic: string | boolean; pro: string | boolean; enterprise: string | boolean; comingSoon?: boolean }[] = [
   {
     label: "Products tracked",
-    basic: PLAN_LIMITS.basic.maxProducts.toLocaleString(),
-    pro: PLAN_LIMITS.pro.maxProducts.toLocaleString(),
-    enterprise: PLAN_LIMITS.enterprise.maxProducts.toLocaleString(),
+    basic: formatMaxProducts(PLAN_LIMITS.basic.maxProducts),
+    pro: formatMaxProducts(PLAN_LIMITS.pro.maxProducts),
+    enterprise: formatMaxProducts(PLAN_LIMITS.enterprise.maxProducts),
   },
   { label: "Email notifications", basic: true, pro: true, enterprise: true },
   { label: "Auto-hide sold-out products", basic: true, pro: true, enterprise: true },
@@ -153,7 +153,10 @@ function PlanCards({ activePlan }: { activePlan: "basic" | "pro" | null }) {
         const accent = PLAN_ACCENT[key];
         const isCurrent = activePlan === key;
         const isPurchasable = plan.status === "active";
-        const bullets = [...plan.features, `Up to ${plan.maxProducts.toLocaleString()} products`, "30-day free trial"];
+        const productsBullet = Number.isFinite(plan.maxProducts)
+          ? `Up to ${formatMaxProducts(plan.maxProducts)} products`
+          : "Unlimited products";
+        const bullets = [...plan.features, productsBullet, "30-day free trial"];
 
         const tierIndex = isPurchasable ? PURCHASABLE_PLAN_KEYS.indexOf(key as "basic" | "pro") : -1;
         const buttonLabel =

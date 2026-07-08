@@ -6,7 +6,7 @@ import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getMaxProducts, canUseFeature } from "../lib/plan-limits";
+import { getMaxProducts, canUseFeature, formatMaxProducts, PLAN_LIMITS } from "../lib/plan-limits";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
@@ -275,6 +275,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
   const seenProductIds = new Set<string>();
   let cursor: string | null = null;
   let hasNextPage = true;
+  let pageCount = 0;
 
   try {
     while (hasNextPage && seenProductIds.size < maxProducts) {
@@ -339,8 +340,15 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
       hasNextPage = page.pageInfo.hasNextPage;
       cursor = page.pageInfo.endCursor;
+      pageCount += 1;
 
-      const fetchPct = Math.min(80, 5 + Math.round((seenProductIds.size / maxProducts) * 75));
+      // An unlimited plan (maxProducts: Infinity) has no known total to
+      // measure progress against — seenProductIds.size / Infinity is always
+      // 0, which would freeze the bar at 5% for the whole fetch. Fall back
+      // to a page-count heuristic that keeps inching toward 80% instead.
+      const fetchPct = Number.isFinite(maxProducts)
+        ? Math.min(80, 5 + Math.round((seenProductIds.size / maxProducts) * 75))
+        : Math.min(80, Math.round(80 - 75 / (pageCount + 1)));
       await syncState.progress(shop, fetchPct);
     }
 
@@ -1018,9 +1026,9 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
         </div>
       )}
 
-      {plan !== "pro" && (
+      {Number.isFinite(maxProducts) && plan !== "pro" && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
-          Basic plan: monitoring up to {maxProducts} products. {trackedCount} of {maxProducts} tracked.{" "}
+          {PLAN_LIMITS[plan === "basic" ? "basic" : "none"].name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
           <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}
