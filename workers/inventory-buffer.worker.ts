@@ -23,10 +23,13 @@ import {
 import {
   QUEUE_NAME,
   DIGEST_QUEUE_NAME,
+  VELOCITY_QUEUE_NAME,
   type BufferPayload,
   type InventoryBufferJobData,
 } from "../app/lib/queue.js";
 import { atRiskRepresentativeRows } from "../app/lib/inventory-rollup.server.js";
+import { refreshShopVelocity } from "../app/lib/velocity.server.js";
+import { unauthenticated } from "../app/shopify.server.js";
 
 // ── pg-boss instance ──────────────────────────────────────────────────────────
 const boss = new PgBoss({ connectionString: process.env.DATABASE_URL! });
@@ -40,7 +43,8 @@ boss.on("error", (err) => {
 await boss.start();
 await boss.createQueue(QUEUE_NAME);
 await boss.createQueue(DIGEST_QUEUE_NAME);
-console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, DIGEST_QUEUE_NAME);
+await boss.createQueue(VELOCITY_QUEUE_NAME);
+console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────
 // pg-boss v12 WorkHandler always receives Job<T>[] — an array.
@@ -112,6 +116,41 @@ console.log("[Worker] Digest cron scheduled — fires daily at 08:00 UTC");
 await boss.work<Record<string, never>>(DIGEST_QUEUE_NAME, async () => {
   await processDigests();
 });
+
+// ── Velocity cron ─────────────────────────────────────────────────────────────
+// Fires once per day at 5am UTC, before the 8am digest so it reflects
+// freshly-refreshed stockOutDays. Pro/Enterprise only — recalculating avg
+// daily sales requires an Orders API query per shop, so Basic shops (the
+// large majority of installs) are skipped entirely rather than adding load
+// for a plan that isn't gated on this data anyway.
+await boss.schedule(VELOCITY_QUEUE_NAME, "0 5 * * *", {});
+console.log("[Worker] Velocity cron scheduled — fires daily at 05:00 UTC (Pro/Enterprise only)");
+
+await boss.work<Record<string, never>>(VELOCITY_QUEUE_NAME, async () => {
+  await processVelocityRefresh();
+});
+
+async function processVelocityRefresh(): Promise<void> {
+  const now = new Date();
+  console.log(`[Velocity] Running daily refresh — ${now.toUTCString()}`);
+
+  const shops = await prisma.session.findMany({
+    where: { isOnline: false, plan: { in: ["pro", "enterprise"] } },
+    select: { shop: true },
+  });
+
+  console.log(`[Velocity] ${shops.length} Pro/Enterprise shop(s) eligible`);
+
+  for (const { shop } of shops) {
+    try {
+      const { admin } = await unauthenticated.admin(shop);
+      const { updatedProducts } = await refreshShopVelocity(shop, admin);
+      console.log(`[Velocity] ${shop}: refreshed ${updatedProducts} product(s)`);
+    } catch (err) {
+      console.error(`[Velocity] Failed for ${shop}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
 
 async function processDigests(): Promise<void> {
   const now = new Date();
