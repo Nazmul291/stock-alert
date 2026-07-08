@@ -28,25 +28,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const plan = targetPlan === "pro" ? BILLING_PLAN_PRO : BILLING_PLAN_BASIC;
 
-  // Cancel any active subscription before requesting a new plan to prevent double-billing
-  try {
-    const { appSubscriptions } = await billing.check({
-      plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
-      isTest,
-    });
-    for (const sub of appSubscriptions) {
-      await billing.cancel({
-        subscriptionId: sub.id,
-        isTest,
-        prorate: false,
-      });
-    }
-  } catch {
-    // No active subscription to cancel — proceed normally
-  }
+  // Any existing subscription is cancelled in app.billing.confirm.tsx, only
+  // after the merchant actually approves this new one — not here. Cancelling
+  // eagerly, before Shopify's approval screen even loads, left a window where
+  // a merchant who backed out (or just hadn't finished yet) had zero active
+  // subscription and all their products got deactivated for nothing.
+  const returnUrlWithIntent = `${returnUrl}?intendedPlan=${targetPlan}`;
 
   try {
-    await billing.request({ plan, isTest, returnUrl });
+    await billing.request({ plan, isTest, returnUrl: returnUrlWithIntent });
   } catch (err) {
     // billing.request throws a Response redirect on success — let it through
     if (err instanceof Response) throw err;

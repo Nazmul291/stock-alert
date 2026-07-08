@@ -734,7 +734,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   low_stock: { bg: "#fef3c7", color: "#92400e", label: "Low Stock" },
   out_of_stock: { bg: "#fee2e2", color: "#991b1b", label: "Out of Stock" },
   deactivated: { bg: "#f3f4f6", color: "#374151", label: "Deactivated" },
-  requires_upgrade: { bg: "#ede9fe", color: "#6d28d9", label: "Requires Pro" },
+  requires_upgrade: { bg: "#e0e7ff", color: "#4338ca", label: "Requires Pro" },
   not_tracked: { bg: "#ede9fe", color: "#5b21b6", label: "Not Tracked" },
 };
 
@@ -1147,11 +1147,11 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <span style={{
-                          background: p.monitoringEnabled ? "#d1fae5" : "#f3f4f6",
-                          color: p.monitoringEnabled ? "#065f46" : "#6b7280",
+                          background: p.monitoringEnabled ? "#d1fae5" : p.inventoryStatus === "requires_upgrade" ? "#e0e7ff" : "#f3f4f6",
+                          color: p.monitoringEnabled ? "#065f46" : p.inventoryStatus === "requires_upgrade" ? "#4338ca" : "#6b7280",
                           padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500,
                         }}>
-                          {p.monitoringEnabled ? "Active" : "Disabled"}
+                          {p.monitoringEnabled ? "Active" : p.inventoryStatus === "requires_upgrade" ? "Requires Pro" : "Disabled"}
                         </span>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
