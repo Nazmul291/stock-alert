@@ -1218,8 +1218,15 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
                       <td style={{ padding: "10px 12px" }}>
                         <button
                           onClick={() => setEditProduct(p)}
-                          title="Edit product"
-                          style={{ background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: "#374151", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13 }}
+                          disabled={p.inventoryStatus === "requires_upgrade"}
+                          title={p.inventoryStatus === "requires_upgrade" ? "Upgrade to Pro to edit this product" : "Edit product"}
+                          style={{
+                            background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "5px 8px",
+                            cursor: p.inventoryStatus === "requires_upgrade" ? "not-allowed" : "pointer",
+                            color: p.inventoryStatus === "requires_upgrade" ? "#9ca3af" : "#374151",
+                            opacity: p.inventoryStatus === "requires_upgrade" ? 0.6 : 1,
+                            display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13,
+                          }}
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
