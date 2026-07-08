@@ -13,18 +13,23 @@ export async function enforcePlanLimits(shop: string, plan: string | null) {
   const maxProducts = getMaxProducts(plan);
 
   // Grouped by productId (not row) — a product's variants must be
-  // deactivated/restored together, not piecemeal.
+  // deactivated/restored together, not piecemeal. Ordered by createdAt (when
+  // first tracked), not updatedAt — updatedAt gets bumped by every inventory
+  // webhook, so ranking by it made the "kept" set shift with unrelated stock
+  // activity instead of deterministically keeping whichever products were
+  // tracked first.
   const activeGroups = await prisma.inventoryTracking.groupBy({
     by: ['productId'],
     where: { shop, inventoryStatus: { notIn: [...BENCHED_STATUSES] } },
-    _max: { updatedAt: true },
-    orderBy: { _max: { updatedAt: 'desc' } },
+    _min: { createdAt: true },
+    orderBy: { _min: { createdAt: 'asc' } },
   });
 
   if (activeGroups.length > maxProducts) {
-    // Over the cap — bench the least-recently-touched products as
-    // "requires_upgrade", not "deactivated". That status is reserved for a
-    // merchant's own choice; a plan limit is never that.
+    // Over the cap — bench the most-recently-tracked products (i.e. keep the
+    // first `maxProducts` added) as "requires_upgrade", not "deactivated".
+    // That status is reserved for a merchant's own choice; a plan limit is
+    // never that.
     const toBenchProductIds = activeGroups.slice(maxProducts).map((g) => g.productId);
     await prisma.inventoryTracking.updateMany({
       where: { shop, productId: { in: toBenchProductIds } },
@@ -38,15 +43,15 @@ export async function enforcePlanLimits(shop: string, plan: string | null) {
   }
 
   // The cap grew (upgrade, or a lapsed subscription came back) — restore
-  // previously benched products, oldest-benched first, up to however many
-  // slots are now free. Never touches 'deactivated' rows — those stay off
-  // until the merchant re-enables them.
+  // previously benched products, oldest-tracked first (same createdAt
+  // ordering as above), up to however many slots are now free. Never touches
+  // 'deactivated' rows — those stay off until the merchant re-enables them.
   const freeSlots = maxProducts - activeGroups.length;
   const benchedGroups = await prisma.inventoryTracking.groupBy({
     by: ['productId'],
     where: { shop, inventoryStatus: 'requires_upgrade' },
-    _max: { updatedAt: true },
-    orderBy: { _max: { updatedAt: 'asc' } },
+    _min: { createdAt: true },
+    orderBy: { _min: { createdAt: 'asc' } },
     take: freeSlots,
   });
 

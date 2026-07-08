@@ -572,15 +572,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           const stockOutDays = effectiveSales
             ? Math.min(999, Math.ceil(existingRow.currentQuantity / effectiveSales))
             : undefined;
+
+          // A product benched by plan-limit enforcement can't be re-enabled
+          // from here — that would let a merchant self-service past their
+          // plan's product cap without upgrading.
+          const isPlanBenched = existingRow.inventoryStatus === "requires_upgrade";
+          const effectiveMonitoringEnabled = isPlanBenched ? false : monitoringEnabled;
+
+          // inventoryStatus is the one exception to "leave it untouched"
+          // above: the monitoring toggle owns it at the exact moment it
+          // flips, so plan-limit enforcement can tell "merchant turned this
+          // off" apart from "benched for being over the cap" (see
+          // BENCHED_STATUSES in plan-enforcement.ts). Turning back on
+          // recomputes the real stock status immediately — otherwise it
+          // would stay stuck 'deactivated' forever, since the inventory
+          // webhook skips any row whose previous status was 'deactivated'.
+          const monitoringChanged = !isPlanBenched && effectiveMonitoringEnabled !== existingRow.monitoringEnabled;
+          const recomputedStatus: "in_stock" | "low_stock" | "out_of_stock" =
+            existingRow.currentQuantity <= 0
+              ? "out_of_stock"
+              : existingRow.currentQuantity <= effectiveThreshold
+              ? "low_stock"
+              : "in_stock";
+          const statusPatch = !monitoringChanged
+            ? {}
+            : effectiveMonitoringEnabled
+            ? { inventoryStatus: recomputedStatus }
+            : { inventoryStatus: "deactivated" as const };
+
           await prisma.inventoryTracking.update({
             where: { id: existingRow.id },
             data: {
               productTitle,
               variantTitle: v.variantTitle,
               sku: v.sku,
-              monitoringEnabled,
+              monitoringEnabled: effectiveMonitoringEnabled,
               manualDailySales,
               expectedRestockDate,
+              ...statusPatch,
               ...(stockOutDays !== undefined ? { stockOutDays } : {}),
             },
           });
@@ -696,13 +725,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "bulk_monitoring") {
     const productIds = JSON.parse((form.get("productIds") as string) ?? "[]") as string[];
     const enabled = form.get("monitoringEnabled") === "true";
+    let updatedCount = productIds.length;
     if (productIds.length > 0) {
-      await prisma.inventoryTracking.updateMany({
-        where: { shop, productId: { in: productIds.map(BigInt) } },
-        data: { monitoringEnabled: enabled },
-      });
+      const ids = productIds.map(BigInt);
+      if (enabled) {
+        // Recompute each row's real stock status since it was overwritten
+        // with 'deactivated' while off (see the single-product save above).
+        // Rows benched by plan-limit enforcement ('requires_upgrade') are
+        // skipped — bulk-enabling can't be used to bypass the plan's
+        // product cap without upgrading.
+        const settings = await prisma.storeSettings.findUnique({ where: { shop } });
+        const threshold = settings?.lowStockThreshold ?? 5;
+        const rows = await prisma.inventoryTracking.findMany({
+          where: { shop, productId: { in: ids }, inventoryStatus: { not: "requires_upgrade" } },
+          select: { id: true, productId: true, currentQuantity: true },
+        });
+        await Promise.all(
+          rows.map((r) =>
+            prisma.inventoryTracking.update({
+              where: { id: r.id },
+              data: {
+                monitoringEnabled: true,
+                inventoryStatus: r.currentQuantity <= 0 ? "out_of_stock" : r.currentQuantity <= threshold ? "low_stock" : "in_stock",
+              },
+            }),
+          ),
+        );
+        updatedCount = new Set(rows.map((r) => r.productId.toString())).size;
+      } else {
+        // inventoryStatus is the one exception to the manual-edit-path
+        // "leave it untouched" rule — see the single-product save above for
+        // why: it's what lets plan-limit enforcement tell "merchant turned
+        // this off" apart from "benched for being over the cap".
+        await prisma.inventoryTracking.updateMany({
+          where: { shop, productId: { in: ids } },
+          data: { monitoringEnabled: false, inventoryStatus: "deactivated" },
+        });
+      }
     }
-    return { success: true, message: `Monitoring ${enabled ? "enabled" : "disabled"} for ${productIds.length} product(s).` };
+    return { success: true, message: `Monitoring ${enabled ? "enabled" : "disabled"} for ${updatedCount} product(s).` };
   }
 
   if (intent === "sync") {
