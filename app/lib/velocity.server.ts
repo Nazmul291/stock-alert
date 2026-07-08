@@ -1,3 +1,5 @@
+import prisma from "../db.server";
+
 const ORDERS_QUERY = `
   query GetOrderItems($query: String!, $after: String) {
     orders(first: 250, query: $query, after: $after) {
@@ -76,4 +78,43 @@ export function computeStockOutDays(qty: number, avgDailySales: number | null | 
   if (!avgDailySales || avgDailySales <= 0) return null;
   if (qty <= 0) return 0;
   return Math.min(999, Math.ceil(qty / avgDailySales));
+}
+
+// Recomputes every tracked variant's avgDailySales/stockOutDays for a shop in
+// one pass — the shared implementation behind both the manual "Sync" action
+// and the daily velocity cron (see workers/inventory-buffer.worker.ts).
+// Reads current rows from the DB rather than taking a caller-supplied list,
+// so both callers get identical behavior without duplicating the update loop.
+export async function refreshShopVelocity(shop: string, admin: any): Promise<{ updatedProducts: number }> {
+  const velocity = await calcSalesVelocity(admin);
+  const rows = await prisma.inventoryTracking.findMany({
+    where: { shop },
+    select: { id: true, productId: true, currentQuantity: true },
+  });
+  if (rows.length === 0) return { updatedProducts: 0 };
+
+  const now = new Date();
+  const CHUNK = 100;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    await prisma.$transaction(
+      chunk.map((r) => {
+        // A product absent from the map had zero orders in the window — that's
+        // written explicitly (not skipped) so a product that's gone dead
+        // actually reflects that instead of keeping a stale number from the
+        // last time it sold.
+        const avg = velocity.get(r.productId.toString()) ?? 0;
+        return prisma.inventoryTracking.update({
+          where: { id: r.id },
+          data: {
+            avgDailySales: avg,
+            velocityUpdatedAt: now,
+            stockOutDays: computeStockOutDays(r.currentQuantity, avg),
+          },
+        });
+      }),
+    );
+  }
+
+  return { updatedProducts: new Set(rows.map((r) => r.productId.toString())).size };
 }

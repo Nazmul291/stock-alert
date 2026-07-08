@@ -10,7 +10,7 @@ import { getMaxProducts, canUseFeature, formatMaxProducts, PLAN_LIMITS } from ".
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
-import { calcSalesVelocity, computeStockOutDays } from "../lib/velocity.server";
+import { refreshShopVelocity } from "../lib/velocity.server";
 import { ProductEditModal, rollupVariantStatuses } from "../components/ProductEditModal";
 import type { ProductRow, OptimisticPatch } from "../components/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/InventorySection";
@@ -393,37 +393,18 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       }
     }
 
-    // Velocity calculation — query last 30 days of orders to compute avg daily sales.
-    // avgDailySales/stockOutDays stay product-wide (velocity.server.ts only
-    // resolves orders down to the product level, not variant), so each
+    // Velocity calculation — query last 30 days of orders to compute avg daily
+    // sales. avgDailySales/stockOutDays stay product-wide (velocity.server.ts
+    // only resolves orders down to the product level, not variant), so each
     // variant's stockOutDays is "this variant's own quantity against the
     // product's blended sales rate" — a reasonable approximation until
-    // per-variant velocity is added.
+    // per-variant velocity is added. Same shared function the daily velocity
+    // cron uses (see workers/inventory-buffer.worker.ts) — a manual sync just
+    // gets an on-demand refresh instead of waiting for the next cron run.
     try {
       await syncState.progress(shop, 99);
-      const velocity = await calcSalesVelocity(admin);
-      const velUpdates: Array<{ variantId: bigint; avgDailySales: number; stockOutDays: number | null }> = [];
-      for (const v of allVariants) {
-        const avg = velocity.get(v.productId.toString()) ?? 0;
-        if (avg > 0) {
-          velUpdates.push({
-            variantId: v.variantId,
-            avgDailySales: avg,
-            stockOutDays: computeStockOutDays(v.currentQuantity, avg),
-          });
-        }
-      }
-      if (velUpdates.length > 0) {
-        await prisma.$transaction(
-          velUpdates.map((u) =>
-            prisma.inventoryTracking.updateMany({
-              where: { shop, variantId: u.variantId },
-              data: { avgDailySales: u.avgDailySales, stockOutDays: u.stockOutDays },
-            }),
-          ),
-        );
-        console.log(`[Sync] Velocity updated for ${velUpdates.length} variant row(s) in ${shop}`);
-      }
+      const { updatedProducts } = await refreshShopVelocity(shop, admin);
+      console.log(`[Sync] Velocity updated for ${updatedProducts} product(s) in ${shop}`);
     } catch (err) {
       console.warn(`[Sync] Velocity calc failed for ${shop}:`, err instanceof Error ? err.message : err);
     }

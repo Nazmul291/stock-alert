@@ -2,6 +2,7 @@ import { PgBoss } from "pg-boss";
 
 export const QUEUE_NAME = "inventory-buffer";
 export const DIGEST_QUEUE_NAME = "digest-daily";
+export const VELOCITY_QUEUE_NAME = "velocity-daily";
 export const DEBOUNCE_SECONDS = 10;
 export const JOB_RETRY_LIMIT = 3;
 export const JOB_RETRY_DELAY = 60;

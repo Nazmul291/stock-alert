@@ -149,6 +149,7 @@ model InventoryTracking {
   imageUrl           String?         @map("image_url")
   imageAlt           String?         @map("image_alt")
   avgDailySales        Float?    @map("avg_daily_sales")
+  velocityUpdatedAt    DateTime? @map("velocity_updated_at") @db.Timestamptz
   stockOutDays         Int?      @map("stock_out_days")
   manualDailySales     Float?    @map("manual_daily_sales")
   expectedRestockDate  DateTime? @map("expected_restock_date") @db.Timestamptz
