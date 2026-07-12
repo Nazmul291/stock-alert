@@ -10,6 +10,7 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { canUseFeature } from "../lib/plan-limits";
+import { useSettingsStore } from "../stores/settings-store";
 import { SettingsSkeleton } from "../components/settings/SettingsSkeleton";
 import { PlanCard } from "../components/settings/PlanCard";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
@@ -124,12 +125,20 @@ export default function SettingsPage() {
     `/api/settings-stream?token=${encodeURIComponent(token)}`,
   );
 
+  const setSSEState = useSettingsStore((s) => s.setSSEState);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  // Gate on the store, not the local `data`/`error` above — see the rule
+  // established in dashboard-store.ts.
+  const storeData = useSettingsStore((s) => s.data);
+  const storeError = useSettingsStore((s) => s.error);
+
   return (
     <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
-      {error ? (
-        <SSEErrorRetry message={error} onRetry={retry} />
-      ) : data ? (
-        <SettingsContent data={data} />
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
+      ) : storeData ? (
+        <SettingsContent />
       ) : (
         <SettingsSkeleton />
       )}
@@ -141,8 +150,8 @@ export default function SettingsPage() {
   );
 }
 
-function SettingsContent({ data }: { data: SettingsData }) {
-  const { plan, settings } = data;
+function SettingsContent() {
+  const { plan, settings } = useSettingsStore((s) => s.data!);
   const saveFetcher = useFetcher<typeof action>();
   const saving = saveFetcher.state !== "idle";
   const [autoHideEnabled, setAutoHideEnabled] = useState(settings.autoHideEnabled);
@@ -232,7 +241,7 @@ function SettingsContent({ data }: { data: SettingsData }) {
         </div>
       )}
 
-      <PlanCard plan={plan} />
+      <PlanCard />
 
       <Form method="post" ref={formRef} onChange={markDirty}>
         <InventorySettingsSection

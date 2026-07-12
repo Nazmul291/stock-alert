@@ -1,6 +1,8 @@
 import { canUseFeature, getMaxProducts, formatMaxProducts } from "../../lib/plan-limits";
+import { useSettingsStore } from "../../stores/settings-store";
 
-export function PlanCard({ plan }: { plan: string }) {
+export function PlanCard() {
+  const plan = useSettingsStore((s) => s.data!.plan);
   const isPro = plan === "pro";
   const maxProducts = getMaxProducts(plan);
   const productsLabel = Number.isFinite(maxProducts) ? `Up to ${formatMaxProducts(maxProducts)} products` : "Unlimited products";
