@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getCachedSettings, getCachedSession } from "./shop-cache.server";
+import { getCachedSettings, getCachedSession, getCachedShopEmail } from "./shop-cache.server";
 
 type IntegrationsValues = {
   emailNotifications: boolean;
@@ -34,15 +34,16 @@ export type IntegrationsData = {
 };
 
 export async function loadIntegrationsData(shop: string): Promise<IntegrationsData> {
-  const [settings, storeSession, asanaMappings] = await Promise.all([
+  const [settings, storeSession, storeEmail, asanaMappings] = await Promise.all([
     getCachedSettings(shop),
     getCachedSession(shop),
+    getCachedShopEmail(shop),
     prisma.asanaEventMapping.findMany({ where: { shop } }),
   ]);
 
   return {
     plan: storeSession?.plan ?? "basic",
-    storeEmail: storeSession?.email ?? null,
+    storeEmail,
     asanaMappings: asanaMappings.map((m) => ({
       eventType: m.eventType,
       projectGid: m.projectGid,

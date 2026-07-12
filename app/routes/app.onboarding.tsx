@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getCachedSettings, getCachedSession } from "../lib/shop-cache.server";
+import { getCachedSettings, getCachedShopEmail } from "../lib/shop-cache.server";
 import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
 import { mintSseToken } from "../lib/sse-token.server";
 import { useSSEData } from "../hooks/use-sse-data";
@@ -19,22 +19,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const [settings, dbSession] = await Promise.all([
+  const [settings, ownerEmail] = await Promise.all([
     getCachedSettings(shop),
-    getCachedSession(shop),
+    getCachedShopEmail(shop),
   ]);
 
   const url = new URL(request.url);
   const step = Math.min(2, Math.max(1, parseInt(url.searchParams.get("step") ?? "1")));
 
-  // Domain, email, and a display name are all available from our DB session —
-  // no Shopify API call needed just to show this info in the onboarding UI.
   const displayName = shop
     .replace(".myshopify.com", "")
     .split("-")
     .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
-  const shopInfo = { name: displayName, email: dbSession?.email ?? "", domain: shop };
+  const shopInfo = { name: displayName, email: ownerEmail ?? "", domain: shop };
 
   const existingSettings = {
     lowStockThreshold: settings?.lowStockThreshold ?? 5,
@@ -48,7 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const shop = session.shop;
   const form = await request.formData();
   const intent = form.get("intent") as string;
@@ -77,14 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     };
 
     // Auto-set notification email from the shop's owner email
-    let notificationEmail: string | null = null;
-    try {
-      const res = await admin.graphql(`query { shop { email } }`);
-      const json: any = await res.json();
-      notificationEmail = json.data?.shop?.email || null;
-    } catch {
-      // Non-fatal — leave null, user can set it in Settings
-    }
+    const notificationEmail = await getCachedShopEmail(shop);
 
     await prisma.storeSettings.upsert({
       where: { shop },
