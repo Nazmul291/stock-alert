@@ -1,6 +1,6 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher } from "react-router";
+import { useLoaderData, useActionData, useNavigation, useSubmit, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -14,7 +14,13 @@ import { refreshShopVelocity } from "../lib/velocity.server";
 import { ProductEditModal, rollupVariantStatuses } from "../components/ProductEditModal";
 import type { ProductRow, OptimisticPatch } from "../components/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/InventorySection";
-import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
+import { SSEErrorRetry } from "../components/Skeleton";
+import { ProductsPageSkeleton } from "../components/ProductsPageSkeleton";
+import { ProductSyncButton } from "../components/ProductSyncButton";
+import { ProductsToolbar } from "../components/ProductsToolbar";
+import { ProductsTable } from "../components/ProductsTable";
+import { ProductsBulkActionBar } from "../components/ProductsBulkActionBar";
+import { ProductsPagination } from "../components/ProductsPagination";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { ProductsData } from "../lib/products-data.server";
 
@@ -779,23 +785,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { error: "Unknown action." };
 };
 
-const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  in_stock: { bg: "#d1fae5", color: "#065f46", label: "In Stock" },
-  low_stock: { bg: "#fef3c7", color: "#92400e", label: "Low Stock" },
-  out_of_stock: { bg: "#fee2e2", color: "#991b1b", label: "Out of Stock" },
-  deactivated: { bg: "#f3f4f6", color: "#374151", label: "Deactivated" },
-  requires_upgrade: { bg: "#e0e7ff", color: "#4338ca", label: "Requires Pro" },
-  not_tracked: { bg: "#ede9fe", color: "#5b21b6", label: "Not Tracked" },
-};
-
-const FILTER_TABS = [
-  { key: "all",           label: "All Products" },
-  { key: "out_of_stock",  label: "Out of Stock" },
-  { key: "low_stock",     label: "Low Stock" },
-  { key: "tracked",       label: "Tracked" },
-  { key: "not_tracked",   label: "Not Tracked" },
-];
-
 // Overlays a just-saved product-edit modal's OptimisticPatch onto its server
 // row so the table reflects the change instantly instead of waiting for a
 // page reload. Purely a display overlay — the real DB write (and any alert)
@@ -960,13 +949,10 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
   };
 
   const prevList = prev ? prev.split(",") : [];
-  const prevPageAfter = prevList[prevList.length - 1] ?? null;
-  const prevPagePrev = prevList.slice(0, -1).join(",") || null;
-  const nextPagePrev = [prev, after].filter(Boolean).join(",") || null;
 
   return (
     <>
-      <SyncButton
+      <ProductSyncButton
         slot="primary-action"
         pct={syncPct}
         busy={busy}
@@ -1021,304 +1007,40 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
       )}
 
       <s-section heading="">
-        <Form method="get" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input type="hidden" name="filter" value={filter} />
-          <input
-            name="search"
-            defaultValue={search}
-            placeholder="Search by title…"
-            style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            aria-label="Search products"
-          />
-          <button type="submit" style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontSize: 14 }}>
-            Search
-          </button>
-          {search && (
-            <Link to={`/app/products${filter !== "all" ? `?filter=${filter}` : ""}`}
-              style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", textDecoration: "none", fontSize: 14, color: "#374151", lineHeight: "1.5" }}>
-              Clear
-            </Link>
-          )}
-        </Form>
-
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8, marginBottom: 0 }}>
-          <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e5e7eb", flex: 1 }}>
-            {FILTER_TABS.map((tab) => (
-              <Link
-                key={tab.key}
-                to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null, prev: null })}
-                style={{
-                  padding: "6px 14px", fontSize: 13, textDecoration: "none", whiteSpace: "nowrap",
-                  fontWeight: filter === tab.key || (tab.key === "all" && filter === "all") ? 600 : 400,
-                  color: filter === tab.key || (tab.key === "all" && filter === "all") ? "#111827" : "#6b7280",
-                  borderBottom: filter === tab.key || (tab.key === "all" && filter === "all") ? "2px solid #111827" : "2px solid transparent",
-                }}
-              >
-                {tab.label}
-              </Link>
-            ))}
-          </div>
-          <button
-            onClick={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
-            disabled={csvFetcher.state !== "idle"}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              padding: "5px 12px", borderRadius: 6, border: "1px solid #d1d5db",
-              background: "#fff", color: "#374151", fontSize: 13,
-              cursor: csvFetcher.state !== "idle" ? "not-allowed" : "pointer",
-              opacity: csvFetcher.state !== "idle" ? 0.7 : 1,
-              whiteSpace: "nowrap", marginBottom: 1,
-            }}
-          >
-            {csvFetcher.state !== "idle" ? (
-              <span style={{
-                width: 12, height: 12, borderRadius: "50%",
-                border: "2px solid #d1d5db", borderTopColor: "#374151",
-                animation: "btn-spin 0.6s linear infinite", flexShrink: 0,
-              }} />
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-            )}
-            {csvFetcher.state !== "idle" ? "Exporting…" : "Export CSV"}
-          </button>
-        </div>
+        <ProductsToolbar
+          search={search}
+          filter={filter}
+          buildUrl={buildUrl}
+          onExportCsv={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
+          exporting={csvFetcher.state !== "idle"}
+        />
         <div style={{ marginBottom: 16 }} />
 
-        {displayProducts.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>
-            <p style={{ fontSize: 16, marginBottom: 8 }}>No products found.</p>
-            <p style={{ fontSize: 14 }}>
-              {filter === "not_tracked"
-                ? "All products have been synced and are tracked."
-                : "Click Sync Products to import your Shopify inventory."}
-            </p>
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <thead>
-                <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
-                  <th style={{ padding: "8px 8px 8px 12px", width: 32 }}>
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleSelectAll}
-                      disabled={selectableIds.length === 0}
-                      aria-label="Select all"
-                      style={{ cursor: selectableIds.length === 0 ? "not-allowed" : "pointer" }}
-                    />
-                  </th>
-                  {[
-                    { label: "Product" },
-                    { label: "SKU" },
-                    { label: "Quantity" },
-                    { label: "Status", width: 130 },
-                    { label: "Days Left" },
-                    { label: "Reorder By" },
-                    { label: "Monitor Alert" },
-                    { label: "Action" },
-                  ].map(({ label, width }) => (
-                    <th key={label} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap", ...(width ? { width, minWidth: width } : {}) }}>{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {displayProducts.map((p: ProductRow) => {
-                  const s = STATUS_STYLE[p.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
-                  const isNotTracked = p.inventoryStatus === "not_tracked";
-                  const hasVariants = (p.variantCount ?? 0) > 1;
-                  const isExpanded = expandedProductIds.has(p.productId);
-                  const mixedVariants = hasVariants && (p.variantsAtRiskCount ?? 0) > 0 && (p.variantsAtRiskCount ?? 0) < (p.variantCount ?? 0);
-                  return (
-                    <Fragment key={p.id}>
-                    <tr style={{ borderBottom: isExpanded ? "none" : "1px solid #f3f4f6", opacity: isNotTracked ? 0.8 : 1 }}>
-                      <td style={{ padding: "10px 8px 10px 12px", width: 32 }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(p.productId)}
-                          onChange={() => toggleSelect(p.productId)}
-                          disabled={!p.isTracked}
-                          aria-label={`Select ${p.productTitle}`}
-                          style={{ cursor: p.isTracked ? "pointer" : "not-allowed" }}
-                        />
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          {hasVariants ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleExpandProduct(p.productId)}
-                              aria-label={isExpanded ? "Collapse variants" : "Expand variants"}
-                              style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#6b7280", flexShrink: 0, transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform .15s" }}
-                            >
-                              ▸
-                            </button>
-                          ) : (
-                            <span style={{ width: 18, flexShrink: 0 }} />
-                          )}
-                          {p.imageUrl ? (
-                            <img src={p.imageUrl} alt={p.imageAlt} width={40} height={40} loading="lazy"
-                              style={{ borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
-                          ) : (
-                            <div style={{ width: 40, height: 40, borderRadius: 6, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 18 }}>
-                              ▢
-                            </div>
-                          )}
-                          <span style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: "10px 12px", color: "#6b7280" }}>{hasVariants ? `${p.variantCount} variants` : (p.sku ?? "—")}</td>
-                      <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.inventoryStatus === "out_of_stock" ? "#dc2626" : p.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
-                        {isNotTracked ? "—" : p.currentQuantity}
-                      </td>
-                      <td style={{ padding: "10px 12px", width: 130, minWidth: 130 }}>
-                        {mixedVariants ? (
-                          <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                            {p.variantsAtRiskCount} of {p.variantCount} low
-                          </span>
-                        ) : (
-                          <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                            {s.label}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} isManual={!!p.manualDailySales} />
-                        {p.expectedRestockDate && (
-                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
-                            Back: {new Date(p.expectedRestockDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <span style={{
-                          background: p.monitoringEnabled ? "#d1fae5" : p.inventoryStatus === "requires_upgrade" ? "#e0e7ff" : "#f3f4f6",
-                          color: p.monitoringEnabled ? "#065f46" : p.inventoryStatus === "requires_upgrade" ? "#4338ca" : "#6b7280",
-                          padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500,
-                        }}>
-                          {p.monitoringEnabled ? "Active" : p.inventoryStatus === "requires_upgrade" ? "Requires Pro" : "Disabled"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <button
-                          onClick={() => setEditProduct(p)}
-                          disabled={p.inventoryStatus === "requires_upgrade"}
-                          title={p.inventoryStatus === "requires_upgrade" ? "Upgrade to Pro to edit this product" : "Edit product"}
-                          style={{
-                            background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "5px 8px",
-                            cursor: p.inventoryStatus === "requires_upgrade" ? "not-allowed" : "pointer",
-                            color: p.inventoryStatus === "requires_upgrade" ? "#9ca3af" : "#374151",
-                            opacity: p.inventoryStatus === "requires_upgrade" ? 0.6 : 1,
-                            display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13,
-                          }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                          </svg>
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                    {isExpanded && hasVariants && (
-                      <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
-                        <td />
-                        <td colSpan={7} style={{ padding: "4px 12px 12px 40px" }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            {(p.variants ?? []).map((v) => {
-                              const vs = STATUS_STYLE[v.inventoryStatus] ?? STATUS_STYLE.not_tracked;
-                              return (
-                                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "#fff", borderRadius: 6, border: "1px solid #f0f0f0" }}>
-                                  <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{v.variantTitle ?? "—"}</span>
-                                  <span style={{ fontSize: 12, color: "#9ca3af" }}>{v.sku ?? "—"}</span>
-                                  <span style={{ fontWeight: 600, fontSize: 13, width: 50, textAlign: "right", color: v.inventoryStatus === "out_of_stock" ? "#dc2626" : v.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
-                                    {v.currentQuantity}
-                                  </span>
-                                  <span style={{ background: vs.bg, color: vs.color, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", width: 90, textAlign: "center" }}>
-                                    {vs.label}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <ProductsTable
+          products={displayProducts}
+          filter={filter}
+          selectedIds={selectedIds}
+          toggleSelect={toggleSelect}
+          allSelected={allSelected}
+          toggleSelectAll={toggleSelectAll}
+          selectableIds={selectableIds}
+          expandedProductIds={expandedProductIds}
+          toggleExpandProduct={toggleExpandProduct}
+          supplierLeadTimeDays={supplierLeadTimeDays}
+          onEditProduct={setEditProduct}
+        />
 
         {selectedIds.size > 0 && (
-          <div style={{ position: "sticky", bottom: 16, zIndex: 50, margin: "12px 0 0", background: "#111827", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 4px 20px rgba(0,0,0,0.25)" }}>
-            <span style={{ color: "#e5e7eb", fontSize: 14, fontWeight: 500, flex: 1 }}>
-              {selectedIds.size} product{selectedIds.size !== 1 ? "s" : ""} selected
-            </span>
-            <button
-              type="button"
-              onClick={() => submitBulk(true)}
-              disabled={bulkFetcher.state === "submitting"}
-              style={{ padding: "7px 14px", borderRadius: 6, border: "none", background: "#059669", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-            >
-              Enable Monitoring
-            </button>
-            <button
-              type="button"
-              onClick={() => submitBulk(false)}
-              disabled={bulkFetcher.state === "submitting"}
-              style={{ padding: "7px 14px", borderRadius: 6, border: "none", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-            >
-              Disable Monitoring
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedIds(new Set())}
-              style={{ padding: "7px 12px", borderRadius: 6, border: "1px solid #4b5563", background: "transparent", color: "#9ca3af", cursor: "pointer", fontSize: 13 }}
-            >
-              Clear
-            </button>
-          </div>
+          <ProductsBulkActionBar
+            count={selectedIds.size}
+            busy={bulkFetcher.state === "submitting"}
+            onEnable={() => submitBulk(true)}
+            onDisable={() => submitBulk(false)}
+            onClear={() => setSelectedIds(new Set())}
+          />
         )}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
-          <span style={{ fontSize: 13, color: "#6b7280" }}>
-            {after ? `Page ${prevList.length + 2}` : "Page 1"}
-          </span>
-          <div style={{ display: "flex", gap: 8 }}>
-            {prevList.length > 1 && (
-              <Link
-                to={buildUrl({ after: null, prev: null })}
-                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
-              >
-                ← First
-              </Link>
-            )}
-            {after && (
-              <Link
-                to={buildUrl({ after: prevPageAfter, prev: prevPagePrev })}
-                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
-              >
-                ← Previous
-              </Link>
-            )}
-            {pageInfo.hasNextPage && pageInfo.endCursor && (
-              <Link
-                to={buildUrl({ after: pageInfo.endCursor, prev: nextPagePrev })}
-                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
-              >
-                Next →
-              </Link>
-            )}
-          </div>
-        </div>
+        <ProductsPagination after={after} prevList={prevList} pageInfo={pageInfo} buildUrl={buildUrl} />
       </s-section>
 
       {editProduct && (
@@ -1340,27 +1062,6 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
   );
 }
 
-function ProductsPageSkeleton() {
-  return (
-    <>
-      <s-button slot="primary-action" disabled>Sync Products</s-button>
-      <s-section heading="">
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <SkeletonBlock width="100%" height={32} borderRadius={6} />
-        </div>
-        <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
-          {Array.from({ length: 5 }, (_, i) => <SkeletonBlock key={i} width={90} height={20} />)}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {Array.from({ length: 8 }, (_, i) => (
-            <SkeletonBlock key={i} width="100%" height={56} borderRadius={6} />
-          ))}
-        </div>
-      </s-section>
-    </>
-  );
-}
-
 function timeAgo(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (secs < 60) return "just now";
@@ -1369,71 +1070,6 @@ function timeAgo(iso: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function SyncButton({ pct, busy, onClick, slot }: { pct: number | null; busy: boolean; onClick: () => void; slot?: Lowercase<string> }) {
-  const syncing = pct !== null;
-  const displayPct = Math.round(pct ?? 0);
-  const active = syncing || busy;
-  return (
-    <s-button
-      slot={slot}
-      variant="primary"
-      disabled={active ? true : undefined}
-      onClick={!active ? onClick : undefined}
-    >
-      {syncing ? `Syncing ${displayPct}%` : busy ? "Syncing…" : "Sync Products"}
-    </s-button>
-  );
-}
-
-function ReorderBadge({ days, leadTime }: { days: number | null; leadTime: number }) {
-  if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
-  if (days === 0) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
-
-  const daysUntilReorder = days - leadTime;
-
-  if (daysUntilReorder <= 0) {
-    return (
-      <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-        Reorder now!
-      </span>
-    );
-  }
-
-  const reorderDate = new Date();
-  reorderDate.setDate(reorderDate.getDate() + daysUntilReorder);
-  const label = reorderDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const isUrgent = daysUntilReorder <= 3;
-
-  return (
-    <span style={{
-      background: isUrgent ? "#fef3c7" : "#f9fafb",
-      color: isUrgent ? "#92400e" : "#374151",
-      border: `1px solid ${isUrgent ? "#fde68a" : "#e5e7eb"}`,
-      padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: isUrgent ? 600 : 400,
-      whiteSpace: "nowrap",
-    }}>
-      {label}
-    </span>
-  );
-}
-
-function StockOutBadge({ days, isManual }: { days: number | null; isManual?: boolean }) {
-  if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
-  if (days === 0) return (
-    <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
-      0d
-    </span>
-  );
-  const bg    = days < 7  ? "#fee2e2" : days < 14 ? "#fef3c7" : "#d1fae5";
-  const color = days < 7  ? "#991b1b" : days < 14 ? "#92400e" : "#065f46";
-  return (
-    <span style={{ background: bg, color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}
-      title={isManual ? "Based on manual daily sales rate" : "Based on 30-day sales average"}>
-      ~{days}d{isManual ? " ✎" : ""}
-    </span>
-  );
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
