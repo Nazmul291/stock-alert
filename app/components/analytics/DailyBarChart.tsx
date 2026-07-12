@@ -1,4 +1,7 @@
-export function DailyBarChart({ data }: { data: { day: string; count: number }[] }) {
+import { useAnalyticsStore } from "../../stores/analytics-store";
+
+export function DailyBarChart() {
+  const data = useAnalyticsStore((s) => s.data!.daily30);
   const BAR_W = 16;
   const GAP   = 4;
   const BAR_H = 64;

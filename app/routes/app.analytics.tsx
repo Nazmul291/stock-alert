@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -6,6 +7,7 @@ import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { AnalyticsData } from "../lib/analytics-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
+import { useAnalyticsStore } from "../stores/analytics-store";
 import { AnalyticsStatCards, AnalyticsStatCardsSkeleton } from "../components/analytics/AnalyticsStatCards";
 import { AlertTypeBreakdown, AlertTypeBreakdownSkeleton } from "../components/analytics/AlertTypeBreakdown";
 import { ChannelBreakdown, ChannelBreakdownSkeleton } from "../components/analytics/ChannelBreakdown";
@@ -31,12 +33,20 @@ export default function AnalyticsPage() {
     `/api/analytics-stream?token=${encodeURIComponent(token)}`,
   );
 
+  const setSSEState = useAnalyticsStore((s) => s.setSSEState);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  // Gate on the store, not the local `data`/`error` above — see the rule
+  // established in dashboard-store.ts.
+  const storeData = useAnalyticsStore((s) => s.data);
+  const storeError = useAnalyticsStore((s) => s.error);
+
   return (
     <s-page heading="Analytics" sub-heading="Alert trends and inventory health over the last 30 days">
-      {error ? (
-        <SSEErrorRetry message={error} onRetry={retry} />
-      ) : data ? (
-        <AnalyticsContent data={data} />
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
+      ) : storeData ? (
+        <AnalyticsContent />
       ) : (
         <AnalyticsSkeleton />
       )}
@@ -44,32 +54,35 @@ export default function AnalyticsPage() {
   );
 }
 
-function AnalyticsContent({ data }: { data: AnalyticsData }) {
+function AnalyticsContent() {
+  const totalThisMonth = useAnalyticsStore((s) => s.data!.totalThisMonth);
+  const topProducts = useAnalyticsStore((s) => s.data!.topProducts);
+
   return (
     <>
       {/* Summary stat cards */}
-      <AnalyticsStatCards data={data} />
+      <AnalyticsStatCards />
 
       {/* Row 2: Type breakdown + Channel */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <s-section heading="Alert Types">
-          <AlertTypeBreakdown data={data.typeBreakdown} total={data.totalThisMonth} />
+          <AlertTypeBreakdown />
         </s-section>
         <s-section heading="Notification Channels">
-          <ChannelBreakdown email={data.channel.email} slack={data.channel.slack} />
+          <ChannelBreakdown />
         </s-section>
       </div>
 
       {/* Daily volume chart */}
       <s-section heading="Daily Alert Volume — Last 30 Days">
-        <DailyBarChart data={data.daily30} />
+        <DailyBarChart />
       </s-section>
 
       {/* Top products */}
-      {data.topProducts.length > 0 && (
+      {topProducts.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <s-section heading="Most Alerted Products">
-            <TopProductsChart data={data.topProducts} />
+            <TopProductsChart />
           </s-section>
         </div>
       )}
@@ -77,11 +90,11 @@ function AnalyticsContent({ data }: { data: AnalyticsData }) {
       {/* Stock health */}
       <div style={{ marginTop: 16 }}>
         <s-section heading="Current Stock Health">
-          <StockHealthBar health={data.stockHealth} />
+          <StockHealthBar />
         </s-section>
       </div>
 
-      {data.totalThisMonth === 0 && (
+      {totalThisMonth === 0 && (
         <div style={{ marginTop: 24, padding: "32px", textAlign: "center", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10 }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
           <p style={{ fontWeight: 600, color: "#374151", marginBottom: 6 }}>No alerts yet</p>

@@ -1,6 +1,9 @@
+import { useAnalyticsStore } from "../../stores/analytics-store";
 import { SkeletonBlock } from "../Skeleton";
 
-export function ChannelBreakdown({ email, slack }: { email: number; slack: number }) {
+export function ChannelBreakdown() {
+  const email = useAnalyticsStore((s) => s.data!.channel.email);
+  const slack = useAnalyticsStore((s) => s.data!.channel.slack);
   const total = email + slack;
   if (total === 0) return <p style={{ fontSize: 14, color: "#9ca3af" }}>No notifications sent yet.</p>;
 

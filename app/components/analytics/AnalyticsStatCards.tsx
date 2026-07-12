@@ -1,4 +1,4 @@
-import type { AnalyticsData } from "../../lib/analytics-data.server";
+import { useAnalyticsStore } from "../../stores/analytics-store";
 import { SkeletonBlock } from "../Skeleton";
 
 function StatCard({ label, value, color, sub }: { label: string; value: string | number; color: string; sub?: string }) {
@@ -11,8 +11,8 @@ function StatCard({ label, value, color, sub }: { label: string; value: string |
   );
 }
 
-export function AnalyticsStatCards({ data }: { data: AnalyticsData }) {
-  const { totalThisMonth, totalLastMonth, avgPerDay, busiest } = data;
+export function AnalyticsStatCards() {
+  const { totalThisMonth, totalLastMonth, avgPerDay, busiest } = useAnalyticsStore((s) => s.data!);
   const pctChange = totalLastMonth === 0
     ? null
     : Math.round(((totalThisMonth - totalLastMonth) / totalLastMonth) * 100);

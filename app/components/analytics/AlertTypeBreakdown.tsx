@@ -1,3 +1,4 @@
+import { useAnalyticsStore } from "../../stores/analytics-store";
 import { SkeletonBlock } from "../Skeleton";
 
 const TYPE_COLORS: Record<string, { color: string; label: string }> = {
@@ -6,7 +7,9 @@ const TYPE_COLORS: Record<string, { color: string; label: string }> = {
   restock:      { color: "#10b981", label: "Restock" },
 };
 
-export function AlertTypeBreakdown({ data, total }: { data: { type: string; count: number }[]; total: number }) {
+export function AlertTypeBreakdown() {
+  const data = useAnalyticsStore((s) => s.data!.typeBreakdown);
+  const total = useAnalyticsStore((s) => s.data!.totalThisMonth);
   if (total === 0) return <p style={{ fontSize: 14, color: "#9ca3af" }}>No data yet.</p>;
 
   const R = 46;

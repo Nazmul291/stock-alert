@@ -1,4 +1,7 @@
-export function TopProductsChart({ data }: { data: { title: string; count: number }[] }) {
+import { useAnalyticsStore } from "../../stores/analytics-store";
+
+export function TopProductsChart() {
+  const data = useAnalyticsStore((s) => s.data!.topProducts);
   const maxCount = Math.max(...data.map((d) => d.count), 1);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

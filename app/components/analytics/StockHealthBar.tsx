@@ -1,4 +1,7 @@
-export function StockHealthBar({ health }: { health: { inStock: number; lowStock: number; outOfStock: number; deactivated: number } }) {
+import { useAnalyticsStore } from "../../stores/analytics-store";
+
+export function StockHealthBar() {
+  const health = useAnalyticsStore((s) => s.data!.stockHealth);
   const total = health.inStock + health.lowStock + health.outOfStock + health.deactivated;
   if (total === 0) return <p style={{ fontSize: 14, color: "#9ca3af" }}>No products tracked yet.</p>;
 
