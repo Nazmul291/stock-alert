@@ -1,7 +1,8 @@
 import { Form } from "react-router";
-import type { BackInStockData } from "../../lib/back-in-stock-data.server";
+import { useBackInStockStore } from "../../stores/back-in-stock-store";
 
-export function BackInStockProductGroups({ productGroups }: { productGroups: BackInStockData["productGroups"] }) {
+export function BackInStockProductGroups() {
+  const productGroups = useBackInStockStore((s) => s.data!.productGroups);
   return (
     <div style={{ marginTop: 24 }}>
       <s-section heading="Subscribers by Product">

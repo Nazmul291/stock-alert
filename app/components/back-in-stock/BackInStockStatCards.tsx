@@ -1,4 +1,4 @@
-import type { BackInStockData } from "../../lib/back-in-stock-data.server";
+import { useBackInStockStore } from "../../stores/back-in-stock-store";
 import { SkeletonBlock } from "../Skeleton";
 
 function statCard(label: string, value: number | string, color: string) {
@@ -10,13 +10,14 @@ function statCard(label: string, value: number | string, color: string) {
   );
 }
 
-export function BackInStockStatCards({ data }: { data: BackInStockData }) {
+export function BackInStockStatCards() {
+  const { total, pendingCount, notifiedCount, productGroups } = useBackInStockStore((s) => s.data!);
   return (
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
-      {statCard("Total Subscribers", data.total, "#111827")}
-      {statCard("Waiting", data.pendingCount, "#d97706")}
-      {statCard("Notified", data.notifiedCount, "#059669")}
-      {statCard("Products Watched", data.productGroups.length, "#4f46e5")}
+      {statCard("Total Subscribers", total, "#111827")}
+      {statCard("Waiting", pendingCount, "#d97706")}
+      {statCard("Notified", notifiedCount, "#059669")}
+      {statCard("Products Watched", productGroups.length, "#4f46e5")}
     </div>
   );
 }

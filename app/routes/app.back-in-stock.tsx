@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -7,6 +8,7 @@ import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { BackInStockData } from "../lib/back-in-stock-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
+import { useBackInStockStore } from "../stores/back-in-stock-store";
 import { BackInStockStatCards, BackInStockStatCardsSkeleton } from "../components/back-in-stock/BackInStockStatCards";
 import { BackInStockProductGroups } from "../components/back-in-stock/BackInStockProductGroups";
 import { BackInStockSubscriberList, BackInStockSubscriberListSkeleton } from "../components/back-in-stock/BackInStockSubscriberList";
@@ -57,15 +59,23 @@ export default function BackInStockPage() {
     `/api/back-in-stock-stream?token=${encodeURIComponent(token)}&page=${page}`,
   );
 
-  if (error) {
+  const setLoaderData = useBackInStockStore((s) => s.setLoaderData);
+  const setSSEState = useBackInStockStore((s) => s.setSSEState);
+  useEffect(() => { setLoaderData({ page }); }, [page, setLoaderData]);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  const storeData = useBackInStockStore((s) => s.data);
+  const storeError = useBackInStockStore((s) => s.error);
+
+  if (storeError) {
     return (
       <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
-        <SSEErrorRetry message={error} onRetry={retry} />
+        <SSEErrorRetry message={storeError} onRetry={retry} />
       </s-page>
     );
   }
 
-  if (!data) {
+  if (!storeData) {
     return (
       <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
         <BackInStockStatCardsSkeleton />
@@ -78,12 +88,12 @@ export default function BackInStockPage() {
 
   return (
     <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
-      <BackInStockStatCards data={data} />
+      <BackInStockStatCards />
 
-      {data.productGroups.length > 0 && <BackInStockProductGroups productGroups={data.productGroups} />}
+      {storeData.productGroups.length > 0 && <BackInStockProductGroups />}
 
       <div style={{ marginTop: 24 }}>
-        <BackInStockSubscriberList data={data} page={page} />
+        <BackInStockSubscriberList />
       </div>
     </s-page>
   );

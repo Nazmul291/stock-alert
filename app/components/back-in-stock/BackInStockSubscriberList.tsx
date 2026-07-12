@@ -1,10 +1,11 @@
 import { useFetcher } from "react-router";
 import { format } from "date-fns";
-import type { BackInStockData } from "../../lib/back-in-stock-data.server";
+import { useBackInStockStore } from "../../stores/back-in-stock-store";
 import { SkeletonBlock } from "../Skeleton";
 
-export function BackInStockSubscriberList({ data, page }: { data: BackInStockData; page: number }) {
-  const { subscribers, total, totalPages } = data;
+export function BackInStockSubscriberList() {
+  const { subscribers, total, totalPages } = useBackInStockStore((s) => s.data!);
+  const page = useBackInStockStore((s) => s.page);
   const deleteFetcher = useFetcher();
   const buildUrl = (p: number) => `/app/back-in-stock${p > 1 ? `?page=${p}` : ""}`;
 
