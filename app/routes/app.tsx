@@ -35,6 +35,23 @@ function GlobalStyles() {
       @keyframes nav-spin { to { transform: rotate(360deg); } }
       @keyframes btn-spin { to { transform: rotate(360deg); } }
       @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+      /* Applied to a dynamic value's own wrapper (a plain span/div we render,
+         never the s-* web component itself — its text lives in light DOM
+         slotted content, so this cascades normally). The element keeps
+         rendering its real markup with a placeholder/default value so its
+         size matches the eventual real content (no layout shift); this class
+         just hides that text and paints a pulsing gray bar over it. Remove
+         the class once real data arrives — everything else about the element
+         stays untouched. */
+      .skeleton-text {
+        color: transparent !important;
+        background-color: #e5e7eb;
+        border-radius: 4px;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      .skeleton-text * { visibility: hidden; }
+      .skeleton-text svg { display: none; }
     `}</style>
   );
 }

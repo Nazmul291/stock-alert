@@ -6,12 +6,13 @@ import { canUseFeature } from "../../lib/plan-limits";
 
 // Email — connect/disconnect via modal, no inline toggle.
 export function EmailIntegrationSection() {
-  const notificationEmail = useIntegrationsStore((s) => s.data!.settings.notificationEmail);
-  const emailNotifications = useIntegrationsStore((s) => s.data!.settings.emailNotifications);
-  const storeEmail = useIntegrationsStore((s) => s.data!.storeEmail);
-  const plan = useIntegrationsStore((s) => s.data!.plan);
+  const loading = useIntegrationsStore((s) => s.data === null);
+  const notificationEmail = useIntegrationsStore((s) => s.data?.settings.notificationEmail) ?? "";
+  const emailNotifications = useIntegrationsStore((s) => s.data?.settings.emailNotifications) ?? false;
+  const storeEmail = useIntegrationsStore((s) => s.data?.storeEmail) ?? null;
+  const plan = useIntegrationsStore((s) => s.data?.plan) ?? "basic";
   const canMultipleRecipients = canUseFeature(plan, "multipleRecipients");
-  const retry = useIntegrationsStore((s) => s.retry)!;
+  const retry = useIntegrationsStore((s) => s.retry);
 
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailInput, setEmailInput] = useState(notificationEmail);
@@ -27,7 +28,7 @@ export function EmailIntegrationSection() {
       if (d.success) {
         setEmailModalOpen(false);
         setEmailError(null);
-        retry();
+        retry?.();
       } else {
         setEmailError(d.error ?? "Something went wrong.");
       }
@@ -37,7 +38,7 @@ export function EmailIntegrationSection() {
 
   useEffect(() => {
     const d = emailDisableFetcher.data;
-    if (d?.intent === "disable_email" && d?.success) retry();
+    if (d?.intent === "disable_email" && d?.success) retry?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emailDisableFetcher.data]);
 
@@ -46,7 +47,7 @@ export function EmailIntegrationSection() {
       <ConnectRow
         icon={<span style={{ fontSize: 20 }}>✉️</span>}
         title="Email"
-        connected={emailNotifications}
+        connected={!loading && emailNotifications}
         connectLabel="Connect"
         onConnect={() => { setEmailInput(notificationEmail); setEmailError(null); setEmailModalOpen(true); }}
         onDisconnect={() => emailDisableFetcher.submit({ intent: "disable_email" }, { method: "post" })}

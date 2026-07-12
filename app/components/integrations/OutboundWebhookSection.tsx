@@ -6,13 +6,19 @@ export function OutboundWebhookSection({ value, onChange }: {
   value: string;
   onChange: (value: string) => void;
 }) {
-  const canUse = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "outboundWebhook");
+  const loading = useIntegrationsStore((s) => s.data === null);
+  const canUse = canUseFeature(useIntegrationsStore((s) => s.data?.plan) ?? "basic", "outboundWebhook");
   return (
     <div style={{ marginTop: 24 }}>
       <s-section heading="Outbound Webhook">
         <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
           Fire a JSON POST to any URL on every stock event. Connect Zapier, Make, or your own ERP.{" "}
-          {!canUse && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
+          {!loading && !canUse && (
+            <>
+              <span style={{ color: "#9ca3af" }}>Requires Professional plan.</span>{" "}
+              <s-link href="/app/billing">Upgrade →</s-link>
+            </>
+          )}
         </p>
 
         <div style={{ opacity: canUse ? 1 : 0.45, pointerEvents: canUse ? "auto" : "none" }}>

@@ -7,9 +7,10 @@ import { useIntegrationsStore } from "../../stores/integrations-store";
 // merchant enters, so "connecting" is just proving they own that number: send
 // a code, they type it back. No Meta login involved at all.
 export function WhatsAppIntegrationSection() {
-  const phone = useIntegrationsStore((s) => s.data!.settings.whatsappPhone);
-  const phoneVerified = useIntegrationsStore((s) => s.data!.settings.whatsappPhoneVerified);
-  const retry = useIntegrationsStore((s) => s.retry)!;
+  const loading = useIntegrationsStore((s) => s.data === null);
+  const phone = useIntegrationsStore((s) => s.data?.settings.whatsappPhone) ?? "";
+  const phoneVerified = useIntegrationsStore((s) => s.data?.settings.whatsappPhoneVerified) ?? false;
+  const retry = useIntegrationsStore((s) => s.retry);
 
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappStep, setWhatsappStep] = useState<"phone" | "code">("phone");
@@ -44,7 +45,7 @@ export function WhatsAppIntegrationSection() {
         setWhatsappError(null);
         setWhatsappStep("phone");
         setWhatsappCodeInput("");
-        retry();
+        retry?.();
       } else {
         setWhatsappError(d.error ?? "Incorrect or expired code.");
       }
@@ -54,7 +55,7 @@ export function WhatsAppIntegrationSection() {
 
   useEffect(() => {
     const d = whatsappDisconnectFetcher.data;
-    if (d?.intent === "disconnect_whatsapp" && d?.success) retry();
+    if (d?.intent === "disconnect_whatsapp" && d?.success) retry?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whatsappDisconnectFetcher.data]);
 
@@ -72,7 +73,7 @@ export function WhatsAppIntegrationSection() {
           />
         }
         title="WhatsApp"
-        connected={phoneVerified}
+        connected={!loading && phoneVerified}
         locked
         lockedNode={<span style={{ color: "#9ca3af", fontSize: 13 }}>Coming Soon</span>}
         hideEdit

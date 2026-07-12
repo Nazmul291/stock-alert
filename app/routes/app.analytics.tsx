@@ -3,14 +3,14 @@ import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
+import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { AnalyticsData } from "../lib/analytics-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { useAnalyticsStore } from "../stores/analytics-store";
-import { AnalyticsStatCards, AnalyticsStatCardsSkeleton } from "../components/analytics/AnalyticsStatCards";
-import { AlertTypeBreakdown, AlertTypeBreakdownSkeleton } from "../components/analytics/AlertTypeBreakdown";
-import { ChannelBreakdown, ChannelBreakdownSkeleton } from "../components/analytics/ChannelBreakdown";
+import { AnalyticsStatCards } from "../components/analytics/AnalyticsStatCards";
+import { AlertTypeBreakdown } from "../components/analytics/AlertTypeBreakdown";
+import { ChannelBreakdown } from "../components/analytics/ChannelBreakdown";
 import { DailyBarChart } from "../components/analytics/DailyBarChart";
 import { TopProductsChart } from "../components/analytics/TopProductsChart";
 import { StockHealthBar } from "../components/analytics/StockHealthBar";
@@ -38,25 +38,27 @@ export default function AnalyticsPage() {
 
   // Gate on the store, not the local `data`/`error` above — see the rule
   // established in dashboard-store.ts.
-  const storeData = useAnalyticsStore((s) => s.data);
   const storeError = useAnalyticsStore((s) => s.error);
 
   return (
     <s-page heading="Analytics" sub-heading="Alert trends and inventory health over the last 30 days">
       {storeError ? (
         <SSEErrorRetry message={storeError} onRetry={retry} />
-      ) : storeData ? (
-        <AnalyticsContent />
       ) : (
-        <AnalyticsSkeleton />
+        <AnalyticsContent />
       )}
     </s-page>
   );
 }
 
+// Always renders the real layout — descendants read `loading` off the store
+// themselves and apply the shared `.skeleton-text` class to just their
+// dynamic value nodes, so there's a single markup tree for both states
+// instead of a separate skeleton component to keep in sync.
 function AnalyticsContent() {
-  const totalThisMonth = useAnalyticsStore((s) => s.data!.totalThisMonth);
-  const topProducts = useAnalyticsStore((s) => s.data!.topProducts);
+  const loading = useAnalyticsStore((s) => s.data === null);
+  const totalThisMonth = useAnalyticsStore((s) => s.data?.totalThisMonth) ?? 0;
+  const topProducts = useAnalyticsStore((s) => s.data?.topProducts) ?? [];
 
   return (
     <>
@@ -78,8 +80,9 @@ function AnalyticsContent() {
         <DailyBarChart />
       </s-section>
 
-      {/* Top products */}
-      {topProducts.length > 0 && (
+      {/* Top products — held back until data confirms there actually are
+          any, rather than reserving space on every load. */}
+      {(!loading && topProducts.length > 0) && (
         <div style={{ marginTop: 16 }}>
           <s-section heading="Most Alerted Products">
             <TopProductsChart />
@@ -94,33 +97,16 @@ function AnalyticsContent() {
         </s-section>
       </div>
 
-      {totalThisMonth === 0 && (
+      {/* Genuinely-empty state — loading has its own visual state (the
+          sections above render with placeholder/zeroed content), so this
+          only appears once data has actually confirmed there's nothing. */}
+      {!loading && totalThisMonth === 0 && (
         <div style={{ marginTop: 24, padding: "32px", textAlign: "center", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10 }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
           <p style={{ fontWeight: 600, color: "#374151", marginBottom: 6 }}>No alerts yet</p>
           <p style={{ fontSize: 14, color: "#6b7280" }}>Analytics will appear once Stock Alert starts firing notifications.</p>
         </div>
       )}
-    </>
-  );
-}
-
-function AnalyticsSkeleton() {
-  return (
-    <>
-      <AnalyticsStatCardsSkeleton />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        <s-section heading="Alert Types"><AlertTypeBreakdownSkeleton /></s-section>
-        <s-section heading="Notification Channels"><ChannelBreakdownSkeleton /></s-section>
-      </div>
-      <s-section heading="Daily Alert Volume — Last 30 Days">
-        <SkeletonBlock width="100%" height={82} />
-      </s-section>
-      <div style={{ marginTop: 16 }}>
-        <s-section heading="Current Stock Health">
-          <SkeletonBlock width="100%" height={20} borderRadius={6} />
-        </s-section>
-      </div>
     </>
   );
 }

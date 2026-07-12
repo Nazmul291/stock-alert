@@ -11,9 +11,10 @@ function timeAgo(iso: string): string {
 }
 
 export function WebhookHealthBar() {
-  const lastWebhookAt = useDashboardStore((s) => s.data!.lastWebhookAt);
-  const lastSyncCompletedAt = useDashboardStore((s) => s.data!.lastSyncCompletedAt);
-  const lastSyncCount = useDashboardStore((s) => s.data!.lastSyncCount);
+  const loading = useDashboardStore((s) => s.data === null);
+  const lastWebhookAt = useDashboardStore((s) => s.data?.lastWebhookAt) ?? null;
+  const lastSyncCompletedAt = useDashboardStore((s) => s.data?.lastSyncCompletedAt) ?? null;
+  const lastSyncCount = useDashboardStore((s) => s.data?.lastSyncCount) ?? null;
   const now = Date.now();
   const webhookAge = lastWebhookAt ? (now - new Date(lastWebhookAt).getTime()) / 3_600_000 : null;
 
@@ -53,9 +54,9 @@ export function WebhookHealthBar() {
     <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: bg, border: `1px solid ${border}`, borderRadius: 20, padding: "4px 10px" }}>
         <span style={{ fontSize: 8, color, lineHeight: 1 }}>{dot}</span>
-        <span style={{ fontSize: 12, color, fontWeight: 500 }}>{label}</span>
+        <span className={loading ? "skeleton-text" : undefined} style={{ fontSize: 12, color, fontWeight: 500 }}>{label}</span>
       </div>
-      {lastSyncCompletedAt && (
+      {(!loading && lastSyncCompletedAt) && (
         <span style={{ fontSize: 12, color: "#9ca3af" }}>
           Last full sync {timeAgo(lastSyncCompletedAt)}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
         </span>

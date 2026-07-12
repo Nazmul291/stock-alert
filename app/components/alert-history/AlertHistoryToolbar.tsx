@@ -31,6 +31,7 @@ export function AlertHistoryToolbar() {
   const typeFilter = useAlertHistoryStore((s) => s.typeFilter);
   const productSearch = useAlertHistoryStore((s) => s.productSearch);
   const page = useAlertHistoryStore((s) => s.page);
+  const loading = useAlertHistoryStore((s) => s.data === null);
   const clearAllTotal = useAlertHistoryStore((s) => s.data?.total ?? null);
   const buildUrl = (overrides: Record<string, string | number | null>) =>
     buildAlertHistoryUrl({ typeFilter, productSearch, page }, overrides);
@@ -38,8 +39,8 @@ export function AlertHistoryToolbar() {
   return (
     <>
       {/* Top bar: search + clear all — search renders immediately (URL-derived,
-          no DB needed); Clear All depends on knowing whether there's anything
-          to clear, so it streams in independently once that's known. */}
+          no DB needed); Clear All is held back until data confirms there's
+          actually something to clear. */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <Form method="get" style={{ display: "flex", gap: 8, flex: 1, minWidth: 200 }}>
           {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter} />}
@@ -63,7 +64,9 @@ export function AlertHistoryToolbar() {
           )}
         </Form>
 
-        {clearAllTotal !== null && clearAllTotal > 0 && <ClearAllButton total={clearAllTotal} />}
+        {(!loading && clearAllTotal !== null && clearAllTotal > 0) && (
+          <ClearAllButton total={clearAllTotal} />
+        )}
       </div>
 
       {/* Filter tabs — URL-derived, render immediately */}

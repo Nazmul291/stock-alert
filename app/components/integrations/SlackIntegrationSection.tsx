@@ -6,18 +6,19 @@ import { canUseFeature } from "../../lib/plan-limits";
 
 // Slack — connected via OAuth, not a manual webhook-URL paste.
 export function SlackIntegrationSection() {
-  const connected = useIntegrationsStore((s) => s.data!.settings.slackConnected);
-  const channelName = useIntegrationsStore((s) => s.data!.settings.slackChannelName);
-  const teamName = useIntegrationsStore((s) => s.data!.settings.slackTeamName);
-  const canSlack = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "slackNotifications");
+  const loading = useIntegrationsStore((s) => s.data === null);
+  const connected = useIntegrationsStore((s) => s.data?.settings.slackConnected) ?? false;
+  const channelName = useIntegrationsStore((s) => s.data?.settings.slackChannelName) ?? "";
+  const teamName = useIntegrationsStore((s) => s.data?.settings.slackTeamName) ?? "";
+  const canSlack = canUseFeature(useIntegrationsStore((s) => s.data?.plan) ?? "basic", "slackNotifications");
   const slackConnectToken = useIntegrationsStore((s) => s.slackConnectToken)!;
-  const retry = useIntegrationsStore((s) => s.retry)!;
+  const retry = useIntegrationsStore((s) => s.retry);
   const disconnectFetcher = useFetcher<{ intent: string; success: boolean }>();
   const disconnecting = disconnectFetcher.state !== "idle";
 
   useEffect(() => {
     const d = disconnectFetcher.data;
-    if (d?.intent === "disconnect_slack" && d?.success) retry();
+    if (d?.intent === "disconnect_slack" && d?.success) retry?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disconnectFetcher.data]);
 
@@ -34,9 +35,9 @@ export function SlackIntegrationSection() {
         />
       }
       title="Slack"
-      badge={!canSlack ? "Pro" : null}
-      connected={canSlack && connected}
-      locked={!canSlack}
+      badge={!loading && !canSlack ? "Pro" : null}
+      connected={!loading && canSlack && connected}
+      locked={!loading && !canSlack}
       lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
       connectLabel="Connect"
       hideEdit

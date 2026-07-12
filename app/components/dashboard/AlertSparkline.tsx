@@ -1,7 +1,10 @@
 import { useDashboardStore } from "../../stores/dashboard-store";
 
+const DEFAULT_SPARK7 = [0, 0, 0, 0, 0, 0, 0];
+
 export function AlertSparkline() {
-  const data = useDashboardStore((s) => s.data!.spark7);
+  const loading = useDashboardStore((s) => s.data === null);
+  const data = useDashboardStore((s) => s.data?.spark7) ?? DEFAULT_SPARK7;
   const BAR_W = 28;
   const GAP = 6;
   const BAR_H = 44;
@@ -24,7 +27,7 @@ export function AlertSparkline() {
     <div style={{ marginTop: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>Alerts — last 7 days</span>
-        <span style={{ fontSize: 12, color: "#6b7280" }}>{totalAlerts} total</span>
+        <span className={loading ? "skeleton-text" : undefined} style={{ fontSize: 12, color: "#6b7280" }}>{totalAlerts} total</span>
       </div>
       <svg width={svgW} height={svgH} style={{ display: "block", overflow: "visible" }}>
         {data.map((count, i) => {

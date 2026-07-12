@@ -1,5 +1,4 @@
 import { useAnalyticsStore } from "../../stores/analytics-store";
-import { SkeletonBlock } from "../Skeleton";
 
 const TYPE_COLORS: Record<string, { color: string; label: string }> = {
   low_stock:    { color: "#f59e0b", label: "Low Stock" },
@@ -7,19 +6,32 @@ const TYPE_COLORS: Record<string, { color: string; label: string }> = {
   restock:      { color: "#10b981", label: "Restock" },
 };
 
+// Reserves the legend's shape while loading — the real types aren't known
+// yet, but these three cover the known alert types so the layout doesn't
+// jump once data arrives.
+const DEFAULT_TYPE_BREAKDOWN = [
+  { type: "low_stock", count: 0 },
+  { type: "out_of_stock", count: 0 },
+  { type: "restock", count: 0 },
+];
+
 export function AlertTypeBreakdown() {
-  const data = useAnalyticsStore((s) => s.data!.typeBreakdown);
-  const total = useAnalyticsStore((s) => s.data!.totalThisMonth);
-  if (total === 0) return <p style={{ fontSize: 14, color: "#9ca3af" }}>No data yet.</p>;
+  const loading = useAnalyticsStore((s) => s.data === null);
+  const data = useAnalyticsStore((s) => s.data?.typeBreakdown) ?? DEFAULT_TYPE_BREAKDOWN;
+  const total = useAnalyticsStore((s) => s.data?.totalThisMonth) ?? 0;
+  // Genuinely-empty state — loading has its own visual state below, so this
+  // only appears once data has confirmed there's nothing.
+  if (!loading && total === 0) return <p style={{ fontSize: 14, color: "#9ca3af" }}>No data yet.</p>;
 
   const R = 46;
   const CX = 56;
   const CY = 56;
   const circumference = 2 * Math.PI * R;
+  const safeTotal = total || 1;
   let offset = 0;
 
   const segments = data.map((d) => {
-    const frac = d.count / total;
+    const frac = d.count / safeTotal;
     const dash = frac * circumference;
     const seg = { ...d, dash, offset, frac };
     offset += dash;
@@ -55,27 +67,16 @@ export function AlertTypeBreakdown() {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {data.map((d) => {
           const meta = TYPE_COLORS[d.type] ?? { color: "#9ca3af", label: d.type };
-          const pct = Math.round((d.count / total) * 100);
+          const pct = Math.round((d.count / safeTotal) * 100);
           return (
             <div key={d.type} style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ width: 10, height: 10, borderRadius: 2, background: meta.color, flexShrink: 0 }} />
               <span style={{ fontSize: 13, color: "#374151" }}>{meta.label}</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginLeft: "auto", paddingLeft: 12 }}>{d.count}</span>
-              <span style={{ fontSize: 12, color: "#9ca3af", width: 32, textAlign: "right" }}>{pct}%</span>
+              <span className={loading ? "skeleton-text" : undefined} style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginLeft: "auto", paddingLeft: 12 }}>{d.count}</span>
+              <span className={loading ? "skeleton-text" : undefined} style={{ fontSize: 12, color: "#9ca3af", width: 32, textAlign: "right" }}>{pct}%</span>
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-export function AlertTypeBreakdownSkeleton() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-      <SkeletonBlock width={112} height={112} borderRadius={56} />
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {Array.from({ length: 3 }, (_, i) => <SkeletonBlock key={i} width={120} height={14} />)}
       </div>
     </div>
   );

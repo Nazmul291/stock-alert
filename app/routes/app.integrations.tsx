@@ -24,7 +24,6 @@ import { FlowIntegrationSection } from "../components/integrations/FlowIntegrati
 import { OutboundWebhookSection } from "../components/integrations/OutboundWebhookSection";
 import { TestNotificationButton } from "../components/integrations/TestNotificationButton";
 import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
-import { IntegrationsSkeleton } from "../components/integrations/IntegrationsSkeleton";
 import { canUseFeature } from "../lib/plan-limits";
 
 // Only the auth check blocks the response — integrations data loads entirely in
@@ -376,7 +375,6 @@ export default function IntegrationsPage() {
 
   // Gate on the store, not the local `data`/`error` above — see the rule
   // established in dashboard-store.ts.
-  const storeData = useIntegrationsStore((s) => s.data);
   const storeError = useIntegrationsStore((s) => s.error);
 
   return (
@@ -393,17 +391,40 @@ export default function IntegrationsPage() {
       )}
       {storeError ? (
         <SSEErrorRetry message={storeError} onRetry={retry} />
-      ) : storeData ? (
-        <IntegrationsContent />
       ) : (
-        <IntegrationsSkeleton />
+        <IntegrationsContent />
       )}
     </s-page>
   );
 }
 
+// Fallback shape while SSE data hasn't landed yet — mirrors the "no settings
+// row yet" branch of loadIntegrationsData in integrations-data.server.ts.
+const DEFAULT_SETTINGS: IntegrationsData["settings"] = {
+  emailNotifications: false,
+  notificationEmail: "",
+  slackConnected: false,
+  slackTeamName: "",
+  slackChannelName: "",
+  whatsappNotifications: false,
+  whatsappPhone: "",
+  whatsappPhoneVerified: false,
+  outboundWebhookUrl: "",
+  klaviyoEnabled: false,
+  asanaConnected: false,
+  asanaUserName: "",
+  asanaWorkspaceName: "",
+};
+
+// Always renders the real layout — descendants read `loading` off the store
+// themselves and apply the shared `.skeleton-text` class to just their
+// dynamic value nodes, so there's a single markup tree for both states
+// instead of a separate skeleton component to keep in sync.
 function IntegrationsContent() {
-  const { plan, settings } = useIntegrationsStore((s) => s.data!);
+  const data = useIntegrationsStore((s) => s.data);
+  const loading = data === null;
+  const plan = data?.plan ?? "basic";
+  const settings = data?.settings ?? DEFAULT_SETTINGS;
   const canSlack = canUseFeature(plan, "slackNotifications");
   const canKlaviyo = canUseFeature(plan, "klaviyoIntegration");
 
@@ -413,6 +434,16 @@ function IntegrationsContent() {
 
   const [outboundWebhookUrl, setOutboundWebhookUrl] = useState(settings.outboundWebhookUrl);
   const [isDirty, setIsDirty] = useState(false);
+
+  // Re-seed the webhook field once real data lands — this component now
+  // mounts immediately (while `loading`), unlike before when it was only
+  // ever mounted after `storeData` was ready, so the initial useState above
+  // captures the loading-time default instead of the real saved value. This
+  // mirrors the remount that used to accomplish the same seeding.
+  useEffect(() => {
+    if (!loading) setOutboundWebhookUrl(settings.outboundWebhookUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   function markDirty() {
     setIsDirty(true);

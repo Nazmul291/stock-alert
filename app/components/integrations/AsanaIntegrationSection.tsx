@@ -9,14 +9,15 @@ import { canUseFeature } from "../../lib/plan-limits";
 // consent screen can't render inside Shopify's iframe either), then per-event
 // project/section mappings live inline once connected.
 export function AsanaIntegrationSection() {
-  const canAsana = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "asanaTaskCreation");
-  const connected = useIntegrationsStore((s) => s.data!.settings.asanaConnected);
-  const userName = useIntegrationsStore((s) => s.data!.settings.asanaUserName);
-  const workspaceName = useIntegrationsStore((s) => s.data!.settings.asanaWorkspaceName);
+  const loading = useIntegrationsStore((s) => s.data === null);
+  const canAsana = canUseFeature(useIntegrationsStore((s) => s.data?.plan) ?? "basic", "asanaTaskCreation");
+  const connected = useIntegrationsStore((s) => s.data?.settings.asanaConnected) ?? false;
+  const userName = useIntegrationsStore((s) => s.data?.settings.asanaUserName) ?? "";
+  const workspaceName = useIntegrationsStore((s) => s.data?.settings.asanaWorkspaceName) ?? "";
   const asanaConnectToken = useIntegrationsStore((s) => s.asanaConnectToken)!;
-  const asanaMappings = useIntegrationsStore((s) => s.data!.asanaMappings);
+  const asanaMappings = useIntegrationsStore((s) => s.data?.asanaMappings) ?? [];
   const mappingByEvent = Object.fromEntries(asanaMappings.map((m) => [m.eventType, m]));
-  const retry = useIntegrationsStore((s) => s.retry)!;
+  const retry = useIntegrationsStore((s) => s.retry);
 
   const asanaDisconnectFetcher = useFetcher<{ intent: string; success: boolean }>();
   const asanaDisconnecting = asanaDisconnectFetcher.state !== "idle";
@@ -38,7 +39,7 @@ export function AsanaIntegrationSection() {
 
   useEffect(() => {
     const d = asanaDisconnectFetcher.data;
-    if (d?.intent === "disconnect_asana" && d?.success) retry();
+    if (d?.intent === "disconnect_asana" && d?.success) retry?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asanaDisconnectFetcher.data]);
 
@@ -46,7 +47,7 @@ export function AsanaIntegrationSection() {
     const d = asanaSelectWorkspaceFetcher.data;
     if (d?.intent === "select_asana_workspace" && d?.success) {
       setAsanaWorkspacePickerOpen(false);
-      retry();
+      retry?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asanaSelectWorkspaceFetcher.data]);
@@ -56,7 +57,12 @@ export function AsanaIntegrationSection() {
       <s-section heading="Asana">
         <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
           Create a task for each stock event in an Asana project of your choice.{" "}
-          {!canAsana && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
+          {!loading && !canAsana && (
+            <>
+              <span style={{ color: "#9ca3af" }}>Requires Professional plan.</span>{" "}
+              <s-link href="/app/billing">Upgrade →</s-link>
+            </>
+          )}
         </p>
 
         <ConnectRow
@@ -71,9 +77,9 @@ export function AsanaIntegrationSection() {
             />
           }
           title="Asana"
-          badge={!canAsana ? "Pro" : null}
-          connected={canAsana && connected}
-          locked={!canAsana}
+          badge={!loading && !canAsana ? "Pro" : null}
+          connected={!loading && canAsana && connected}
+          locked={!loading && !canAsana}
           lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
           connectLabel="Connect"
           hideEdit
@@ -127,7 +133,7 @@ export function AsanaIntegrationSection() {
           </div>
         )}
 
-        {canAsana && connected && (
+        {(!loading && canAsana && connected) && (
           <div style={{ marginTop: 8 }}>
             <AsanaEventRow
               eventType="low_stock"

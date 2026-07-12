@@ -11,7 +11,6 @@ import type { SettingsData } from "../lib/settings-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { canUseFeature } from "../lib/plan-limits";
 import { useSettingsStore } from "../stores/settings-store";
-import { SettingsSkeleton } from "../components/settings/SettingsSkeleton";
 import { PlanCard } from "../components/settings/PlanCard";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
 import { DigestEmailsSection } from "../components/settings/DigestEmailsSection";
@@ -134,17 +133,14 @@ export default function SettingsPage() {
 
   // Gate on the store, not the local `data`/`error` above — see the rule
   // established in dashboard-store.ts.
-  const storeData = useSettingsStore((s) => s.data);
   const storeError = useSettingsStore((s) => s.error);
 
   return (
     <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
       {storeError ? (
         <SSEErrorRetry message={storeError} onRetry={retry} />
-      ) : storeData ? (
-        <SettingsContent />
       ) : (
-        <SettingsSkeleton />
+        <SettingsContent />
       )}
 
       {/* Static, doesn't depend on loaded settings */}
@@ -154,8 +150,34 @@ export default function SettingsPage() {
   );
 }
 
+// Same defaults `loadSettingsData` returns for a shop with no stored
+// settings row yet — used here as the placeholder while the SSE payload is
+// still in flight, so the form seeds with a sensible starting point either way.
+const DEFAULT_SETTINGS: SettingsData["settings"] = {
+  autoHideEnabled: false,
+  autoRepublishEnabled: false,
+  lowStockThreshold: 5,
+  digestEnabled: true,
+  digestFrequency: "weekly",
+  brandLogoUrl: "",
+  brandColor: "#4f46e5",
+  brandSenderName: "",
+  supplierLeadTimeDays: 7,
+  monitoringFilter: "all",
+  monitoringCollectionId: "",
+  monitoringTags: "",
+};
+
+// Always renders the real layout — read-only display values (PlanCard) read
+// `loading` off the store themselves and apply `.skeleton-text` to their
+// dynamic nodes. The fields below are editable/dirty-tracked form state, so
+// they just seed from DEFAULT_SETTINGS until real data arrives (see the
+// re-seed effect further down) — an <input> can't show a shimmering
+// skeleton in place of its value the way a <span> can.
 function SettingsContent() {
-  const { plan, settings } = useSettingsStore((s) => s.data!);
+  const loading = useSettingsStore((s) => s.data === null);
+  const plan = useSettingsStore((s) => s.data?.plan) ?? "basic";
+  const settings = useSettingsStore((s) => s.data?.settings) ?? DEFAULT_SETTINGS;
   const saveFetcher = useFetcher<typeof action>();
   const saving = saveFetcher.state !== "idle";
   const [autoHideEnabled, setAutoHideEnabled] = useState(settings.autoHideEnabled);
@@ -170,6 +192,29 @@ function SettingsContent() {
   const [monitoringTags, setMonitoringTags] = useState(settings.monitoringTags);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // SettingsContent now mounts immediately (before this effect existed it
+  // only mounted once real data was already in the store, so the useState
+  // initializers above always ran against real values). Re-seed local form
+  // state the moment loading flips from true to false so the form catches
+  // up to the real settings instead of being stuck on DEFAULT_SETTINGS.
+  useEffect(() => {
+    if (loading) return;
+    setAutoHideEnabled(settings.autoHideEnabled);
+    setAutoRepublishEnabled(settings.autoRepublishEnabled);
+    setDigestEnabled(settings.digestEnabled);
+    setDigestFrequency(settings.digestFrequency);
+    setBrandLogoUrl(settings.brandLogoUrl);
+    setBrandColor(settings.brandColor);
+    setBrandSenderName(settings.brandSenderName);
+    setMonitoringFilter(settings.monitoringFilter);
+    setMonitoringCollectionId(settings.monitoringCollectionId);
+    setMonitoringTags(settings.monitoringTags);
+    // Only re-seed on the loading -> loaded transition, not on every
+    // settings identity change (e.g. an in-place SSE re-push), so it
+    // doesn't clobber in-progress edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   function handleDiscard() {
     setAutoHideEnabled(settings.autoHideEnabled);

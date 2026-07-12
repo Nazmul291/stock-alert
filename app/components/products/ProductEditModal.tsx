@@ -99,12 +99,36 @@ type SaveActionResult =
   | { success: true; message: string; updatedProductId: string }
   | { error: string; updatedProductId: string };
 
+// Module-level (survives across the modal's own mount/unmount, for as long
+// as the tab stays open) so reopening the same product shortly after closing
+// it reuses the last live fetch instead of re-hitting the Shopify Admin API
+// every single time the modal opens. A save invalidates its own product's
+// entry (see closeOnce) since that's the one case where the cached snapshot
+// is now known-stale.
+const INVENTORY_CACHE_TTL_MS = 60_000;
+const inventoryCache = new Map<string, { variants: VariantInventory[]; fetchedAt: number }>();
+const settingsCache = new Map<string, { settings: ProductSettings; fetchedAt: number }>();
+
+function getCachedVariants(productId: string): VariantInventory[] | null {
+  const entry = inventoryCache.get(productId);
+  if (!entry || Date.now() - entry.fetchedAt > INVENTORY_CACHE_TTL_MS) return null;
+  return entry.variants;
+}
+
+function getCachedSettings(productId: string): ProductSettings | null {
+  const entry = settingsCache.get(productId);
+  if (!entry || Date.now() - entry.fetchedAt > INVENTORY_CACHE_TTL_MS) return null;
+  return entry.settings;
+}
+
 export function ProductEditModal({ product, plan, threshold, autoHideEnabled, autoRepublishEnabled, onClose, onSaved, onSaveError }: Props) {
   const canPerProductThreshold = canUseFeature(plan, "perProductThresholds");
   const saveFetcher = useFetcher<SaveActionResult>();
   const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
   const enableTrackingFetcher = useFetcher<{ enabledInventory?: { variants: VariantInventory[] }; error?: string }>();
   const settingsFetcher = useFetcher<{ productSettings?: ProductSettings | null; settingsError?: string }>();
+  const [cachedVariants] = useState(() => getCachedVariants(product.productId));
+  const [cachedSettings] = useState(() => getCachedSettings(product.productId));
 
   const [editStatus, setEditStatus] = useState(product.shopifyStatus ?? "ACTIVE");
   const [editTracked, setEditTracked] = useState(product.isTracked);
@@ -118,24 +142,40 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
   const [editRestockDate, setEditRestockDate] = useState(product.expectedRestockDate ?? "");
   const [editManualSales, setEditManualSales] = useState(product.manualDailySales != null ? String(product.manualDailySales) : "");
 
-  // Load inventory and settings on mount
+  // Load inventory and settings on mount — skip either round-trip entirely
+  // on a fresh cache hit (see inventoryCache/settingsCache above).
   useEffect(() => {
-    if (product.isTracked) {
+    if (product.isTracked && cachedVariants === null) {
       inventoryFetcher.load(`/app/products?intent=get_product_inventory&productId=${product.productId}`);
     }
-    settingsFetcher.load(`/app/products?intent=get_product_settings&productId=${product.productId}`);
+    if (cachedSettings === null) {
+      settingsFetcher.load(`/app/products?intent=get_product_settings&productId=${product.productId}`);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Populate settings when metafield data arrives
+  // Keep the cache fresh whenever a live fetch (either the plain inventory
+  // load or the enable-tracking flow) actually returns new variants.
+  useEffect(() => {
+    const variants =
+      enableTrackingFetcher.data?.enabledInventory?.variants ??
+      inventoryFetcher.data?.inventoryData?.variants;
+    if (variants) inventoryCache.set(product.productId, { variants, fetchedAt: Date.now() });
+  }, [enableTrackingFetcher.data, inventoryFetcher.data, product.productId]);
+
+  // Populate settings when metafield data arrives — from a live fetch, or
+  // immediately from cachedSettings on a cache hit (the fetcher never fires
+  // in that case, so this must consider it too).
   useEffect(() => {
     const s = settingsFetcher.data?.productSettings;
-    if (!s) return;
-    setEditCustomThreshold(s.customThreshold ?? "");
-    setEditAutoHide(s.autoHide !== null ? s.autoHide : autoHideEnabled);
-    setEditAutoRepublish(s.autoRepublish !== null ? s.autoRepublish : autoRepublishEnabled);
-    setCustomThresholdMetafieldId(s.customThresholdId);
-  }, [settingsFetcher.data]);
+    if (s) settingsCache.set(product.productId, { settings: s, fetchedAt: Date.now() });
+    const effective = s ?? cachedSettings;
+    if (!effective) return;
+    setEditCustomThreshold(effective.customThreshold ?? "");
+    setEditAutoHide(effective.autoHide !== null ? effective.autoHide : autoHideEnabled);
+    setEditAutoRepublish(effective.autoRepublish !== null ? effective.autoRepublish : autoRepublishEnabled);
+    setCustomThresholdMetafieldId(effective.customThresholdId);
+  }, [settingsFetcher.data, cachedSettings, product.productId]);
 
   // Closes immediately on a real success, or forcibly after 1s regardless of
   // whether the request has finished — the save almost always succeeds, and
@@ -149,6 +189,11 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
     if (closedRef.current) return;
     closedRef.current = true;
     if (forceCloseTimerRef.current) clearTimeout(forceCloseTimerRef.current);
+    // The save just changed quantities/tracking/thresholds — the cached
+    // snapshots are now stale, so drop them rather than let a quick reopen
+    // show pre-edit values.
+    inventoryCache.delete(product.productId);
+    settingsCache.delete(product.productId);
     onSaved?.(buildOptimisticPatch());
     onClose();
   }
@@ -210,11 +255,14 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
     return { ...base, variantPatches };
   }
 
-  // Initialise edits when inventory data arrives from either fetcher
+  // Initialise edits when inventory data arrives — from either live fetcher,
+  // or immediately from cachedVariants on a cache hit (fetchers never fire
+  // in that case, so this must consider it too).
   useEffect(() => {
     const variants =
       enableTrackingFetcher.data?.enabledInventory?.variants ??
-      inventoryFetcher.data?.inventoryData?.variants;
+      inventoryFetcher.data?.inventoryData?.variants ??
+      cachedVariants;
     if (!variants?.length) return;
     const initial: Record<string, string> = {};
     for (const v of variants) {
@@ -224,7 +272,7 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
       }
     }
     setInventoryEdits(initial);
-  }, [enableTrackingFetcher.data, inventoryFetcher.data]);
+  }, [enableTrackingFetcher.data, inventoryFetcher.data, cachedVariants]);
 
   const toggleVariant = (id: string) => {
     setExpandedVariants((prev) => {
@@ -240,6 +288,7 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
   const latestVariants =
     enableTrackingFetcher.data?.enabledInventory?.variants ??
     inventoryFetcher.data?.inventoryData?.variants ??
+    cachedVariants ??
     [];
 
   const inventoryUpdates = Object.entries(inventoryEdits)

@@ -11,8 +11,11 @@ export function SetupChecklist({
   onSync: () => void;
 }) {
   const navigate = useShopAwareNavigate();
-  const progress = useDashboardStore((s) => s.data!.setupProgress);
-  const progressPct = useDashboardStore((s) => s.data!.progressPct);
+  const loading = useDashboardStore((s) => s.data === null);
+  const progress = useDashboardStore((s) => s.data?.setupProgress) ?? {
+    appInstalled: false, globalSettingsConfigured: false, notificationsConfigured: false, firstProductTracked: false,
+  };
+  const progressPct = useDashboardStore((s) => s.data?.progressPct) ?? 0;
   const steps = [
     {
       done: progress.appInstalled,
@@ -49,10 +52,10 @@ export function SetupChecklist({
       <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Getting Started</span>
-          <span style={{ fontSize: 13, color: "#6b7280", marginLeft: 10 }}>{progressPct}% complete</span>
+          <span className={loading ? "skeleton-text" : undefined} style={{ fontSize: 13, color: "#6b7280", marginLeft: 10 }}>{progressPct}% complete</span>
         </div>
         <div style={{ width: 120, background: "#e5e7eb", borderRadius: 4, height: 6 }}>
-          <div style={{ background: "#667eea", borderRadius: 4, height: 6, width: `${progressPct}%`, transition: "width .3s" }} />
+          <div className={loading ? "skeleton-text" : undefined} style={{ background: "#667eea", borderRadius: 4, height: 6, width: `${progressPct}%`, transition: "width .3s" }} />
         </div>
       </div>
 

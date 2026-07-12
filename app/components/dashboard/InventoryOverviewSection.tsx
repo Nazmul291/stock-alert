@@ -4,33 +4,38 @@ import { useDashboardStore } from "../../stores/dashboard-store";
 import { AlertSparkline } from "./AlertSparkline";
 import { WebhookHealthBar } from "./WebhookHealthBar";
 
+const DEFAULT_STATS = {
+  totalProducts: 0, outOfStock: 0, lowStock: 0, inStock: 0, hidden: 0, deactivated: 0, requiresUpgrade: 0,
+};
+
 export function InventoryOverviewSection() {
   const navigate = useShopAwareNavigate();
-  const plan = useDashboardStore((s) => s.data!.plan);
-  const stats = useDashboardStore((s) => s.data!.stats);
-  const alertsToday = useDashboardStore((s) => s.data!.alertsToday);
+  const loading = useDashboardStore((s) => s.data === null);
+  const plan = useDashboardStore((s) => s.data?.plan) ?? "basic";
+  const stats = useDashboardStore((s) => s.data?.stats) ?? DEFAULT_STATS;
+  const alertsToday = useDashboardStore((s) => s.data?.alertsToday) ?? 0;
 
   return (
     <s-section heading="Inventory Overview">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 12, margin: "8px 0" }}>
         {[
-          { label: "Tracked", value: stats.totalProducts, color: "#374151", href: stats.totalProducts > 0 ? "/app/products?filter=tracked" : null },
-          { label: "In Stock", value: stats.inStock, color: "#059669", href: stats.inStock > 0 ? "/app/products?filter=in_stock" : null },
-          { label: "Low Stock", value: stats.lowStock, color: "#d97706", href: stats.lowStock > 0 ? "/app/products?filter=low_stock" : null },
-          { label: "Out of Stock", value: stats.outOfStock, color: "#dc2626", href: stats.outOfStock > 0 ? "/app/products?filter=out_of_stock" : null },
-          { label: "Hidden", value: stats.hidden, color: "#6b7280", href: null },
-          { label: "Deactivated", value: stats.deactivated, color: "#9ca3af", href: null },
+          { label: "Tracked", value: stats.totalProducts, color: "#374151", href: stats.totalProducts > 0 ? "/app/products?filter=tracked" : null, static: false },
+          { label: "In Stock", value: stats.inStock, color: "#059669", href: stats.inStock > 0 ? "/app/products?filter=in_stock" : null, static: false },
+          { label: "Low Stock", value: stats.lowStock, color: "#d97706", href: stats.lowStock > 0 ? "/app/products?filter=low_stock" : null, static: false },
+          { label: "Out of Stock", value: stats.outOfStock, color: "#dc2626", href: stats.outOfStock > 0 ? "/app/products?filter=out_of_stock" : null, static: false },
+          { label: "Hidden", value: stats.hidden, color: "#6b7280", href: null, static: false },
+          { label: "Deactivated", value: stats.deactivated, color: "#9ca3af", href: null, static: false },
           // Only relevant on a plan that can actually hit a product cap —
           // Pro/Enterprise merchants have nothing to upgrade for here.
           ...(plan !== "pro" && plan !== "enterprise"
-            ? [{ label: "Requires Pro", value: stats.requiresUpgrade, color: "#4338ca", href: stats.requiresUpgrade > 0 ? "/app/billing" : null }]
+            ? [{ label: "Requires Pro", value: stats.requiresUpgrade, color: "#4338ca", href: stats.requiresUpgrade > 0 ? "/app/billing" : null, static: false }]
             : []),
-          { label: "Alerts Today", value: alertsToday, color: alertsToday > 0 ? "#d97706" : "#6b7280", href: alertsToday > 0 ? "/app/alert-history" : null },
-          { label: "Analytics", value: "→", color: "#4f46e5", href: "/app/analytics" },
+          { label: "Alerts Today", value: alertsToday, color: alertsToday > 0 ? "#d97706" : "#6b7280", href: alertsToday > 0 ? "/app/alert-history" : null, static: false },
+          { label: "Analytics", value: "→", color: "#4f46e5", href: "/app/analytics", static: true },
         ].map((s) => {
           const inner = (
             <>
-              <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
+              <div className={loading && !s.static ? "skeleton-text" : undefined} style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
               <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>{s.label}</div>
             </>
           );

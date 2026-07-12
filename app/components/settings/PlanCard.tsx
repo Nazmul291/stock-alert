@@ -2,7 +2,8 @@ import { canUseFeature, getMaxProducts, formatMaxProducts } from "../../lib/plan
 import { useSettingsStore } from "../../stores/settings-store";
 
 export function PlanCard() {
-  const plan = useSettingsStore((s) => s.data!.plan);
+  const loading = useSettingsStore((s) => s.data === null);
+  const plan = useSettingsStore((s) => s.data?.plan) ?? "basic";
   const isPro = plan === "pro";
   const maxProducts = getMaxProducts(plan);
   const productsLabel = Number.isFinite(maxProducts) ? `Up to ${formatMaxProducts(maxProducts)} products` : "Unlimited products";
@@ -26,10 +27,12 @@ export function PlanCard() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>Current Plan</span>
-          <span style={{
-            padding: "3px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-            background: isPro ? "#4f46e5" : "#6b7280", color: "#fff",
-          }}>
+          <span
+            className={loading ? "skeleton-text" : undefined}
+            style={{
+              padding: "3px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+              background: isPro ? "#4f46e5" : "#6b7280", color: "#fff",
+            }}>
             {isPro ? "Professional" : "Basic"}
           </span>
         </div>
@@ -39,7 +42,11 @@ export function PlanCard() {
         {features.map((f) => {
           const active = f.active;
           return (
-            <div key={f.label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: active ? "#374151" : "#9ca3af" }}>
+            <div
+              key={f.label}
+              className={loading ? "skeleton-text" : undefined}
+              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: active ? "#374151" : "#9ca3af", borderRadius: 4 }}
+            >
               <span style={{ fontSize: 14, flexShrink: 0 }}>{active ? "✓" : "🔒"}</span>
               {f.label}
             </div>

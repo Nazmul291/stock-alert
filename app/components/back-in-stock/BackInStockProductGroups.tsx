@@ -1,13 +1,26 @@
 import { Form } from "react-router";
 import { useBackInStockStore } from "../../stores/back-in-stock-store";
 
+// Shown in place of real rows while loading — the parent only renders this
+// section at all once it knows (or assumes, while loading) there's at least
+// one product group, so this always has something to show.
+const PLACEHOLDER_GROUPS = Array.from({ length: 3 }, (_, i) => ({
+  productId: `skeleton-${i}`,
+  productTitle: "Product name",
+  count: 0,
+  expectedRestockDate: null as string | null,
+}));
+
 export function BackInStockProductGroups() {
-  const productGroups = useBackInStockStore((s) => s.data!.productGroups);
+  const loading = useBackInStockStore((s) => s.data === null);
+  const productGroups = useBackInStockStore((s) => s.data?.productGroups) ?? [];
+  const groups = loading ? PLACEHOLDER_GROUPS : productGroups;
+
   return (
     <div style={{ marginTop: 24 }}>
       <s-section heading="Subscribers by Product">
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
-          {productGroups.map((g, i) => (
+          {groups.map((g, i) => (
             <div
               key={g.productId}
               style={{
@@ -16,14 +29,14 @@ export function BackInStockProductGroups() {
                 justifyContent: "space-between",
                 padding: "12px 16px",
                 background: i % 2 === 0 ? "#fff" : "#f9fafb",
-                borderBottom: i < productGroups.length - 1 ? "1px solid #f3f4f6" : "none",
+                borderBottom: i < groups.length - 1 ? "1px solid #f3f4f6" : "none",
               }}
             >
               <div>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>
+                <div className={loading ? "skeleton-text" : undefined} style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>
                   {g.productTitle ?? `Product #${g.productId}`}
                 </div>
-                <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+                <div className={loading ? "skeleton-text" : undefined} style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
                   ID: {g.productId}
                   {g.expectedRestockDate && (
                     <span style={{ marginLeft: 10, color: "#059669", fontWeight: 500 }}>
@@ -38,31 +51,33 @@ export function BackInStockProductGroups() {
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ fontSize: 18, fontWeight: 700, color: "#4f46e5" }}>{g.count}</span>
-                <Form
-                  method="post"
-                  onSubmit={(e) => {
-                    if (!confirm(`Remove all ${g.count} subscriber(s) for this product?`))
-                      e.preventDefault();
-                  }}
-                >
-                  <input type="hidden" name="intent" value="clear_product" />
-                  <input type="hidden" name="productId" value={g.productId} />
-                  <button
-                    type="submit"
-                    style={{
-                      fontSize: 12,
-                      padding: "3px 10px",
-                      borderRadius: 6,
-                      border: "1px solid #fca5a5",
-                      background: "#fee2e2",
-                      color: "#991b1b",
-                      cursor: "pointer",
+                <span className={loading ? "skeleton-text" : undefined} style={{ fontSize: 18, fontWeight: 700, color: "#4f46e5" }}>{g.count}</span>
+                {!loading && (
+                  <Form
+                    method="post"
+                    onSubmit={(e) => {
+                      if (!confirm(`Remove all ${g.count} subscriber(s) for this product?`))
+                        e.preventDefault();
                     }}
                   >
-                    Clear
-                  </button>
-                </Form>
+                    <input type="hidden" name="intent" value="clear_product" />
+                    <input type="hidden" name="productId" value={g.productId} />
+                    <button
+                      type="submit"
+                      style={{
+                        fontSize: 12,
+                        padding: "3px 10px",
+                        borderRadius: 6,
+                        border: "1px solid #fca5a5",
+                        background: "#fee2e2",
+                        color: "#991b1b",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </Form>
+                )}
               </div>
             </div>
           ))}

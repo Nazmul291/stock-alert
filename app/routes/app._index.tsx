@@ -10,7 +10,6 @@ import type { DashboardData } from "../lib/dashboard-data.server";
 import { useAppGateStore } from "../stores/app-gate-store";
 import { useDashboardStore } from "../stores/dashboard-store";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { DashboardSkeleton } from "../components/dashboard/DashboardSkeleton";
 import { SetupChecklist } from "../components/dashboard/SetupChecklist";
 import { InventoryOverviewSection } from "../components/dashboard/InventoryOverviewSection";
 import { StockOutSoonBanner } from "../components/dashboard/StockOutSoonBanner";
@@ -44,18 +43,7 @@ export default function Dashboard() {
   useEffect(() => { setLoaderData({ shop }); }, [shop, setLoaderData]);
   useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
 
-  // app.tsx's gate check runs in parallel and may still decide to bounce this
-  // merchant to onboarding/billing. Hold the skeleton while appStatus is
-  // "loading" or "redirect", instead of flashing full dashboard content right
-  // before the redirect fires — only "ready" means it's safe to render.
-  const appStatus = useAppGateStore((s) => s.appStatus);
-  // Gate on the STORE's data, not the local `data` above — the setSSEState
-  // effect hasn't committed yet in the same render where `data` first turns
-  // non-null, so descendants (which read the store) would otherwise render
-  // against a stale/null value for one commit. See dashboard-store.ts.
-  const storeData = useDashboardStore((s) => s.data);
   const storeError = useDashboardStore((s) => s.error);
-  const showContent = !!storeData && appStatus === "ready";
 
   return (
     <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
@@ -65,37 +53,56 @@ export default function Dashboard() {
 
       {storeError ? (
         <SSEErrorRetry message={storeError} onRetry={retry} />
-      ) : showContent ? (
-        <DashboardContent />
       ) : (
-        <DashboardSkeleton />
+        <DashboardContent />
       )}
     </s-page>
   );
 }
 
+// Always renders the real layout — descendants read `loading` off the store
+// themselves and apply the shared `.skeleton-text` class to just their
+// dynamic value nodes, so there's a single markup tree for both states
+// instead of a separate skeleton component to keep in sync.
 function DashboardContent() {
-  const shop = useDashboardStore((s) => s.shop)!;
-  const data = useDashboardStore((s) => s.data)!;
-  const {
-    plan, progressPct, syncRunning,
-    notificationEmail, atRiskProducts, stockOutSoonCount,
-  } = data;
+  const shop = useDashboardStore((s) => s.shop);
+  const data = useDashboardStore((s) => s.data);
+  // app.tsx's gate check runs in parallel and may still decide to bounce this
+  // merchant to onboarding/billing. Treat the page as still loading while
+  // appStatus is "loading" or "redirect", instead of flashing full dashboard
+  // content right before the redirect fires — only "ready" means it's safe
+  // to treat data as final.
+  const appStatus = useAppGateStore((s) => s.appStatus);
+  // Gate on the STORE's data, not the local `data` from useSSEData in the
+  // parent — the setSSEState effect hasn't committed yet in the same render
+  // where that local value first turns non-null, so this component would
+  // otherwise render against a stale/null value for one commit. See
+  // dashboard-store.ts.
+  const loading = !data || appStatus !== "ready";
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
-  const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop, syncRunning);
+  const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop ?? "", data?.syncRunning ?? false);
 
   useEffect(() => {
     if (syncFetcher.data?.status === "started") openStream();
   }, [syncFetcher.data, openStream]);
+
+  const plan = data?.plan ?? "basic";
+  const progressPct = data?.progressPct ?? 0;
+  const notificationEmail = data?.notificationEmail ?? null;
+  const atRiskProducts = data?.atRiskProducts ?? [];
+  const stockOutSoonCount = data?.stockOutSoonCount ?? 0;
 
   const syncActionError = syncPct === null && syncFetcher.state === "idle" ? (syncFetcher.data?.error ?? null) : null;
   const syncError = syncStreamError ?? syncActionError;
 
   return (
     <>
-      {/* Setup checklist */}
-      {progressPct < 100 && (
+      {/* Setup checklist — held back until data confirms setup is actually
+          incomplete, rather than reserving space on every load; most
+          merchants complete setup once and shouldn't see this flash back in
+          on every reload. */}
+      {(!loading && progressPct < 100) && (
         <SetupChecklist
           syncPct={syncPct}
           syncSubmitting={syncFetcher.state !== "idle"}
@@ -108,9 +115,12 @@ function DashboardContent() {
 
       <InventoryOverviewSection />
 
-      {stockOutSoonCount > 0 && <StockOutSoonBanner />}
+      {/* Held back until data confirms they're actually needed, same
+          reasoning as the setup checklist above — most loads won't need
+          either of these, so don't reserve space for them by default. */}
+      {(!loading && stockOutSoonCount > 0) && <StockOutSoonBanner />}
 
-      {atRiskProducts.length > 0 && <ProductsAtRiskSection />}
+      {(!loading && atRiskProducts.length > 0) && <ProductsAtRiskSection />}
 
       <RecentAlertsSection />
 
@@ -119,11 +129,19 @@ function DashboardContent() {
         <s-paragraph><strong>Shop:</strong> {shop}</s-paragraph>
         <s-paragraph>
           <strong>Plan:</strong>{" "}
-          <span style={{ background: plan === "pro" ? "#d1fae5" : "#dbeafe", color: plan === "pro" ? "#065f46" : "#1e40af", padding: "1px 8px", borderRadius: 12, fontSize: 12 }}>
+          <span
+            className={loading ? "skeleton-text" : undefined}
+            style={{ background: plan === "pro" ? "#d1fae5" : "#dbeafe", color: plan === "pro" ? "#065f46" : "#1e40af", padding: "1px 8px", borderRadius: 12, fontSize: 12 }}
+          >
             {plan === "pro" ? "Professional" : "Basic"}
           </span>
         </s-paragraph>
-        {notificationEmail && <s-paragraph><strong>Alert Email:</strong> {notificationEmail}</s-paragraph>}
+        {(loading || notificationEmail) && (
+          <s-paragraph>
+            <strong>Alert Email:</strong>{" "}
+            <span className={loading ? "skeleton-text" : undefined}>{notificationEmail || "name@example.com"}</span>
+          </s-paragraph>
+        )}
       </s-section>
 
       {/* Quick actions */}

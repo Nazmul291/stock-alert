@@ -15,7 +15,6 @@ import { ProductEditModal } from "../components/products/ProductEditModal";
 import type { ProductRow } from "../components/products/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/products/InventorySection";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { ProductsPageSkeleton } from "../components/products/ProductsPageSkeleton";
 import { ProductSyncButton } from "../components/products/ProductSyncButton";
 import { ProductsToolbar } from "../components/products/ProductsToolbar";
 import { ProductsTable } from "../components/products/ProductsTable";
@@ -886,24 +885,36 @@ export default function ProductsPage() {
 
   // Gate on the store, not the local `data`/`error` above — see the rule
   // established in dashboard-store.ts.
-  const storeData = useProductsStore((s) => s.data);
   const storeError = useProductsStore((s) => s.error);
 
   return (
     <s-page heading="Products" sub-heading="Monitor and manage your tracked inventory">
       {storeError ? (
         <SSEErrorRetry message={storeError} onRetry={retry} />
-      ) : storeData ? (
-        <ProductsPageContent />
       ) : (
-        <ProductsPageSkeleton />
+        <ProductsPageContent />
       )}
     </s-page>
   );
 }
 
+// Always renders the real layout — descendants that read SSE data off the
+// store (ProductsTable) compute their own `loading` and apply the shared
+// `.skeleton-text` class to just their dynamic value nodes, matching the
+// pattern established on the dashboard (see app._index.tsx).
 function ProductsPageContent() {
-  const { shop, plan, maxProducts, trackedCount, threshold, products, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled } = useProductsStore((s) => s.data!);
+  const loading = useProductsStore((s) => s.data === null);
+  const shop = useProductsStore((s) => s.data?.shop) ?? "";
+  const plan = useProductsStore((s) => s.data?.plan) ?? "basic";
+  const maxProducts = useProductsStore((s) => s.data?.maxProducts) ?? 0;
+  const trackedCount = useProductsStore((s) => s.data?.trackedCount) ?? 0;
+  const threshold = useProductsStore((s) => s.data?.threshold) ?? 5;
+  const products = useProductsStore((s) => s.data?.products) ?? [];
+  const syncRunning = useProductsStore((s) => s.data?.syncRunning) ?? false;
+  const lastSyncCompletedAt = useProductsStore((s) => s.data?.lastSyncCompletedAt) ?? null;
+  const lastSyncCount = useProductsStore((s) => s.data?.lastSyncCount) ?? null;
+  const autoHideEnabled = useProductsStore((s) => s.data?.autoHideEnabled) ?? false;
+  const autoRepublishEnabled = useProductsStore((s) => s.data?.autoRepublishEnabled) ?? false;
   const filter = useProductsStore((s) => s.filter);
   const applyOptimisticPatch = useProductsStore((s) => s.applyOptimisticPatch);
 
@@ -953,7 +964,7 @@ function ProductsPageContent() {
 
   const [saveErrorAfterClose, setSaveErrorAfterClose] = useState<string | null>(null);
 
-  const selectableIds = (products as ProductRow[]).filter((p) => p.isTracked).map((p) => p.productId);
+  const selectableIds = products.filter((p) => p.isTracked).map((p) => p.productId);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
 
   const toggleSelectAll = () => {
@@ -1019,16 +1030,23 @@ function ProductsPageContent() {
         </div>
       )}
 
-      {Number.isFinite(maxProducts) && plan !== "pro" && (
+      {/* Held back until data confirms it's actually needed, rather than
+          reserving space on every load. */}
+      {(!loading && Number.isFinite(maxProducts) && plan !== "pro") && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
           {PLAN_LIMITS[plan === "basic" ? "basic" : "none"].name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
           <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}
 
-      {lastSyncCompletedAt && (
+      {/* Reserved during loading — unlike the plan banner above, most
+          returning merchants have synced before, so treating this as "likely
+          present" avoids a shift for the common case instead of causing one. */}
+      {(loading || lastSyncCompletedAt) && (
         <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 12 }}>
-          Last synced {timeAgo(lastSyncCompletedAt)}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
+          <span className={loading ? "skeleton-text" : undefined}>
+            Last synced {lastSyncCompletedAt ? timeAgo(lastSyncCompletedAt) : "just now"}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
+          </span>
         </div>
       )}
 

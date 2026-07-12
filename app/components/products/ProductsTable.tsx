@@ -13,6 +13,32 @@ export const STATUS_STYLE: Record<string, { bg: string; color: string; label: st
   not_tracked: { bg: "#ede9fe", color: "#5b21b6", label: "Not Tracked" },
 };
 
+// Shown in place of real rows while loading — reserves the same table
+// structure so the layout doesn't jump once data arrives. isTracked: false
+// keeps the row's checkbox and Edit action inert (same as a real untracked
+// product), since there's nothing real to select or edit yet.
+const PLACEHOLDER_ROWS: ProductRow[] = Array.from({ length: 5 }, (_, i) => ({
+  id: `skeleton-${i}`,
+  productId: `skeleton-${i}`,
+  productTitle: "Product name",
+  sku: "SKU-0000",
+  currentQuantity: 0,
+  inventoryStatus: "in_stock",
+  isHidden: false,
+  isTracked: false,
+  monitoringEnabled: false,
+  imageUrl: null,
+  imageAlt: "",
+  shopifyStatus: "ACTIVE",
+  inventoryItemId: null,
+  stockOutDays: null,
+  manualDailySales: null,
+  expectedRestockDate: null,
+  variants: [],
+  variantCount: 1,
+  variantsAtRiskCount: 0,
+}));
+
 export function ProductsTable({
   selectedIds,
   toggleSelect,
@@ -32,11 +58,12 @@ export function ProductsTable({
   toggleExpandProduct: (productId: string) => void;
   onEditProduct: (product: ProductRow) => void;
 }) {
-  const products = useProductsStore((s) => s.data!.products);
+  const loading = useProductsStore((s) => s.data === null);
+  const products = useProductsStore((s) => s.data?.products) ?? [];
   const filter = useProductsStore((s) => s.filter);
-  const supplierLeadTimeDays = useProductsStore((s) => s.data!.supplierLeadTimeDays);
+  const supplierLeadTimeDays = useProductsStore((s) => s.data?.supplierLeadTimeDays) ?? 7;
 
-  if (products.length === 0) {
+  if (!loading && products.length === 0) {
     return (
       <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>
         <p style={{ fontSize: 16, marginBottom: 8 }}>No products found.</p>
@@ -48,6 +75,8 @@ export function ProductsTable({
       </div>
     );
   }
+
+  const rows: ProductRow[] = loading ? PLACEHOLDER_ROWS : products;
 
   return (
     <div style={{ overflowX: "auto" }}>
@@ -79,7 +108,7 @@ export function ProductsTable({
           </tr>
         </thead>
         <tbody>
-          {products.map((p: ProductRow) => {
+          {rows.map((p: ProductRow) => {
             const s = STATUS_STYLE[p.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
             const isNotTracked = p.inventoryStatus === "not_tracked";
             const hasVariants = (p.variantCount ?? 0) > 1;
@@ -93,9 +122,9 @@ export function ProductsTable({
                     type="checkbox"
                     checked={selectedIds.has(p.productId)}
                     onChange={() => toggleSelect(p.productId)}
-                    disabled={!p.isTracked}
+                    disabled={loading || !p.isTracked}
                     aria-label={`Select ${p.productTitle}`}
-                    style={{ cursor: p.isTracked ? "pointer" : "not-allowed" }}
+                    style={{ cursor: loading || !p.isTracked ? "not-allowed" : "pointer" }}
                   />
                 </td>
                 <td style={{ padding: "10px 12px" }}>
@@ -112,7 +141,9 @@ export function ProductsTable({
                     ) : (
                       <span style={{ width: 18, flexShrink: 0 }} />
                     )}
-                    {p.imageUrl ? (
+                    {loading ? (
+                      <div className="skeleton-text" style={{ width: 40, height: 40, borderRadius: 6, flexShrink: 0 }} />
+                    ) : p.imageUrl ? (
                       <img src={p.imageUrl} alt={p.imageAlt} width={40} height={40} loading="lazy"
                         style={{ borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
                     ) : (
@@ -120,26 +151,30 @@ export function ProductsTable({
                         ▢
                       </div>
                     )}
-                    <span style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
+                    <span className={loading ? "skeleton-text" : undefined} style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
                   </div>
                 </td>
-                <td style={{ padding: "10px 12px", color: "#6b7280" }}>{hasVariants ? `${p.variantCount} variants` : (p.sku ?? "—")}</td>
+                <td style={{ padding: "10px 12px", color: "#6b7280" }}>
+                  <span className={loading ? "skeleton-text" : undefined} style={{ whiteSpace: "nowrap" }}>{hasVariants ? `${p.variantCount} variants` : (p.sku ?? "—")}</span>
+                </td>
                 <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.inventoryStatus === "out_of_stock" ? "#dc2626" : p.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
-                  {isNotTracked ? "—" : p.currentQuantity}
+                  <span className={loading ? "skeleton-text" : undefined}>{isNotTracked ? "—" : p.currentQuantity}</span>
                 </td>
                 <td style={{ padding: "10px 12px", width: 130, minWidth: 130 }}>
                   {mixedVariants ? (
-                    <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
+                    <span className={loading ? "skeleton-text" : undefined} style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
                       {p.variantsAtRiskCount} of {p.variantCount} low
                     </span>
                   ) : (
-                    <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
+                    <span className={loading ? "skeleton-text" : undefined} style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
                       {s.label}
                     </span>
                   )}
                 </td>
                 <td style={{ padding: "10px 12px" }}>
-                  <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} isManual={!!p.manualDailySales} />
+                  <span className={loading ? "skeleton-text" : undefined}>
+                    <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} isManual={!!p.manualDailySales} />
+                  </span>
                   {p.expectedRestockDate && (
                     <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
                       Back: {new Date(p.expectedRestockDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
@@ -147,10 +182,12 @@ export function ProductsTable({
                   )}
                 </td>
                 <td style={{ padding: "10px 12px" }}>
-                  <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
+                  <span className={loading ? "skeleton-text" : undefined}>
+                    <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
+                  </span>
                 </td>
                 <td style={{ padding: "10px 12px" }}>
-                  <span style={{
+                  <span className={loading ? "skeleton-text" : undefined} style={{
                     background: p.monitoringEnabled ? "#d1fae5" : p.inventoryStatus === "requires_upgrade" ? "#e0e7ff" : "#f3f4f6",
                     color: p.monitoringEnabled ? "#065f46" : p.inventoryStatus === "requires_upgrade" ? "#4338ca" : "#6b7280",
                     padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500,
@@ -161,13 +198,13 @@ export function ProductsTable({
                 <td style={{ padding: "10px 12px" }}>
                   <button
                     onClick={() => onEditProduct(p)}
-                    disabled={p.inventoryStatus === "requires_upgrade"}
+                    disabled={loading || p.inventoryStatus === "requires_upgrade"}
                     title={p.inventoryStatus === "requires_upgrade" ? "Upgrade to Pro to edit this product" : "Edit product"}
                     style={{
                       background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "5px 8px",
-                      cursor: p.inventoryStatus === "requires_upgrade" ? "not-allowed" : "pointer",
+                      cursor: loading || p.inventoryStatus === "requires_upgrade" ? "not-allowed" : "pointer",
                       color: p.inventoryStatus === "requires_upgrade" ? "#9ca3af" : "#374151",
-                      opacity: p.inventoryStatus === "requires_upgrade" ? 0.6 : 1,
+                      opacity: loading || p.inventoryStatus === "requires_upgrade" ? 0.6 : 1,
                       display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13,
                     }}
                   >

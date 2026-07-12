@@ -6,7 +6,7 @@ export function ProductsPagination() {
   const filter = useProductsStore((s) => s.filter);
   const after = useProductsStore((s) => s.after);
   const prev = useProductsStore((s) => s.prev);
-  const pageInfo = useProductsStore((s) => s.data!.pageInfo);
+  const pageInfo = useProductsStore((s) => s.data?.pageInfo) ?? { hasNextPage: false, endCursor: null };
   const buildUrl = (params: Record<string, string | null>) => buildProductsUrl({ search, filter, prev }, params);
 
   const prevList = prev ? prev.split(",") : [];

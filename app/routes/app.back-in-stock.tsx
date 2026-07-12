@@ -9,9 +9,9 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { BackInStockData } from "../lib/back-in-stock-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { useBackInStockStore } from "../stores/back-in-stock-store";
-import { BackInStockStatCards, BackInStockStatCardsSkeleton } from "../components/back-in-stock/BackInStockStatCards";
+import { BackInStockStatCards } from "../components/back-in-stock/BackInStockStatCards";
 import { BackInStockProductGroups } from "../components/back-in-stock/BackInStockProductGroups";
-import { BackInStockSubscriberList, BackInStockSubscriberListSkeleton } from "../components/back-in-stock/BackInStockSubscriberList";
+import { BackInStockSubscriberList } from "../components/back-in-stock/BackInStockSubscriberList";
 
 // `page` comes straight from the URL — available immediately. Everything else
 // loads entirely in the background via api.back-in-stock-stream.ts and streams
@@ -64,38 +64,39 @@ export default function BackInStockPage() {
   useEffect(() => { setLoaderData({ page }); }, [page, setLoaderData]);
   useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
 
-  const storeData = useBackInStockStore((s) => s.data);
   const storeError = useBackInStockStore((s) => s.error);
-
-  if (storeError) {
-    return (
-      <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
-        <SSEErrorRetry message={storeError} onRetry={retry} />
-      </s-page>
-    );
-  }
-
-  if (!storeData) {
-    return (
-      <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
-        <BackInStockStatCardsSkeleton />
-        <div style={{ marginTop: 24 }}>
-          <BackInStockSubscriberListSkeleton />
-        </div>
-      </s-page>
-    );
-  }
 
   return (
     <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
+      ) : (
+        <BackInStockContent />
+      )}
+    </s-page>
+  );
+}
+
+// Always renders the real layout — descendants read `loading` off the store
+// themselves and apply the shared `.skeleton-text` class to just their
+// dynamic value nodes, so there's a single markup tree for both states
+// instead of a separate skeleton component to keep in sync.
+function BackInStockContent() {
+  const loading = useBackInStockStore((s) => s.data === null);
+  // Held back until data confirms there actually are product groups to
+  // show, rather than reserving space on every load.
+  const hasProductGroups = useBackInStockStore((s) => (s.data?.productGroups.length ?? 0) > 0);
+
+  return (
+    <>
       <BackInStockStatCards />
 
-      {storeData.productGroups.length > 0 && <BackInStockProductGroups />}
+      {(!loading && hasProductGroups) && <BackInStockProductGroups />}
 
       <div style={{ marginTop: 24 }}>
         <BackInStockSubscriberList />
       </div>
-    </s-page>
+    </>
   );
 }
 

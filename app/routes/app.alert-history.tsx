@@ -10,7 +10,7 @@ import type { AlertsData } from "../lib/alert-history-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { useAlertHistoryStore } from "../stores/alert-history-store";
 import { AlertHistoryToolbar } from "../components/alert-history/AlertHistoryToolbar";
-import { AlertsTable, AlertsTableSkeleton } from "../components/alert-history/AlertsTable";
+import { AlertsTable } from "../components/alert-history/AlertsTable";
 
 // Filters come straight from the URL — available immediately, no DB needed —
 // so they're returned synchronously. The actual alert rows load entirely in
@@ -63,7 +63,6 @@ export default function AlertHistoryPage() {
   useEffect(() => { setLoaderData({ page, typeFilter, productSearch }); }, [page, typeFilter, productSearch, setLoaderData]);
   useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
 
-  const storeData = useAlertHistoryStore((s) => s.data);
   const storeError = useAlertHistoryStore((s) => s.error);
 
   return (
@@ -75,10 +74,8 @@ export default function AlertHistoryPage() {
 
         {storeError ? (
           <SSEErrorRetry message={storeError} onRetry={retry} />
-        ) : storeData ? (
-          <AlertsTable />
         ) : (
-          <AlertsTableSkeleton />
+          <AlertsTable />
         )}
       </s-section>
     </s-page>

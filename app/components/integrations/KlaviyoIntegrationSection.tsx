@@ -7,9 +7,10 @@ import { canUseFeature } from "../../lib/plan-limits";
 // Klaviyo — connect/disconnect via modal. The API key is write-only (never
 // sent to the client), so the input always starts blank.
 export function KlaviyoIntegrationSection() {
-  const canKlaviyo = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "klaviyoIntegration");
-  const enabled = useIntegrationsStore((s) => s.data!.settings.klaviyoEnabled);
-  const retry = useIntegrationsStore((s) => s.retry)!;
+  const loading = useIntegrationsStore((s) => s.data === null);
+  const canKlaviyo = canUseFeature(useIntegrationsStore((s) => s.data?.plan) ?? "basic", "klaviyoIntegration");
+  const enabled = useIntegrationsStore((s) => s.data?.settings.klaviyoEnabled) ?? false;
+  const retry = useIntegrationsStore((s) => s.retry);
 
   const [klaviyoModalOpen, setKlaviyoModalOpen] = useState(false);
   const [klaviyoInput, setKlaviyoInput] = useState("");
@@ -25,7 +26,7 @@ export function KlaviyoIntegrationSection() {
       if (d.success) {
         setKlaviyoModalOpen(false);
         setKlaviyoError(null);
-        retry();
+        retry?.();
       } else {
         setKlaviyoError(d.error ?? "Something went wrong.");
       }
@@ -35,7 +36,7 @@ export function KlaviyoIntegrationSection() {
 
   useEffect(() => {
     const d = klaviyoDisconnectFetcher.data;
-    if (d?.intent === "disconnect_klaviyo" && d?.success) retry();
+    if (d?.intent === "disconnect_klaviyo" && d?.success) retry?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [klaviyoDisconnectFetcher.data]);
 
@@ -53,9 +54,9 @@ export function KlaviyoIntegrationSection() {
           />
         }
         title="Klaviyo"
-        badge={!canKlaviyo ? "Pro" : null}
-        connected={canKlaviyo && enabled}
-        locked={!canKlaviyo}
+        badge={!loading && !canKlaviyo ? "Pro" : null}
+        connected={!loading && canKlaviyo && enabled}
+        locked={!loading && !canKlaviyo}
         lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
         connectLabel="Connect"
         onConnect={() => { setKlaviyoInput(""); setKlaviyoError(null); setKlaviyoModalOpen(true); }}
