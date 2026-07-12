@@ -33,7 +33,7 @@ export const PLAN_LIMITS = {
   },
   basic: {
     name: 'Basic',
-    price: '$3.99/month',
+    price: '$3.99',
     maxProducts: 1000,
     status: 'active' as PlanStatus,
     // Purely qualitative bullets — product count and trial length are
@@ -66,7 +66,7 @@ export const PLAN_LIMITS = {
   },
   pro: {
     name: 'Professional',
-    price: '$9.99/month',
+    price: '$9.99',
     maxProducts: 10000,
     status: 'active' as PlanStatus,
     features: [
@@ -104,7 +104,7 @@ export const PLAN_LIMITS = {
   // actually built yet — nothing in the app calls canUseFeature() for them.
   enterprise: {
     name: 'Enterprise',
-    price: '$19.99/month',
+    price: '$19.99',
     maxProducts: Infinity,
     status: 'coming_soon' as PlanStatus,
     features: [
