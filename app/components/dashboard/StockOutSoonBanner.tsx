@@ -1,7 +1,9 @@
 import { useShopAwareNavigate } from "../../lib/use-shop-aware-navigate";
+import { useDashboardStore } from "../../stores/dashboard-store";
 
-export function StockOutSoonBanner({ count }: { count: number }) {
+export function StockOutSoonBanner() {
   const navigate = useShopAwareNavigate();
+  const count = useDashboardStore((s) => s.data!.stockOutSoonCount);
 
   return (
     <div style={{ marginTop: 16, padding: "12px 16px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>

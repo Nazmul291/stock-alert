@@ -1,4 +1,7 @@
-export function AlertSparkline({ data }: { data: number[] }) {
+import { useDashboardStore } from "../../stores/dashboard-store";
+
+export function AlertSparkline() {
+  const data = useDashboardStore((s) => s.data!.spark7);
   const BAR_W = 28;
   const GAP = 6;
   const BAR_H = 44;

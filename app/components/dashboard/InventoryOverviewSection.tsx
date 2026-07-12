@@ -1,21 +1,14 @@
 import type { CSSProperties } from "react";
-import type { DashboardData } from "../../lib/dashboard-data.server";
 import { useShopAwareNavigate } from "../../lib/use-shop-aware-navigate";
+import { useDashboardStore } from "../../stores/dashboard-store";
 import { AlertSparkline } from "./AlertSparkline";
 import { WebhookHealthBar } from "./WebhookHealthBar";
 
-export function InventoryOverviewSection({
-  plan, stats, alertsToday, spark7, lastWebhookAt, lastSyncCompletedAt, lastSyncCount,
-}: {
-  plan: string;
-  stats: DashboardData["stats"];
-  alertsToday: number;
-  spark7: number[];
-  lastWebhookAt: string | null;
-  lastSyncCompletedAt: string | null;
-  lastSyncCount: number | null;
-}) {
+export function InventoryOverviewSection() {
   const navigate = useShopAwareNavigate();
+  const plan = useDashboardStore((s) => s.data!.plan);
+  const stats = useDashboardStore((s) => s.data!.stats);
+  const alertsToday = useDashboardStore((s) => s.data!.alertsToday);
 
   return (
     <s-section heading="Inventory Overview">
@@ -56,8 +49,8 @@ export function InventoryOverviewSection({
           );
         })}
       </div>
-      <AlertSparkline data={spark7} />
-      <WebhookHealthBar lastWebhookAt={lastWebhookAt} lastSyncCompletedAt={lastSyncCompletedAt} lastSyncCount={lastSyncCount} />
+      <AlertSparkline />
+      <WebhookHealthBar />
     </s-section>
   );
 }

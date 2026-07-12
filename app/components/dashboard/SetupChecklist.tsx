@@ -1,19 +1,18 @@
 import { useShopAwareNavigate } from "../../lib/use-shop-aware-navigate";
+import { useDashboardStore } from "../../stores/dashboard-store";
 
 export function SetupChecklist({
-  progress,
-  progressPct,
   syncPct,
   syncSubmitting,
   onSync,
 }: {
-  progress: { appInstalled: boolean; globalSettingsConfigured: boolean; notificationsConfigured: boolean; firstProductTracked: boolean };
-  progressPct: number;
   syncPct: number | null;
   syncSubmitting: boolean;
   onSync: () => void;
 }) {
   const navigate = useShopAwareNavigate();
+  const progress = useDashboardStore((s) => s.data!.setupProgress);
+  const progressPct = useDashboardStore((s) => s.data!.progressPct);
   const steps = [
     {
       done: progress.appInstalled,

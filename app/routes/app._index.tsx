@@ -8,6 +8,7 @@ import { authenticate } from "../shopify.server";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { DashboardData } from "../lib/dashboard-data.server";
 import { useAppGateStore } from "../stores/app-gate-store";
+import { useDashboardStore } from "../stores/dashboard-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { DashboardSkeleton } from "../components/dashboard/DashboardSkeleton";
 import { SetupChecklist } from "../components/dashboard/SetupChecklist";
@@ -38,12 +39,23 @@ export default function Dashboard() {
     `/api/dashboard-stream?token=${encodeURIComponent(token)}`,
   );
 
+  const setLoaderData = useDashboardStore((s) => s.setLoaderData);
+  const setSSEState = useDashboardStore((s) => s.setSSEState);
+  useEffect(() => { setLoaderData({ shop }); }, [shop, setLoaderData]);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
   // app.tsx's gate check runs in parallel and may still decide to bounce this
   // merchant to onboarding/billing. Hold the skeleton while appStatus is
   // "loading" or "redirect", instead of flashing full dashboard content right
   // before the redirect fires — only "ready" means it's safe to render.
   const appStatus = useAppGateStore((s) => s.appStatus);
-  const showContent = !!data && appStatus === "ready";
+  // Gate on the STORE's data, not the local `data` above — the setSSEState
+  // effect hasn't committed yet in the same render where `data` first turns
+  // non-null, so descendants (which read the store) would otherwise render
+  // against a stale/null value for one commit. See dashboard-store.ts.
+  const storeData = useDashboardStore((s) => s.data);
+  const storeError = useDashboardStore((s) => s.error);
+  const showContent = !!storeData && appStatus === "ready";
 
   return (
     <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
@@ -51,10 +63,10 @@ export default function Dashboard() {
         Manage Products
       </s-button>
 
-      {error ? (
-        <SSEErrorRetry message={error} onRetry={retry} />
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
       ) : showContent ? (
-        <DashboardContent shop={shop} data={data!} />
+        <DashboardContent />
       ) : (
         <DashboardSkeleton />
       )}
@@ -62,10 +74,12 @@ export default function Dashboard() {
   );
 }
 
-function DashboardContent({ shop, data }: { shop: string; data: DashboardData }) {
+function DashboardContent() {
+  const shop = useDashboardStore((s) => s.shop)!;
+  const data = useDashboardStore((s) => s.data)!;
   const {
-    plan, stats, setupProgress, progressPct, syncRunning, lastSyncCompletedAt, lastSyncCount,
-    lastWebhookAt, recentAlerts, notificationEmail, alertsToday, spark7, atRiskProducts, stockOutSoonCount,
+    plan, progressPct, syncRunning,
+    notificationEmail, atRiskProducts, stockOutSoonCount,
   } = data;
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
@@ -83,8 +97,6 @@ function DashboardContent({ shop, data }: { shop: string; data: DashboardData })
       {/* Setup checklist */}
       {progressPct < 100 && (
         <SetupChecklist
-          progress={setupProgress}
-          progressPct={progressPct}
           syncPct={syncPct}
           syncSubmitting={syncFetcher.state !== "idle"}
           onSync={() => {
@@ -94,23 +106,13 @@ function DashboardContent({ shop, data }: { shop: string; data: DashboardData })
         />
       )}
 
-      <InventoryOverviewSection
-        plan={plan}
-        stats={stats}
-        alertsToday={alertsToday}
-        spark7={spark7}
-        lastWebhookAt={lastWebhookAt}
-        lastSyncCompletedAt={lastSyncCompletedAt}
-        lastSyncCount={lastSyncCount}
-      />
+      <InventoryOverviewSection />
 
-      {stockOutSoonCount > 0 && <StockOutSoonBanner count={stockOutSoonCount} />}
+      {stockOutSoonCount > 0 && <StockOutSoonBanner />}
 
-      {atRiskProducts.length > 0 && (
-        <ProductsAtRiskSection products={atRiskProducts} />
-      )}
+      {atRiskProducts.length > 0 && <ProductsAtRiskSection />}
 
-      <RecentAlertsSection alerts={recentAlerts} />
+      <RecentAlertsSection />
 
       {/* Store info */}
       <s-section heading="Store Information" slot="aside">

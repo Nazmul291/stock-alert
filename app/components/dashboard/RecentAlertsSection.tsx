@@ -1,7 +1,8 @@
 import { format } from "date-fns";
-import type { DashboardData } from "../../lib/dashboard-data.server";
+import { useDashboardStore } from "../../stores/dashboard-store";
 
-export function RecentAlertsSection({ alerts }: { alerts: DashboardData["recentAlerts"] }) {
+export function RecentAlertsSection() {
+  const alerts = useDashboardStore((s) => s.data!.recentAlerts);
   return (
     <s-section heading="Recent Alerts">
       <s-link slot="primary-action" href="/app/alert-history">View all →</s-link>

@@ -1,3 +1,5 @@
+import { useDashboardStore } from "../../stores/dashboard-store";
+
 function timeAgo(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (secs < 60) return "just now";
@@ -8,15 +10,10 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export function WebhookHealthBar({
-  lastWebhookAt,
-  lastSyncCompletedAt,
-  lastSyncCount,
-}: {
-  lastWebhookAt: string | null;
-  lastSyncCompletedAt: string | null;
-  lastSyncCount: number | null;
-}) {
+export function WebhookHealthBar() {
+  const lastWebhookAt = useDashboardStore((s) => s.data!.lastWebhookAt);
+  const lastSyncCompletedAt = useDashboardStore((s) => s.data!.lastSyncCompletedAt);
+  const lastSyncCount = useDashboardStore((s) => s.data!.lastSyncCount);
   const now = Date.now();
   const webhookAge = lastWebhookAt ? (now - new Date(lastWebhookAt).getTime()) / 3_600_000 : null;
 

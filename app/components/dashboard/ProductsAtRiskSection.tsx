@@ -1,8 +1,9 @@
-import type { DashboardData } from "../../lib/dashboard-data.server";
 import { useShopAwareNavigate } from "../../lib/use-shop-aware-navigate";
+import { useDashboardStore } from "../../stores/dashboard-store";
 
-export function ProductsAtRiskSection({ products }: { products: DashboardData["atRiskProducts"] }) {
+export function ProductsAtRiskSection() {
   const navigate = useShopAwareNavigate();
+  const products = useDashboardStore((s) => s.data!.atRiskProducts);
 
   return (
     <s-section heading="Products at Risk">
