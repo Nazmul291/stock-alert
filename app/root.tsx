@@ -47,26 +47,13 @@ export default function App() {
           </>
         )}
         {wantsShopifyFont && (
-          // Async font loading — preload starts the download immediately but
-          // does not block first paint. The inline script adds a load listener
-          // that swaps rel to stylesheet once the CSS arrives. For repeat
-          // visitors (any merchant who uses Shopify admin) Inter is cached so
-          // the swap happens before paint anyway. noscript covers JS-off envs.
-          <>
-            <link
-              id="shopify-inter"
-              rel="preload"
-              as="style"
-              href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
-            />
-            <script dangerouslySetInnerHTML={{ __html:
-              "(function(){var l=document.getElementById('shopify-inter');" +
-              "l&&l.addEventListener('load',function(){l.rel='stylesheet'})})()"
-            }} />
-            <noscript>
-              <link rel="stylesheet" href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css" />
-            </noscript>
-          </>
+          // Blocking stylesheet, not preload-then-swap. These pages only ever
+          // load inside admin.shopify.com, which loads this exact stylesheet
+          // itself — Chrome's cache is partitioned by (top-level site,
+          // resource origin), so it's already warm here in the vast majority
+          // of sessions. The old async-swap trick traded a rare cold-cache
+          // wait for a guaranteed FOUT reflow (CLS) on every other load.
+          <link rel="stylesheet" href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css" />
         )}
         <Meta />
         <Links />
