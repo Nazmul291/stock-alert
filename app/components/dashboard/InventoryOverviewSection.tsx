@@ -40,6 +40,8 @@ export function InventoryOverviewSection() {
               style={{ ...base, display: "block", transition: "border-color .15s", cursor: "pointer" }}
               onMouseOver={(e) => (e.currentTarget.style.borderColor = "#9ca3af")}
               onMouseOut={(e) => (e.currentTarget.style.borderColor = "#e5e7eb")}
+              onFocus={(e) => (e.currentTarget.style.borderColor = "#9ca3af")}
+              onBlur={(e) => (e.currentTarget.style.borderColor = "#e5e7eb")}
               onKeyDown={(e) => e.key === "Enter" && navigate(s.href!)}
             >
               {inner}

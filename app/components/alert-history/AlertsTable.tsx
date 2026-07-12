@@ -96,6 +96,8 @@ export function AlertsTable() {
                         style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", padding: "4px 6px", borderRadius: 4, lineHeight: 1 }}
                         onMouseOver={(e) => (e.currentTarget.style.color = "#dc2626")}
                         onMouseOut={(e) => (e.currentTarget.style.color = "#9ca3af")}
+                        onFocus={(e) => (e.currentTarget.style.color = "#dc2626")}
+                        onBlur={(e) => (e.currentTarget.style.color = "#9ca3af")}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="3 6 5 6 21 6" />

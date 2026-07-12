@@ -109,6 +109,8 @@ export function BackInStockSubscriberList() {
                           }}
                           onMouseOver={(e) => (e.currentTarget.style.color = "#dc2626")}
                           onMouseOut={(e) => (e.currentTarget.style.color = "#9ca3af")}
+                          onFocus={(e) => (e.currentTarget.style.color = "#dc2626")}
+                          onBlur={(e) => (e.currentTarget.style.color = "#9ca3af")}
                           title="Remove subscriber"
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
