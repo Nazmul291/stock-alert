@@ -2,9 +2,13 @@ import type { HeadersFunction, LoaderFunctionArgs, MetaFunction } from "react-ro
 import { useLoaderData } from "react-router";
 import { useEffect, useState } from "react";
 
-import { PLAN_LIMITS } from "../../lib/plan-limits";
-import logoMark from "../../assets/logo-mark.png";
 import { useSSEData } from "../../hooks/use-sse-data";
+import { LandingHeader } from "../../components/LandingHeader";
+import { LandingHero } from "../../components/LandingHero";
+import { LandingFeatures } from "../../components/LandingFeatures";
+import { LandingPricing } from "../../components/LandingPricing";
+import { LandingFinalCta } from "../../components/LandingFinalCta";
+import { LandingFooter } from "../../components/LandingFooter";
 // Inlined as a <style> tag below instead of a <link rel="stylesheet"> so this
 // page has zero render-blocking network requests — the CSS ships in the same
 // response as the HTML.
@@ -15,45 +19,6 @@ const APP_STORE_URL = "https://apps.shopify.com/stock-alert-4";
 const TITLE = "Stock Alert — Low Stock & Back in Stock Alerts for Shopify";
 const DESCRIPTION =
   "Stock Alert monitors your Shopify inventory in real time and sends instant email and Slack alerts the moment a product runs low or sells out — plus automatic back-in-stock notifications for your customers.";
-
-const FEATURES = [
-  {
-    title: "Real-time low & out-of-stock alerts",
-    body: "Get notified by email, Slack, or WhatsApp the instant inventory crosses your threshold — before you lose the sale.",
-  },
-  {
-    title: "Automatic back-in-stock notifications",
-    body: "Let shoppers sign up on a sold-out product page and get notified automatically the moment it's restocked.",
-  },
-  {
-    title: "Auto-hide & auto-republish",
-    body: "Sold-out products are hidden from your storefront automatically, then brought back live the instant they restock.",
-  },
-  {
-    title: "Per-product thresholds & filtering",
-    body: "Set a global low-stock threshold store-wide, fine-tune it per product, or scope monitoring by collection and tag.",
-  },
-  {
-    title: "Stock-out predictions",
-    body: "See which products are projected to sell out within 7 days, based on your real sales velocity.",
-  },
-  {
-    title: "Analytics dashboard",
-    body: "Track alert history, stock-out trends, and webhook health across your catalog — plus daily or weekly digest emails.",
-  },
-  {
-    title: "Klaviyo integration",
-    body: "Send low-stock and back-in-stock events straight into Klaviyo to power real marketing flows and segments.",
-  },
-  {
-    title: "Native Shopify Flow triggers",
-    body: "Build custom automations on low-stock, out-of-stock, or restock events — no code required.",
-  },
-  {
-    title: "Outbound webhooks",
-    body: "Pipe every alert into Zapier, Make, or your own ERP the moment stock changes.",
-  },
-];
 
 // The landing page is fully static — appUrl comes from an env var that never
 // changes at runtime. Cache aggressively so repeat visitors and CDNs never
@@ -164,112 +129,16 @@ export default function LandingPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <header className="sa-header">
-        <div className="sa-headerInner">
-          <a href="/" className="sa-brand">
-            <img src={logoMark} alt="" className="sa-brandLogo" loading="lazy" />
-            <span>{APP_NAME}</span>
-          </a>
-          <nav className="sa-nav">
-            <a href="#features">Features</a>
-            <a href="#pricing">Pricing</a>
-          </nav>
-          <a
-            className="sa-headerCta"
-            href={APP_STORE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Add to Shopify
-          </a>
-        </div>
-      </header>
+      <LandingHeader appName={APP_NAME} appStoreUrl={APP_STORE_URL} />
 
       <main>
-        <section className="sa-hero">
-          <h1 className="sa-heroHeading">Never Lose a Sale to a Stockout</h1>
-          <p className="sa-heroText">{DESCRIPTION}</p>
-          <div className="sa-heroActions">
-            <a
-              className="sa-primaryButton"
-              href={APP_STORE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Add to Shopify — Free 30-day trial
-            </a>
-            <a className="sa-secondaryButton" href="#features">
-              See how it works
-            </a>
-          </div>
-          <p className="sa-heroNote">
-            Installs in under 2 minutes · No credit card required to start your trial
-          </p>
-        </section>
-
-        <section id="features" className="sa-features">
-          <h2 className="sa-sectionHeading">Everything you need to stop stockouts</h2>
-          <div className="sa-featureGrid">
-            {FEATURES.map((f) => (
-              <div key={f.title} className="sa-featureCard">
-                <h3>{f.title}</h3>
-                <p>{f.body}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section id="pricing" className="sa-pricing">
-          <h2 className="sa-sectionHeading">Simple, transparent pricing</h2>
-          <p className="sa-sectionSub">Every plan includes a 30-day free trial.</p>
-          <div className="sa-pricingGrid">
-            {(["basic", "pro"] as const).map((key) => {
-              const plan = PLAN_LIMITS[key];
-              return (
-                <div
-                  key={key}
-                  className={key === "pro" ? "sa-pricingCard sa-pricingCardHighlight" : "sa-pricingCard"}
-                >
-                  <h3>{plan.name}</h3>
-                  <p className="sa-price">{plan.price}</p>
-                  <ul>
-                    {plan.features.map((feat) => (
-                      <li key={feat}>{feat}</li>
-                    ))}
-                  </ul>
-                  <a
-                    className={key === "pro" ? "sa-primaryButton" : "sa-secondaryButton"}
-                    href={APP_STORE_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Start free trial
-                  </a>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="sa-finalCta">
-          <h2>Ready to stop losing sales to stockouts?</h2>
-          <a
-            className="sa-primaryButton"
-            href={APP_STORE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Add to Shopify — Free 30-day trial
-          </a>
-        </section>
+        <LandingHero description={DESCRIPTION} appStoreUrl={APP_STORE_URL} />
+        <LandingFeatures />
+        <LandingPricing appStoreUrl={APP_STORE_URL} />
+        <LandingFinalCta appStoreUrl={APP_STORE_URL} />
       </main>
 
-      <footer className="sa-footer">
-        <span>© {year} {APP_NAME}</span>
-        <a href="/privacy">Privacy Policy</a>
-        <a href="/terms">Terms of Service</a>
-        <a href="mailto:nazmul291@gmail.com">Support</a>
-      </footer>
+      <LandingFooter appName={APP_NAME} year={year} />
     </div>
   );
 }
