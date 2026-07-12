@@ -8,7 +8,7 @@ import { getIsTestStore } from "../services/billing.server";
 import { invalidateShopCache } from "../lib/shop-cache.server";
 import { invalidateBillingCache } from "../services/billing.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
-import { BillingConfirmStatus } from "../components/BillingConfirmStatus";
+import { BillingConfirmStatus } from "../components/billing/BillingConfirmStatus";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);

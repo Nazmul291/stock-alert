@@ -4,8 +4,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import { getIsTestStore } from "../services/billing.server";
 import { getCachedSession } from "../lib/shop-cache.server";
-import { BillingPlanCards } from "../components/BillingPlanCards";
-import { BillingFeatureComparisonTable } from "../components/BillingFeatureComparisonTable";
+import { BillingPlanCards } from "../components/billing/BillingPlanCards";
+import { BillingFeatureComparisonTable } from "../components/billing/BillingFeatureComparisonTable";
 
 // session.plan is kept in sync by the app_subscriptions/update webhook handler
 // and by the billing confirm action — no Shopify billing API call needed here.

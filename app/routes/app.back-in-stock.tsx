@@ -7,9 +7,9 @@ import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { BackInStockData } from "../lib/back-in-stock-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
-import { BackInStockStatCards, BackInStockStatCardsSkeleton } from "../components/BackInStockStatCards";
-import { BackInStockProductGroups } from "../components/BackInStockProductGroups";
-import { BackInStockSubscriberList, BackInStockSubscriberListSkeleton } from "../components/BackInStockSubscriberList";
+import { BackInStockStatCards, BackInStockStatCardsSkeleton } from "../components/back-in-stock/BackInStockStatCards";
+import { BackInStockProductGroups } from "../components/back-in-stock/BackInStockProductGroups";
+import { BackInStockSubscriberList, BackInStockSubscriberListSkeleton } from "../components/back-in-stock/BackInStockSubscriberList";
 
 // `page` comes straight from the URL — available immediately. Everything else
 // loads entirely in the background via api.back-in-stock-stream.ts and streams

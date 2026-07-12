@@ -7,8 +7,8 @@ import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { AlertsData } from "../lib/alert-history-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
-import { AlertHistoryToolbar } from "../components/AlertHistoryToolbar";
-import { AlertsTable, AlertsTableSkeleton } from "../components/AlertsTable";
+import { AlertHistoryToolbar } from "../components/alert-history/AlertHistoryToolbar";
+import { AlertsTable, AlertsTableSkeleton } from "../components/alert-history/AlertsTable";
 
 // Filters come straight from the URL — available immediately, no DB needed —
 // so they're returned synchronously. The actual alert rows load entirely in

@@ -10,14 +10,14 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { canUseFeature } from "../lib/plan-limits";
-import { SettingsSkeleton } from "../components/SettingsSkeleton";
-import { PlanCard } from "../components/PlanCard";
-import { InventorySettingsSection } from "../components/InventorySettingsSection";
-import { DigestEmailsSection } from "../components/DigestEmailsSection";
-import { EmailBrandingSection } from "../components/EmailBrandingSection";
-import { MonitoringScopeSection } from "../components/MonitoringScopeSection";
-import { ThemeAppEmbedSection } from "../components/ThemeAppEmbedSection";
-import { DangerZoneSection } from "../components/DangerZoneSection";
+import { SettingsSkeleton } from "../components/settings/SettingsSkeleton";
+import { PlanCard } from "../components/settings/PlanCard";
+import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
+import { DigestEmailsSection } from "../components/settings/DigestEmailsSection";
+import { EmailBrandingSection } from "../components/settings/EmailBrandingSection";
+import { MonitoringScopeSection } from "../components/settings/MonitoringScopeSection";
+import { ThemeAppEmbedSection } from "../components/settings/ThemeAppEmbedSection";
+import { DangerZoneSection } from "../components/settings/DangerZoneSection";
 import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
 
 // Only the auth check blocks the response — settings data loads entirely in

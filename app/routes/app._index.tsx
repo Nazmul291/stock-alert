@@ -9,13 +9,13 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { DashboardData } from "../lib/dashboard-data.server";
 import type { AppOutletContext } from "./app";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { DashboardSkeleton } from "../components/DashboardSkeleton";
-import { SetupChecklist } from "../components/SetupChecklist";
-import { InventoryOverviewSection } from "../components/InventoryOverviewSection";
-import { StockOutSoonBanner } from "../components/StockOutSoonBanner";
-import { ProductsAtRiskSection } from "../components/ProductsAtRiskSection";
-import { RecentAlertsSection } from "../components/RecentAlertsSection";
-import { DashboardSyncButton } from "../components/DashboardSyncButton";
+import { DashboardSkeleton } from "../components/dashboard/DashboardSkeleton";
+import { SetupChecklist } from "../components/dashboard/SetupChecklist";
+import { InventoryOverviewSection } from "../components/dashboard/InventoryOverviewSection";
+import { StockOutSoonBanner } from "../components/dashboard/StockOutSoonBanner";
+import { ProductsAtRiskSection } from "../components/dashboard/ProductsAtRiskSection";
+import { RecentAlertsSection } from "../components/dashboard/RecentAlertsSection";
+import { DashboardSyncButton } from "../components/dashboard/DashboardSyncButton";
 
 // Only the auth check blocks the response — dashboard data is fetched entirely
 // in the background by api.dashboard-stream.ts, identified by a short-lived

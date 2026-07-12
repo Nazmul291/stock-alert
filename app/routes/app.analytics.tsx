@@ -6,12 +6,12 @@ import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { AnalyticsData } from "../lib/analytics-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
-import { AnalyticsStatCards, AnalyticsStatCardsSkeleton } from "../components/AnalyticsStatCards";
-import { AlertTypeBreakdown, AlertTypeBreakdownSkeleton } from "../components/AlertTypeBreakdown";
-import { ChannelBreakdown, ChannelBreakdownSkeleton } from "../components/ChannelBreakdown";
-import { DailyBarChart } from "../components/DailyBarChart";
-import { TopProductsChart } from "../components/TopProductsChart";
-import { StockHealthBar } from "../components/StockHealthBar";
+import { AnalyticsStatCards, AnalyticsStatCardsSkeleton } from "../components/analytics/AnalyticsStatCards";
+import { AlertTypeBreakdown, AlertTypeBreakdownSkeleton } from "../components/analytics/AlertTypeBreakdown";
+import { ChannelBreakdown, ChannelBreakdownSkeleton } from "../components/analytics/ChannelBreakdown";
+import { DailyBarChart } from "../components/analytics/DailyBarChart";
+import { TopProductsChart } from "../components/analytics/TopProductsChart";
+import { StockHealthBar } from "../components/analytics/StockHealthBar";
 
 // Only the auth check blocks the response — the analytics query runs entirely
 // in the background via api.analytics-stream.ts and is pushed to the client

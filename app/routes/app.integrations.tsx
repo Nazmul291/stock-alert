@@ -14,16 +14,16 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { IntegrationsData } from "../lib/integrations-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { TestResultBanner, type TestResult } from "../components/IntegrationControls";
-import { EmailIntegrationSection } from "../components/EmailIntegrationSection";
-import { SlackIntegrationSection } from "../components/SlackIntegrationSection";
-import { WhatsAppIntegrationSection } from "../components/WhatsAppIntegrationSection";
-import { AsanaIntegrationSection } from "../components/AsanaIntegrationSection";
-import { KlaviyoIntegrationSection } from "../components/KlaviyoIntegrationSection";
-import { FlowIntegrationSection } from "../components/FlowIntegrationSection";
-import { OutboundWebhookSection } from "../components/OutboundWebhookSection";
-import { TestNotificationButton } from "../components/TestNotificationButton";
+import { EmailIntegrationSection } from "../components/integrations/EmailIntegrationSection";
+import { SlackIntegrationSection } from "../components/integrations/SlackIntegrationSection";
+import { WhatsAppIntegrationSection } from "../components/integrations/WhatsAppIntegrationSection";
+import { AsanaIntegrationSection } from "../components/integrations/AsanaIntegrationSection";
+import { KlaviyoIntegrationSection } from "../components/integrations/KlaviyoIntegrationSection";
+import { FlowIntegrationSection } from "../components/integrations/FlowIntegrationSection";
+import { OutboundWebhookSection } from "../components/integrations/OutboundWebhookSection";
+import { TestNotificationButton } from "../components/integrations/TestNotificationButton";
 import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
-import { IntegrationsSkeleton } from "../components/IntegrationsSkeleton";
+import { IntegrationsSkeleton } from "../components/integrations/IntegrationsSkeleton";
 import { canUseFeature } from "../lib/plan-limits";
 
 // Only the auth check blocks the response — integrations data loads entirely in

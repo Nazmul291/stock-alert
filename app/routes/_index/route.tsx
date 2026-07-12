@@ -3,12 +3,12 @@ import { useLoaderData } from "react-router";
 import { useEffect, useState } from "react";
 
 import { useSSEData } from "../../hooks/use-sse-data";
-import { LandingHeader } from "../../components/LandingHeader";
-import { LandingHero } from "../../components/LandingHero";
-import { LandingFeatures } from "../../components/LandingFeatures";
-import { LandingPricing } from "../../components/LandingPricing";
-import { LandingFinalCta } from "../../components/LandingFinalCta";
-import { LandingFooter } from "../../components/LandingFooter";
+import { LandingHeader } from "../../components/landing/LandingHeader";
+import { LandingHero } from "../../components/landing/LandingHero";
+import { LandingFeatures } from "../../components/landing/LandingFeatures";
+import { LandingPricing } from "../../components/landing/LandingPricing";
+import { LandingFinalCta } from "../../components/landing/LandingFinalCta";
+import { LandingFooter } from "../../components/landing/LandingFooter";
 // Inlined as a <style> tag below instead of a <link rel="stylesheet"> so this
 // page has zero render-blocking network requests — the CSS ships in the same
 // response as the HTML.

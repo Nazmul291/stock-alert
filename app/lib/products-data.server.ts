@@ -2,7 +2,7 @@ import prisma from "../db.server";
 import { getMaxProducts } from "./plan-limits";
 import { syncState } from "./sync-state.server";
 import { classifyProductStatus, countDistinctProducts, paginatedProductIdsByStatus } from "./inventory-rollup.server";
-import type { ProductRow, VariantStatusRow } from "../components/ProductEditModal";
+import type { ProductRow, VariantStatusRow } from "../components/products/ProductEditModal";
 import type { InventoryTracking } from "@prisma/client";
 
 const PRODUCTS_GRAPHQL = `

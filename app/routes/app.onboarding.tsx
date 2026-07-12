@@ -9,9 +9,9 @@ import { embeddedRedirectPath } from "../lib/embedded-redirect.server";
 import { mintSseToken } from "../lib/sse-token.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
-import { OnboardingStepIndicator } from "../components/OnboardingStepIndicator";
-import { OnboardingConfirmStep } from "../components/OnboardingConfirmStep";
-import { OnboardingSettingsStep } from "../components/OnboardingSettingsStep";
+import { OnboardingStepIndicator } from "../components/onboarding/OnboardingStepIndicator";
+import { OnboardingConfirmStep } from "../components/onboarding/OnboardingConfirmStep";
+import { OnboardingSettingsStep } from "../components/onboarding/OnboardingSettingsStep";
 
 // The hasActivePayment / allStepsDone redirect gate used to be awaited here
 // (isTestStore + billing.check, both Shopify API calls) before any of the step
