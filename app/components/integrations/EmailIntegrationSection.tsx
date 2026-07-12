@@ -1,17 +1,18 @@
 import { useState, useEffect } from "react";
 import { useFetcher } from "react-router";
 import { ConnectRow, ConnectModal, fieldLabel, inputStyle, helpText } from "../IntegrationControls";
+import { useIntegrationsStore } from "../../stores/integrations-store";
+import { canUseFeature } from "../../lib/plan-limits";
 
 // Email — connect/disconnect via modal, no inline toggle.
-export function EmailIntegrationSection({
-  notificationEmail, emailNotifications, storeEmail, canMultipleRecipients, retry,
-}: {
-  notificationEmail: string;
-  emailNotifications: boolean;
-  storeEmail: string | null;
-  canMultipleRecipients: boolean;
-  retry: () => void;
-}) {
+export function EmailIntegrationSection() {
+  const notificationEmail = useIntegrationsStore((s) => s.data!.settings.notificationEmail);
+  const emailNotifications = useIntegrationsStore((s) => s.data!.settings.emailNotifications);
+  const storeEmail = useIntegrationsStore((s) => s.data!.storeEmail);
+  const plan = useIntegrationsStore((s) => s.data!.plan);
+  const canMultipleRecipients = canUseFeature(plan, "multipleRecipients");
+  const retry = useIntegrationsStore((s) => s.retry)!;
+
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailInput, setEmailInput] = useState(notificationEmail);
   const [emailError, setEmailError] = useState<string | null>(null);

@@ -1,18 +1,17 @@
 import { useEffect } from "react";
 import { useFetcher } from "react-router";
 import { ConnectRow } from "../IntegrationControls";
+import { useIntegrationsStore } from "../../stores/integrations-store";
+import { canUseFeature } from "../../lib/plan-limits";
 
 // Slack — connected via OAuth, not a manual webhook-URL paste.
-export function SlackIntegrationSection({
-  connected, channelName, teamName, canSlack, slackConnectToken, retry,
-}: {
-  connected: boolean;
-  channelName: string | null;
-  teamName: string | null;
-  canSlack: boolean;
-  slackConnectToken: string;
-  retry: () => void;
-}) {
+export function SlackIntegrationSection() {
+  const connected = useIntegrationsStore((s) => s.data!.settings.slackConnected);
+  const channelName = useIntegrationsStore((s) => s.data!.settings.slackChannelName);
+  const teamName = useIntegrationsStore((s) => s.data!.settings.slackTeamName);
+  const canSlack = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "slackNotifications");
+  const slackConnectToken = useIntegrationsStore((s) => s.slackConnectToken)!;
+  const retry = useIntegrationsStore((s) => s.retry)!;
   const disconnectFetcher = useFetcher();
   const disconnecting = disconnectFetcher.state !== "idle";
 

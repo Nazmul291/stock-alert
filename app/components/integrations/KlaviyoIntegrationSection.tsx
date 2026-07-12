@@ -1,16 +1,16 @@
 import { useState, useEffect } from "react";
 import { useFetcher } from "react-router";
 import { ConnectRow, ConnectModal, fieldLabel, inputStyle, helpText } from "../IntegrationControls";
+import { useIntegrationsStore } from "../../stores/integrations-store";
+import { canUseFeature } from "../../lib/plan-limits";
 
 // Klaviyo — connect/disconnect via modal. The API key is write-only (never
 // sent to the client), so the input always starts blank.
-export function KlaviyoIntegrationSection({
-  canKlaviyo, enabled, retry,
-}: {
-  canKlaviyo: boolean;
-  enabled: boolean;
-  retry: () => void;
-}) {
+export function KlaviyoIntegrationSection() {
+  const canKlaviyo = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "klaviyoIntegration");
+  const enabled = useIntegrationsStore((s) => s.data!.settings.klaviyoEnabled);
+  const retry = useIntegrationsStore((s) => s.retry)!;
+
   const [klaviyoModalOpen, setKlaviyoModalOpen] = useState(false);
   const [klaviyoInput, setKlaviyoInput] = useState("");
   const [klaviyoError, setKlaviyoError] = useState<string | null>(null);

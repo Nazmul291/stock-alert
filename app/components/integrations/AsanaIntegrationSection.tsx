@@ -2,22 +2,22 @@ import { useState, useEffect } from "react";
 import { useFetcher } from "react-router";
 import { ConnectRow, inputStyle, helpText } from "../IntegrationControls";
 import { AsanaEventRow } from "./AsanaEventRow";
-import type { AsanaMapping } from "../../lib/integrations-data.server";
+import { useIntegrationsStore } from "../../stores/integrations-store";
+import { canUseFeature } from "../../lib/plan-limits";
 
 // Asana — connected via OAuth (same new-tab pattern as Slack, since Asana's
 // consent screen can't render inside Shopify's iframe either), then per-event
 // project/section mappings live inline once connected.
-export function AsanaIntegrationSection({
-  canAsana, connected, userName, workspaceName, asanaConnectToken, mappingByEvent, retry,
-}: {
-  canAsana: boolean;
-  connected: boolean;
-  userName: string | null;
-  workspaceName: string | null;
-  asanaConnectToken: string;
-  mappingByEvent: Record<string, AsanaMapping | undefined>;
-  retry: () => void;
-}) {
+export function AsanaIntegrationSection() {
+  const canAsana = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "asanaTaskCreation");
+  const connected = useIntegrationsStore((s) => s.data!.settings.asanaConnected);
+  const userName = useIntegrationsStore((s) => s.data!.settings.asanaUserName);
+  const workspaceName = useIntegrationsStore((s) => s.data!.settings.asanaWorkspaceName);
+  const asanaConnectToken = useIntegrationsStore((s) => s.asanaConnectToken)!;
+  const asanaMappings = useIntegrationsStore((s) => s.data!.asanaMappings);
+  const mappingByEvent = Object.fromEntries(asanaMappings.map((m) => [m.eventType, m]));
+  const retry = useIntegrationsStore((s) => s.retry)!;
+
   const asanaDisconnectFetcher = useFetcher();
   const asanaDisconnecting = asanaDisconnectFetcher.state !== "idle";
   const asanaProjectsFetcher = useFetcher<{ projects: { gid: string; name: string }[] }>();

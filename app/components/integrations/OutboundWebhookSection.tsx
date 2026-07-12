@@ -1,10 +1,12 @@
 import { fieldLabel, inputStyle, helpText } from "../IntegrationControls";
+import { useIntegrationsStore } from "../../stores/integrations-store";
+import { canUseFeature } from "../../lib/plan-limits";
 
-export function OutboundWebhookSection({ value, onChange, canUse }: {
+export function OutboundWebhookSection({ value, onChange }: {
   value: string;
   onChange: (value: string) => void;
-  canUse: boolean;
 }) {
+  const canUse = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "outboundWebhook");
   return (
     <div style={{ marginTop: 24 }}>
       <s-section heading="Outbound Webhook">

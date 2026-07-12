@@ -1,17 +1,16 @@
 import { useState, useEffect } from "react";
 import { useFetcher } from "react-router";
 import { ConnectRow, ConnectModal, fieldLabel, inputStyle, helpText } from "../IntegrationControls";
+import { useIntegrationsStore } from "../../stores/integrations-store";
 
 // WhatsApp — one number Stock Alert owns sends to whatever personal phone the
 // merchant enters, so "connecting" is just proving they own that number: send
 // a code, they type it back. No Meta login involved at all.
-export function WhatsAppIntegrationSection({
-  phone, phoneVerified, retry,
-}: {
-  phone: string;
-  phoneVerified: boolean;
-  retry: () => void;
-}) {
+export function WhatsAppIntegrationSection() {
+  const phone = useIntegrationsStore((s) => s.data!.settings.whatsappPhone);
+  const phoneVerified = useIntegrationsStore((s) => s.data!.settings.whatsappPhoneVerified);
+  const retry = useIntegrationsStore((s) => s.retry)!;
+
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappStep, setWhatsappStep] = useState<"phone" | "code">("phone");
   const [whatsappPhoneInput, setWhatsappPhoneInput] = useState(phone);

@@ -14,6 +14,7 @@ import { mintSseToken } from "../lib/sse-token.server";
 import type { IntegrationsData } from "../lib/integrations-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
 import { TestResultBanner, type TestResult } from "../components/IntegrationControls";
+import { useIntegrationsStore } from "../stores/integrations-store";
 import { EmailIntegrationSection } from "../components/integrations/EmailIntegrationSection";
 import { SlackIntegrationSection } from "../components/integrations/SlackIntegrationSection";
 import { WhatsAppIntegrationSection } from "../components/integrations/WhatsAppIntegrationSection";
@@ -368,6 +369,16 @@ export default function IntegrationsPage() {
   const slackError = searchParams.get("slack_error") === "1";
   const asanaError = searchParams.get("asana_error") === "1";
 
+  const setLoaderData = useIntegrationsStore((s) => s.setLoaderData);
+  const setSSEState = useIntegrationsStore((s) => s.setSSEState);
+  useEffect(() => { setLoaderData({ slackConnectToken, asanaConnectToken }); }, [slackConnectToken, asanaConnectToken, setLoaderData]);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  // Gate on the store, not the local `data`/`error` above — see the rule
+  // established in dashboard-store.ts.
+  const storeData = useIntegrationsStore((s) => s.data);
+  const storeError = useIntegrationsStore((s) => s.error);
+
   return (
     <s-page heading="Integrations" sub-heading="Connect Stock Alert to Slack, WhatsApp, Shopify Flow, Klaviyo, Asana, and your own systems">
       {slackError && (
@@ -380,10 +391,10 @@ export default function IntegrationsPage() {
           Couldn&apos;t connect to Asana — please try again.
         </div>
       )}
-      {error ? (
-        <SSEErrorRetry message={error} onRetry={retry} />
-      ) : data ? (
-        <IntegrationsContent data={data} slackConnectToken={slackConnectToken} asanaConnectToken={asanaConnectToken} retry={retry} />
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
+      ) : storeData ? (
+        <IntegrationsContent />
       ) : (
         <IntegrationsSkeleton />
       )}
@@ -391,21 +402,10 @@ export default function IntegrationsPage() {
   );
 }
 
-function IntegrationsContent({
-  data, slackConnectToken, asanaConnectToken, retry,
-}: {
-  data: IntegrationsData;
-  slackConnectToken: string;
-  asanaConnectToken: string;
-  retry: () => void;
-}) {
-  const { plan, storeEmail, settings, asanaMappings } = data;
+function IntegrationsContent() {
+  const { plan, settings } = useIntegrationsStore((s) => s.data!);
   const canSlack = canUseFeature(plan, "slackNotifications");
-  const canAsana = canUseFeature(plan, "asanaTaskCreation");
   const canKlaviyo = canUseFeature(plan, "klaviyoIntegration");
-  const canOutboundWebhook = canUseFeature(plan, "outboundWebhook");
-  const canMultipleRecipients = canUseFeature(plan, "multipleRecipients");
-  const asanaMappingByEvent = Object.fromEntries(asanaMappings.map((m) => [m.eventType, m]));
 
   const saveFetcher = useFetcher<typeof action>();
   const saving = saveFetcher.state !== "idle";
@@ -481,28 +481,11 @@ function IntegrationsContent({
             Send stock alerts by email, Slack, or WhatsApp.
           </p>
 
-          <EmailIntegrationSection
-            notificationEmail={settings.notificationEmail}
-            emailNotifications={settings.emailNotifications}
-            storeEmail={storeEmail}
-            canMultipleRecipients={canMultipleRecipients}
-            retry={retry}
-          />
+          <EmailIntegrationSection />
 
-          <SlackIntegrationSection
-            connected={settings.slackConnected}
-            channelName={settings.slackChannelName}
-            teamName={settings.slackTeamName}
-            canSlack={canSlack}
-            slackConnectToken={slackConnectToken}
-            retry={retry}
-          />
+          <SlackIntegrationSection />
 
-          <WhatsAppIntegrationSection
-            phone={settings.whatsappPhone}
-            phoneVerified={settings.whatsappPhoneVerified}
-            retry={retry}
-          />
+          <WhatsAppIntegrationSection />
 
           <TestNotificationButton
             testing={testing}
@@ -517,15 +500,7 @@ function IntegrationsContent({
           />
         </s-section>
 
-        <AsanaIntegrationSection
-          canAsana={canAsana}
-          connected={settings.asanaConnected}
-          userName={settings.asanaUserName}
-          workspaceName={settings.asanaWorkspaceName}
-          asanaConnectToken={asanaConnectToken}
-          mappingByEvent={asanaMappingByEvent}
-          retry={retry}
-        />
+        <AsanaIntegrationSection />
 
         {/* ── Klaviyo ── */}
         <div style={{ marginTop: 24 }}>
@@ -542,7 +517,7 @@ function IntegrationsContent({
               </ul>
             </div>
 
-            <KlaviyoIntegrationSection canKlaviyo={canKlaviyo} enabled={settings.klaviyoEnabled} retry={retry} />
+            <KlaviyoIntegrationSection />
           </s-section>
         </div>
 
@@ -551,7 +526,6 @@ function IntegrationsContent({
         <OutboundWebhookSection
           value={outboundWebhookUrl}
           onChange={(v) => { setOutboundWebhookUrl(v); markDirty(); }}
-          canUse={canOutboundWebhook}
         />
       </Form>
 
