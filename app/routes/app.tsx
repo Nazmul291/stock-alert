@@ -1,6 +1,6 @@
 import type { HeadersFunction, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
 import { Outlet, useLoaderData, useRouteError, useNavigation, isRouteErrorResponse } from "react-router";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { ChatWidget } from "@nazmulcodes/shopify-admin-and-support-chat";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
@@ -9,15 +9,7 @@ import { authenticate } from "../shopify.server";
 import { mintSseToken } from "../lib/sse-token.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 import { useSSEData } from "../hooks/use-sse-data";
-
-export type GateData = { redirectTo: string | null; alertsToday: number };
-
-// "loading": gate hasn't settled yet. "redirect": gate says bounce away —
-// child routes should keep showing their skeleton while the navigate() below
-// is in flight. "ready": gate settled with nothing to redirect to (or the
-// gate stream itself failed — fails open rather than blocking forever).
-export type AppStatus = "loading" | "redirect" | "ready";
-export type AppOutletContext = { appStatus: AppStatus };
+import { useAppGateStore, type GateData } from "../stores/app-gate-store";
 
 // Only auth blocks the response now — the billing/onboarding gate check and the
 // alertsToday count used to be awaited here too (~400-1000ms on a cache miss,
@@ -99,7 +91,9 @@ export default function App() {
   );
   const alertsToday = gate?.alertsToday ?? 0;
 
-  const [appStatus, setAppStatus] = useState<AppStatus>("loading");
+  const setGateState = useAppGateStore((s) => s.setGateState);
+  const setAppStatus = useAppGateStore((s) => s.setAppStatus);
+  useEffect(() => { setGateState({ gate, gateError }); }, [gate, gateError, setGateState]);
 
   useEffect(() => {
     if (gate?.redirectTo) {
@@ -108,7 +102,9 @@ export default function App() {
     } else if (gate || gateError) {
       setAppStatus("ready");
     }
-  }, [gate, gateError, navigate]);
+  }, [gate, gateError, navigate, setAppStatus]);
+
+  const appStatus = useAppGateStore((s) => s.appStatus);
 
   return (
     <AppProvider embedded={false}>
@@ -126,11 +122,12 @@ export default function App() {
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/billing">Billing</s-link>
       </s-app-nav>
-      {/* Lets child routes (e.g. app._index.tsx's dashboard) hold their own
-          skeleton while appStatus is "loading" or "redirect", and only render
-          real content once it's "ready" — instead of flashing full content
-          right before a bounce to onboarding/billing. */}
-      <Outlet context={{ appStatus } satisfies AppOutletContext} />
+      {/* Child routes (e.g. app._index.tsx's dashboard) read appStatus straight
+          from useAppGateStore to hold their own skeleton while it's "loading"
+          or "redirect", and only render real content once it's "ready" —
+          instead of flashing full content right before a bounce to
+          onboarding/billing. */}
+      <Outlet />
       <ChatWidget shop={shop} />
       <div style={{ marginTop: 48, paddingTop: 16, borderTop: "1px solid #f3f4f6", textAlign: "center" }}>
         <p style={{ fontSize: 12, color: "#d1d5db", margin: 0 }}>

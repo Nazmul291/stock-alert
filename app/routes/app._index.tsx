@@ -1,13 +1,13 @@
 import { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher, useOutletContext } from "react-router";
+import { useLoaderData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { DashboardData } from "../lib/dashboard-data.server";
-import type { AppOutletContext } from "./app";
+import { useAppGateStore } from "../stores/app-gate-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { DashboardSkeleton } from "../components/dashboard/DashboardSkeleton";
 import { SetupChecklist } from "../components/dashboard/SetupChecklist";
@@ -42,7 +42,7 @@ export default function Dashboard() {
   // merchant to onboarding/billing. Hold the skeleton while appStatus is
   // "loading" or "redirect", instead of flashing full dashboard content right
   // before the redirect fires — only "ready" means it's safe to render.
-  const { appStatus } = useOutletContext<AppOutletContext>();
+  const appStatus = useAppGateStore((s) => s.appStatus);
   const showContent = !!data && appStatus === "ready";
 
   return (
