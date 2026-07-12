@@ -14,7 +14,7 @@ export function LandingPricing({ appStoreUrl }: { appStoreUrl: string }) {
               className={key === "pro" ? "sa-pricingCard sa-pricingCardHighlight" : "sa-pricingCard"}
             >
               <h3>{plan.name}</h3>
-              <p className="sa-price">{plan.price}</p>
+              <p className="sa-price">{plan.price}/month</p>
               <ul>
                 {plan.features.map((feat) => (
                   <li key={feat}>{feat}</li>
