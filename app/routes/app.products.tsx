@@ -1,6 +1,6 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, Form, Link, useNavigation, useSubmit, useFetcher } from "react-router";
+import { useLoaderData, useActionData, useNavigation, useSubmit, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -11,12 +11,103 @@ import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { refreshShopVelocity } from "../lib/velocity.server";
-import { ProductEditModal, rollupVariantStatuses } from "../components/ProductEditModal";
-import type { ProductRow, OptimisticPatch } from "../components/ProductEditModal";
-import type { VariantInventory, LocationInventory } from "../components/InventorySection";
-import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
+import { ProductEditModal } from "../components/products/ProductEditModal";
+import type { ProductRow } from "../components/products/ProductEditModal";
+import type { VariantInventory, LocationInventory } from "../components/products/InventorySection";
+import { SSEErrorRetry } from "../components/Skeleton";
+import { ProductSyncButton } from "../components/products/ProductSyncButton";
+import { ProductsToolbar } from "../components/products/ProductsToolbar";
+import { ProductsTable } from "../components/products/ProductsTable";
+import { ProductsBulkActionBar } from "../components/products/ProductsBulkActionBar";
+import { ProductsPagination } from "../components/products/ProductsPagination";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { ProductsData } from "../lib/products-data.server";
+import { useProductsStore } from "../stores/products-store";
+import type { InventoryStatus } from "@prisma/client";
+
+type AdminClient = Awaited<ReturnType<typeof authenticate.admin>>["admin"];
+
+type GraphQLUserError = { field?: string[] | null; message: string };
+type GraphQLResponse<T> = {
+  data?: T;
+  errors?: { message: string }[];
+  extensions?: { cost?: { throttleStatus?: { currentlyAvailable: number; restoreRate: number } } };
+};
+
+type InventoryLevelEdge = {
+  node: {
+    location: { id: string; name: string };
+    quantities: Array<{ name: string; quantity: number }>;
+  };
+};
+type ProductInventoryVariantEdge = {
+  node: {
+    id: string;
+    title: string;
+    sku: string | null;
+    inventoryItem: {
+      id: string;
+      tracked: boolean;
+      inventoryLevels?: { edges: InventoryLevelEdge[] };
+    } | null;
+  };
+};
+type ProductInventoryResponse = GraphQLResponse<{
+  product: { variants: { edges: ProductInventoryVariantEdge[] } } | null;
+}>;
+
+type ProductMetafieldsResponse = GraphQLResponse<{
+  product: {
+    customThreshold: { id: string; value: string } | null;
+    autoHide: { id: string; value: string } | null;
+    autoRepublish: { id: string; value: string } | null;
+  } | null;
+}>;
+
+type CollectionsResponse = GraphQLResponse<{
+  collections: {
+    edges: Array<{ node: { id: string; title: string; legacyResourceId: string } }>;
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
+}>;
+
+type SyncProductVariantEdge = {
+  node: {
+    id: string; title: string; sku: string | null; inventoryQuantity: number | null;
+    inventoryItem: { tracked: boolean } | null;
+  };
+};
+type SyncProductEdge = {
+  node: {
+    id: string; title: string; status: string;
+    featuredMedia: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
+    customThreshold: { value: string } | null;
+    variants: { edges: SyncProductVariantEdge[] };
+  };
+};
+type SyncProductsResponse = GraphQLResponse<{
+  products: { edges: SyncProductEdge[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+}>;
+
+type InventoryItemUpdateResponse = GraphQLResponse<{
+  inventoryItemUpdate: { inventoryItem: { id: string; tracked: boolean } | null; userErrors: GraphQLUserError[] };
+}>;
+type ProductUpdateResponse = GraphQLResponse<{
+  productUpdate: { product: { id: string; status: string } | null; userErrors: GraphQLUserError[] };
+}>;
+type InventorySetQuantitiesResponse = GraphQLResponse<{
+  inventorySetQuantities: { userErrors: GraphQLUserError[] };
+}>;
+type MetafieldsSetResponse = GraphQLResponse<{
+  metafieldsSet: { userErrors: GraphQLUserError[] };
+}>;
+type MetafieldInput = { ownerId: string; namespace: string; key: string; value: string; type: string };
+
+type SyncVariantRow = {
+  productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
+  sku: string | null; currentQuantity: number; inventoryStatus: "in_stock" | "low_stock" | "out_of_stock";
+  imageUrl: string | null; imageAlt: string | null;
+};
 
 const SYNC_PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String, $query: String) {
@@ -129,7 +220,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // as before.
   if (url.searchParams.get("intent") === "export_csv") {
     const csvFilter = url.searchParams.get("filter") ?? "all";
-    const statusFilter: string[] =
+    const statusFilter: InventoryStatus[] =
       csvFilter === "out_of_stock" ? ["out_of_stock"]
       : csvFilter === "low_stock"  ? ["low_stock"]
       : csvFilter === "in_stock"   ? ["in_stock"]
@@ -139,7 +230,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // quantity) is what makes this actionable for reordering; a rolled-up
     // per-product row would lose exactly that.
     const rows = await prisma.inventoryTracking.findMany({
-      where: { shop, inventoryStatus: { in: statusFilter as any }, monitoringEnabled: true },
+      where: { shop, inventoryStatus: { in: statusFilter }, monitoringEnabled: true },
       orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
       select: {
         productId: true, productTitle: true, variantTitle: true, sku: true,
@@ -177,7 +268,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let hasNext = true;
     while (hasNext && collections.length < 250) {
       const res = await admin.graphql(COLLECTIONS_GRAPHQL, { variables: { first: 50, ...(cursor ? { after: cursor } : {}) } });
-      const json: any = await res.json();
+      const json: CollectionsResponse = await res.json();
       const page = json.data?.collections;
       if (!page) break;
       for (const e of page.edges) collections.push({ id: e.node.legacyResourceId, title: e.node.title });
@@ -193,19 +284,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
         variables: { id: `gid://shopify/Product/${productId}` },
       });
-      const json: any = await res.json();
+      const json: ProductInventoryResponse = await res.json();
 
       if (json.errors?.length) {
-        const msg = json.errors.map((e: any) => e.message).join("; ");
+        const msg = json.errors.map((e) => e.message).join("; ");
         console.error("[get_product_inventory] GraphQL errors:", msg);
         return { inventoryData: null, inventoryError: `GraphQL error: ${msg}` };
       }
 
-      const variants: VariantInventory[] = (json.data?.product?.variants?.edges ?? []).map((e: any) => {
+      const variants: VariantInventory[] = (json.data?.product?.variants?.edges ?? []).map((e) => {
         const v = e.node;
-        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le: any) => {
-          const quantities: any[] = le.node.quantities ?? [];
-          const available = quantities.find((q: any) => q.name === "available");
+        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le) => {
+          const quantities = le.node.quantities ?? [];
+          const available = quantities.find((q) => q.name === "available");
           return {
             locationId: le.node.location.id,
             locationName: le.node.location.name,
@@ -236,7 +327,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
         variables: { id: `gid://shopify/Product/${productId}` },
       });
-      const json: any = await res.json();
+      const json: ProductMetafieldsResponse = await res.json();
       const p = json.data?.product;
       return {
         productSettings: {
@@ -268,10 +359,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 
 async function runProductSync({ admin, shop, plan, maxProducts, threshold, monitoringFilter, monitoringCollectionId, monitoringTags }: {
-  admin: any; shop: string; plan: string; maxProducts: number; threshold: number;
+  admin: AdminClient; shop: string; plan: string; maxProducts: number; threshold: number;
   monitoringFilter?: string; monitoringCollectionId?: string | null; monitoringTags?: string | null;
 }) {
-  const allVariants: any[] = [];
+  const allVariants: SyncVariantRow[] = [];
   const seenProductIds = new Set<string>();
   let cursor: string | null = null;
   let hasNextPage = true;
@@ -290,7 +381,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       const gqlResponse = await admin.graphql(SYNC_PRODUCTS_GRAPHQL, {
         variables: { first: batchSize, after: cursor, query: syncQuery },
       });
-      const gqlJson: any = await gqlResponse.json();
+      const gqlJson: SyncProductsResponse = await gqlResponse.json();
 
       const throttle = gqlJson.extensions?.cost?.throttleStatus;
       if (throttle && throttle.currentlyAvailable < throttle.restoreRate * 1.5) {
@@ -304,7 +395,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
       for (const edge of page.edges) {
         const p = edge.node;
-        const productId = p.id.split("/").pop();
+        const productId = p.id.split("/").pop() as string;
         seenProductIds.add(productId);
         const imageUrl = p.featuredMedia?.preview?.image?.url ?? null;
         const imageAlt = p.featuredMedia?.preview?.image?.altText ?? null;
@@ -326,7 +417,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
           allVariants.push({
             productId: BigInt(productId),
-            variantId: BigInt(v.id.split("/").pop()),
+            variantId: BigInt(v.id.split("/").pop() as string),
             productTitle: p.title,
             variantTitle: v.title,
             sku: v.sku || null,
@@ -453,9 +544,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const res = await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
           variables: { id: shopifyInventoryItemId, input: { tracked: true } },
         });
-        const json: any = await res.json();
+        const json: InventoryItemUpdateResponse = await res.json();
         const errs = json.data?.inventoryItemUpdate?.userErrors ?? [];
-        if (errs.length > 0) errors.push(errs.map((e: any) => e.message).join(", "));
+        if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
       } catch (err) {
         errors.push(`Inventory tracking enable failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -465,9 +556,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const res = await admin.graphql(PRODUCT_UPDATE_MUTATION, {
         variables: { product: { id: `gid://shopify/Product/${productId}`, status: shopifyStatus } },
       });
-      const json: any = await res.json();
+      const json: ProductUpdateResponse = await res.json();
       const errs = json.data?.productUpdate?.userErrors ?? [];
-      if (errs.length > 0) errors.push(errs.map((e: any) => e.message).join(", "));
+      if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
     } catch (err) {
       errors.push(`Status update failed: ${err instanceof Error ? err.message : "Unknown"}`);
     }
@@ -484,9 +575,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           },
         });
-        const invJson: any = await invRes.json();
+        const invJson: InventorySetQuantitiesResponse = await invRes.json();
         const invErrs = invJson.data?.inventorySetQuantities?.userErrors ?? [];
-        if (invErrs.length > 0) errors.push(invErrs.map((e: any) => e.message).join(", "));
+        if (invErrs.length > 0) errors.push(invErrs.map((e) => e.message).join(", "));
       } catch (err) {
         errors.push(`Quantity update failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -526,15 +617,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
           variables: { id: `gid://shopify/Product/${productId}` },
         });
-        const json: any = await res.json();
-        if (json.errors?.length) throw new Error(json.errors.map((e: any) => e.message).join("; "));
+        const json: ProductInventoryResponse = await res.json();
+        if (json.errors?.length) throw new Error(json.errors.map((e) => e.message).join("; "));
         const edges = json.data?.product?.variants?.edges ?? [];
         variantsFresh = edges
-          .filter((e: any) => e.node.inventoryItem?.tracked !== false)
-          .map((e: any) => {
+          .filter((e) => e.node.inventoryItem?.tracked !== false)
+          .map((e) => {
             const v = e.node;
-            const qty = (v.inventoryItem?.inventoryLevels?.edges ?? []).reduce((sum: number, le: any) => {
-              const avail = (le.node.quantities ?? []).find((q: any) => q.name === "available");
+            const qty = (v.inventoryItem?.inventoryLevels?.edges ?? []).reduce((sum: number, le) => {
+              const avail = (le.node.quantities ?? []).find((q) => q.name === "available");
               return sum + (avail?.quantity ?? 0);
             }, 0);
             return { variantId: v.id.split("/").pop() as string, variantTitle: v.title ?? null, sku: v.sku || null, qty };
@@ -645,7 +736,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const customThresholdMetafieldId = ((form.get("customThresholdMetafieldId") as string) ?? "").trim() || null;
       const ownerId = `gid://shopify/Product/${productId}`;
 
-      const metafieldsToSet: any[] = [
+      const metafieldsToSet: MetafieldInput[] = [
         { ownerId, namespace: "stock_alert", key: "auto_hide", value: String(autoHide), type: "boolean" },
         { ownerId, namespace: "stock_alert", key: "auto_republish", value: String(autoRepublish), type: "boolean" },
       ];
@@ -656,9 +747,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       try {
         const mfRes = await admin.graphql(METAFIELDS_SET_MUTATION, { variables: { metafields: metafieldsToSet } });
-        const mfJson: any = await mfRes.json();
+        const mfJson: MetafieldsSetResponse = await mfRes.json();
         const mfErrs = mfJson.data?.metafieldsSet?.userErrors ?? [];
-        if (mfErrs.length > 0) errors.push(mfErrs.map((e: any) => e.message).join(", "));
+        if (mfErrs.length > 0) errors.push(mfErrs.map((e) => e.message).join(", "));
       } catch (err) {
         errors.push(`Metafield update failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -684,22 +775,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const invRes = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
         variables: { id: `gid://shopify/Product/${productId}` },
       });
-      const invJson: any = await invRes.json();
+      const invJson: ProductInventoryResponse = await invRes.json();
       const edges = invJson.data?.product?.variants?.edges ?? [];
 
       for (const edge of edges) {
         const itemId = edge.node.inventoryItem?.id;
-        if (itemId && !edge.node.inventoryItem.tracked) {
+        if (itemId && !edge.node.inventoryItem?.tracked) {
           await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
             variables: { id: itemId, input: { tracked: true } },
           });
         }
       }
 
-      const variants: VariantInventory[] = edges.map((e: any) => {
+      const variants: VariantInventory[] = edges.map((e) => {
         const v = e.node;
-        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le: any) => {
-          const available = (le.node.quantities ?? []).find((q: any) => q.name === "available");
+        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le) => {
+          const available = (le.node.quantities ?? []).find((q) => q.name === "available");
           return { locationId: le.node.location.id, locationName: le.node.location.name, quantity: available?.quantity ?? 0 };
         });
         return { id: v.id, title: v.title, sku: v.sku || null, inventoryItemId: v.inventoryItem?.id ?? null, tracked: true, locations };
@@ -779,99 +870,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { error: "Unknown action." };
 };
 
-const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  in_stock: { bg: "#d1fae5", color: "#065f46", label: "In Stock" },
-  low_stock: { bg: "#fef3c7", color: "#92400e", label: "Low Stock" },
-  out_of_stock: { bg: "#fee2e2", color: "#991b1b", label: "Out of Stock" },
-  deactivated: { bg: "#f3f4f6", color: "#374151", label: "Deactivated" },
-  requires_upgrade: { bg: "#e0e7ff", color: "#4338ca", label: "Requires Pro" },
-  not_tracked: { bg: "#ede9fe", color: "#5b21b6", label: "Not Tracked" },
-};
-
-const FILTER_TABS = [
-  { key: "all",           label: "All Products" },
-  { key: "out_of_stock",  label: "Out of Stock" },
-  { key: "low_stock",     label: "Low Stock" },
-  { key: "tracked",       label: "Tracked" },
-  { key: "not_tracked",   label: "Not Tracked" },
-];
-
-// Overlays a just-saved product-edit modal's OptimisticPatch onto its server
-// row so the table reflects the change instantly instead of waiting for a
-// page reload. Purely a display overlay — the real DB write (and any alert)
-// still comes from the inventory webhook; see ProductEditModal.tsx.
-function applyOptimisticPatch(p: ProductRow, patch: OptimisticPatch): ProductRow {
-  if (!patch.isTracked) {
-    return {
-      ...p,
-      isTracked: false,
-      inventoryStatus: "not_tracked",
-      currentQuantity: 0,
-      monitoringEnabled: false,
-      expectedRestockDate: patch.expectedRestockDate,
-      manualDailySales: patch.manualDailySales,
-      variants: [],
-      variantCount: 0,
-      variantsAtRiskCount: 0,
-    };
-  }
-
-  if (!patch.variantPatches) {
-    // Inventory data hadn't loaded when saved (e.g. a very fast save) — only
-    // the non-quantity fields are safe to reflect optimistically.
-    return {
-      ...p,
-      monitoringEnabled: patch.monitoringEnabled,
-      expectedRestockDate: patch.expectedRestockDate,
-      manualDailySales: patch.manualDailySales,
-    };
-  }
-
-  const variants = (p.variants ?? []).map((v) => {
-    const vPatch = patch.variantPatches![v.variantId];
-    return vPatch ? { ...v, ...vPatch } : v;
-  });
-  const statuses = variants.map((v) => v.inventoryStatus);
-
-  return {
-    ...p,
-    monitoringEnabled: patch.monitoringEnabled,
-    expectedRestockDate: patch.expectedRestockDate,
-    manualDailySales: patch.manualDailySales,
-    variants,
-    currentQuantity: variants.reduce((sum, v) => sum + v.currentQuantity, 0),
-    inventoryStatus: rollupVariantStatuses(statuses),
-    variantsAtRiskCount: statuses.filter((s) => s === "low_stock" || s === "out_of_stock").length,
-  };
-}
-
 export default function ProductsPage() {
-  const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as any;
+  const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as {
+    search: string; filter: string; after: string | null; prev: string; token: string;
+  };
   const { data, error, retry } = useSSEData<ProductsData>(
     `/api/products-stream?token=${encodeURIComponent(token)}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
   );
 
+  const setLoaderData = useProductsStore((s) => s.setLoaderData);
+  const setSSEState = useProductsStore((s) => s.setSSEState);
+  useEffect(() => { setLoaderData({ search, filter, after, prev }); }, [search, filter, after, prev, setLoaderData]);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  // Gate on the store, not the local `data`/`error` above — see the rule
+  // established in dashboard-store.ts.
+  const storeError = useProductsStore((s) => s.error);
+
   return (
     <s-page heading="Products" sub-heading="Monitor and manage your tracked inventory">
-      {error ? (
-        <SSEErrorRetry message={error} onRetry={retry} />
-      ) : data ? (
-        <ProductsPageContent data={data} search={search} filter={filter} after={after} prev={prev} />
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
       ) : (
-        <ProductsPageSkeleton />
+        <ProductsPageContent />
       )}
     </s-page>
   );
 }
 
-function ProductsPageContent({ data, search, filter, after, prev }: {
-  data: ProductsData;
-  search: string;
-  filter: string;
-  after: string | null;
-  prev: string;
-}) {
-  const { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled, supplierLeadTimeDays } = data;
+// Always renders the real layout — descendants that read SSE data off the
+// store (ProductsTable) compute their own `loading` and apply the shared
+// `.skeleton-text` class to just their dynamic value nodes, matching the
+// pattern established on the dashboard (see app._index.tsx).
+function ProductsPageContent() {
+  const loading = useProductsStore((s) => s.data === null);
+  const shop = useProductsStore((s) => s.data?.shop) ?? "";
+  const plan = useProductsStore((s) => s.data?.plan) ?? "basic";
+  const maxProducts = useProductsStore((s) => s.data?.maxProducts) ?? 0;
+  const trackedCount = useProductsStore((s) => s.data?.trackedCount) ?? 0;
+  const threshold = useProductsStore((s) => s.data?.threshold) ?? 5;
+  const products = useProductsStore((s) => s.data?.products) ?? [];
+  const syncRunning = useProductsStore((s) => s.data?.syncRunning) ?? false;
+  const lastSyncCompletedAt = useProductsStore((s) => s.data?.lastSyncCompletedAt) ?? null;
+  const lastSyncCount = useProductsStore((s) => s.data?.lastSyncCount) ?? null;
+  const autoHideEnabled = useProductsStore((s) => s.data?.autoHideEnabled) ?? false;
+  const autoRepublishEnabled = useProductsStore((s) => s.data?.autoRepublishEnabled) ?? false;
+  const filter = useProductsStore((s) => s.filter);
+  const applyOptimisticPatch = useProductsStore((s) => s.applyOptimisticPatch);
 
   const nav = useNavigation();
   const submit = useSubmit();
@@ -881,7 +926,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
 
   const actionData = useActionData<typeof action>();
   useEffect(() => {
-    if ((actionData as any)?.status === "started") openStream();
+    if (actionData && "status" in actionData && actionData.status === "started") openStream();
   }, [actionData, openStream]);
 
   const bulkFetcher = useFetcher<typeof action>();
@@ -917,17 +962,9 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
     });
   };
 
-  // Local display overlay applied on top of server data after a product-edit
-  // save — see applyOptimisticPatch above. There's no auto-refresh after a
-  // save (use-sse-data.ts loads once and closes), so without this the table
-  // would show stale values until the next full page reload.
-  const [localOverrides, setLocalOverrides] = useState<Record<string, OptimisticPatch>>({});
   const [saveErrorAfterClose, setSaveErrorAfterClose] = useState<string | null>(null);
-  const displayProducts = (products as ProductRow[]).map((p) =>
-    localOverrides[p.productId] ? applyOptimisticPatch(p, localOverrides[p.productId]) : p,
-  );
 
-  const selectableIds = displayProducts.filter((p) => p.isTracked).map((p) => p.productId);
+  const selectableIds = products.filter((p) => p.isTracked).map((p) => p.productId);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
 
   const toggleSelectAll = () => {
@@ -949,24 +986,9 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
 
   const [editProduct, setEditProduct] = useState<ProductRow | null>(null);
 
-  const buildUrl = (params: Record<string, string | null>) => {
-    const p = new URLSearchParams();
-    if (search) p.set("search", search);
-    if (filter !== "all") p.set("filter", filter);
-    if (prev) p.set("prev", prev);
-    Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); else p.delete(k); });
-    const qs = p.toString();
-    return `/app/products${qs ? `?${qs}` : ""}`;
-  };
-
-  const prevList = prev ? prev.split(",") : [];
-  const prevPageAfter = prevList[prevList.length - 1] ?? null;
-  const prevPagePrev = prevList.slice(0, -1).join(",") || null;
-  const nextPagePrev = [prev, after].filter(Boolean).join(",") || null;
-
   return (
     <>
-      <SyncButton
+      <ProductSyncButton
         slot="primary-action"
         pct={syncPct}
         busy={busy}
@@ -988,7 +1010,8 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
       )}
       {(actionData && "message" in actionData || bulkFetcher.data && "message" in bulkFetcher.data) && (
         <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#065f46" }}>
-          {(bulkFetcher.data as any)?.message ?? (actionData as any)?.message}
+          {(bulkFetcher.data && "message" in bulkFetcher.data ? bulkFetcher.data.message : undefined)
+            ?? (actionData && "message" in actionData ? actionData.message : undefined)}
         </div>
       )}
       {syncStreamError && (
@@ -1007,318 +1030,55 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
         </div>
       )}
 
-      {Number.isFinite(maxProducts) && plan !== "pro" && (
+      {/* Held back until data confirms it's actually needed, rather than
+          reserving space on every load. */}
+      {(!loading && Number.isFinite(maxProducts) && plan !== "pro") && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
           {PLAN_LIMITS[plan === "basic" ? "basic" : "none"].name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
           <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}
 
-      {lastSyncCompletedAt && (
+      {/* Reserved during loading — unlike the plan banner above, most
+          returning merchants have synced before, so treating this as "likely
+          present" avoids a shift for the common case instead of causing one. */}
+      {(loading || lastSyncCompletedAt) && (
         <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 12 }}>
-          Last synced {timeAgo(lastSyncCompletedAt)}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
+          <span className={loading ? "skeleton-text" : undefined}>
+            Last synced {lastSyncCompletedAt ? timeAgo(lastSyncCompletedAt) : "just now"}{lastSyncCount !== null ? ` · ${lastSyncCount} products` : ""}
+          </span>
         </div>
       )}
 
       <s-section heading="">
-        <Form method="get" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input type="hidden" name="filter" value={filter} />
-          <input
-            name="search"
-            defaultValue={search}
-            placeholder="Search by title…"
-            style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 14 }}
-            aria-label="Search products"
-          />
-          <button type="submit" style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontSize: 14 }}>
-            Search
-          </button>
-          {search && (
-            <Link to={`/app/products${filter !== "all" ? `?filter=${filter}` : ""}`}
-              style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", textDecoration: "none", fontSize: 14, color: "#374151", lineHeight: "1.5" }}>
-              Clear
-            </Link>
-          )}
-        </Form>
-
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8, marginBottom: 0 }}>
-          <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e5e7eb", flex: 1 }}>
-            {FILTER_TABS.map((tab) => (
-              <Link
-                key={tab.key}
-                to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null, prev: null })}
-                style={{
-                  padding: "6px 14px", fontSize: 13, textDecoration: "none", whiteSpace: "nowrap",
-                  fontWeight: filter === tab.key || (tab.key === "all" && filter === "all") ? 600 : 400,
-                  color: filter === tab.key || (tab.key === "all" && filter === "all") ? "#111827" : "#6b7280",
-                  borderBottom: filter === tab.key || (tab.key === "all" && filter === "all") ? "2px solid #111827" : "2px solid transparent",
-                }}
-              >
-                {tab.label}
-              </Link>
-            ))}
-          </div>
-          <button
-            onClick={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
-            disabled={csvFetcher.state !== "idle"}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              padding: "5px 12px", borderRadius: 6, border: "1px solid #d1d5db",
-              background: "#fff", color: "#374151", fontSize: 13,
-              cursor: csvFetcher.state !== "idle" ? "not-allowed" : "pointer",
-              opacity: csvFetcher.state !== "idle" ? 0.7 : 1,
-              whiteSpace: "nowrap", marginBottom: 1,
-            }}
-          >
-            {csvFetcher.state !== "idle" ? (
-              <span style={{
-                width: 12, height: 12, borderRadius: "50%",
-                border: "2px solid #d1d5db", borderTopColor: "#374151",
-                animation: "btn-spin 0.6s linear infinite", flexShrink: 0,
-              }} />
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-            )}
-            {csvFetcher.state !== "idle" ? "Exporting…" : "Export CSV"}
-          </button>
-        </div>
+        <ProductsToolbar
+          onExportCsv={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
+          exporting={csvFetcher.state !== "idle"}
+        />
         <div style={{ marginBottom: 16 }} />
 
-        {displayProducts.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>
-            <p style={{ fontSize: 16, marginBottom: 8 }}>No products found.</p>
-            <p style={{ fontSize: 14 }}>
-              {filter === "not_tracked"
-                ? "All products have been synced and are tracked."
-                : "Click Sync Products to import your Shopify inventory."}
-            </p>
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <thead>
-                <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
-                  <th style={{ padding: "8px 8px 8px 12px", width: 32 }}>
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleSelectAll}
-                      disabled={selectableIds.length === 0}
-                      aria-label="Select all"
-                      style={{ cursor: selectableIds.length === 0 ? "not-allowed" : "pointer" }}
-                    />
-                  </th>
-                  {[
-                    { label: "Product" },
-                    { label: "SKU" },
-                    { label: "Quantity" },
-                    { label: "Status", width: 130 },
-                    { label: "Days Left" },
-                    { label: "Reorder By" },
-                    { label: "Monitor Alert" },
-                    { label: "Action" },
-                  ].map(({ label, width }) => (
-                    <th key={label} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap", ...(width ? { width, minWidth: width } : {}) }}>{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {displayProducts.map((p: ProductRow) => {
-                  const s = STATUS_STYLE[p.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
-                  const isNotTracked = p.inventoryStatus === "not_tracked";
-                  const hasVariants = (p.variantCount ?? 0) > 1;
-                  const isExpanded = expandedProductIds.has(p.productId);
-                  const mixedVariants = hasVariants && (p.variantsAtRiskCount ?? 0) > 0 && (p.variantsAtRiskCount ?? 0) < (p.variantCount ?? 0);
-                  return (
-                    <Fragment key={p.id}>
-                    <tr style={{ borderBottom: isExpanded ? "none" : "1px solid #f3f4f6", opacity: isNotTracked ? 0.8 : 1 }}>
-                      <td style={{ padding: "10px 8px 10px 12px", width: 32 }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(p.productId)}
-                          onChange={() => toggleSelect(p.productId)}
-                          disabled={!p.isTracked}
-                          aria-label={`Select ${p.productTitle}`}
-                          style={{ cursor: p.isTracked ? "pointer" : "not-allowed" }}
-                        />
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          {hasVariants ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleExpandProduct(p.productId)}
-                              aria-label={isExpanded ? "Collapse variants" : "Expand variants"}
-                              style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#6b7280", flexShrink: 0, transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform .15s" }}
-                            >
-                              ▸
-                            </button>
-                          ) : (
-                            <span style={{ width: 18, flexShrink: 0 }} />
-                          )}
-                          {p.imageUrl ? (
-                            <img src={p.imageUrl} alt={p.imageAlt} width={40} height={40} loading="lazy"
-                              style={{ borderRadius: 6, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
-                          ) : (
-                            <div style={{ width: 40, height: 40, borderRadius: 6, background: "#f3f4f6", border: "1px solid #e5e7eb", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 18 }}>
-                              ▢
-                            </div>
-                          )}
-                          <span style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: "10px 12px", color: "#6b7280" }}>{hasVariants ? `${p.variantCount} variants` : (p.sku ?? "—")}</td>
-                      <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.inventoryStatus === "out_of_stock" ? "#dc2626" : p.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
-                        {isNotTracked ? "—" : p.currentQuantity}
-                      </td>
-                      <td style={{ padding: "10px 12px", width: 130, minWidth: 130 }}>
-                        {mixedVariants ? (
-                          <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                            {p.variantsAtRiskCount} of {p.variantCount} low
-                          </span>
-                        ) : (
-                          <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                            {s.label}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <StockOutBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} isManual={!!p.manualDailySales} />
-                        {p.expectedRestockDate && (
-                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
-                            Back: {new Date(p.expectedRestockDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <span style={{
-                          background: p.monitoringEnabled ? "#d1fae5" : p.inventoryStatus === "requires_upgrade" ? "#e0e7ff" : "#f3f4f6",
-                          color: p.monitoringEnabled ? "#065f46" : p.inventoryStatus === "requires_upgrade" ? "#4338ca" : "#6b7280",
-                          padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500,
-                        }}>
-                          {p.monitoringEnabled ? "Active" : p.inventoryStatus === "requires_upgrade" ? "Requires Pro" : "Disabled"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <button
-                          onClick={() => setEditProduct(p)}
-                          disabled={p.inventoryStatus === "requires_upgrade"}
-                          title={p.inventoryStatus === "requires_upgrade" ? "Upgrade to Pro to edit this product" : "Edit product"}
-                          style={{
-                            background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "5px 8px",
-                            cursor: p.inventoryStatus === "requires_upgrade" ? "not-allowed" : "pointer",
-                            color: p.inventoryStatus === "requires_upgrade" ? "#9ca3af" : "#374151",
-                            opacity: p.inventoryStatus === "requires_upgrade" ? 0.6 : 1,
-                            display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13,
-                          }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                          </svg>
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                    {isExpanded && hasVariants && (
-                      <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
-                        <td />
-                        <td colSpan={7} style={{ padding: "4px 12px 12px 40px" }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            {(p.variants ?? []).map((v) => {
-                              const vs = STATUS_STYLE[v.inventoryStatus] ?? STATUS_STYLE.not_tracked;
-                              return (
-                                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "#fff", borderRadius: 6, border: "1px solid #f0f0f0" }}>
-                                  <span style={{ flex: 1, fontSize: 13, color: "#374151" }}>{v.variantTitle ?? "—"}</span>
-                                  <span style={{ fontSize: 12, color: "#9ca3af" }}>{v.sku ?? "—"}</span>
-                                  <span style={{ fontWeight: 600, fontSize: 13, width: 50, textAlign: "right", color: v.inventoryStatus === "out_of_stock" ? "#dc2626" : v.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
-                                    {v.currentQuantity}
-                                  </span>
-                                  <span style={{ background: vs.bg, color: vs.color, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", width: 90, textAlign: "center" }}>
-                                    {vs.label}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <ProductsTable
+          selectedIds={selectedIds}
+          toggleSelect={toggleSelect}
+          allSelected={allSelected}
+          toggleSelectAll={toggleSelectAll}
+          selectableIds={selectableIds}
+          expandedProductIds={expandedProductIds}
+          toggleExpandProduct={toggleExpandProduct}
+          onEditProduct={setEditProduct}
+        />
 
         {selectedIds.size > 0 && (
-          <div style={{ position: "sticky", bottom: 16, zIndex: 50, margin: "12px 0 0", background: "#111827", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 4px 20px rgba(0,0,0,0.25)" }}>
-            <span style={{ color: "#e5e7eb", fontSize: 14, fontWeight: 500, flex: 1 }}>
-              {selectedIds.size} product{selectedIds.size !== 1 ? "s" : ""} selected
-            </span>
-            <button
-              type="button"
-              onClick={() => submitBulk(true)}
-              disabled={bulkFetcher.state === "submitting"}
-              style={{ padding: "7px 14px", borderRadius: 6, border: "none", background: "#059669", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-            >
-              Enable Monitoring
-            </button>
-            <button
-              type="button"
-              onClick={() => submitBulk(false)}
-              disabled={bulkFetcher.state === "submitting"}
-              style={{ padding: "7px 14px", borderRadius: 6, border: "none", background: "#dc2626", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-            >
-              Disable Monitoring
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedIds(new Set())}
-              style={{ padding: "7px 12px", borderRadius: 6, border: "1px solid #4b5563", background: "transparent", color: "#9ca3af", cursor: "pointer", fontSize: 13 }}
-            >
-              Clear
-            </button>
-          </div>
+          <ProductsBulkActionBar
+            count={selectedIds.size}
+            busy={bulkFetcher.state === "submitting"}
+            onEnable={() => submitBulk(true)}
+            onDisable={() => submitBulk(false)}
+            onClear={() => setSelectedIds(new Set())}
+          />
         )}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
-          <span style={{ fontSize: 13, color: "#6b7280" }}>
-            {after ? `Page ${prevList.length + 2}` : "Page 1"}
-          </span>
-          <div style={{ display: "flex", gap: 8 }}>
-            {prevList.length > 1 && (
-              <Link
-                to={buildUrl({ after: null, prev: null })}
-                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
-              >
-                ← First
-              </Link>
-            )}
-            {after && (
-              <Link
-                to={buildUrl({ after: prevPageAfter, prev: prevPagePrev })}
-                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
-              >
-                ← Previous
-              </Link>
-            )}
-            {pageInfo.hasNextPage && pageInfo.endCursor && (
-              <Link
-                to={buildUrl({ after: pageInfo.endCursor, prev: nextPagePrev })}
-                style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: 6, textDecoration: "none", color: "#374151", fontSize: 14 }}
-              >
-                Next →
-              </Link>
-            )}
-          </div>
-        </div>
+        <ProductsPagination />
       </s-section>
 
       {editProduct && (
@@ -1329,34 +1089,10 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
           autoHideEnabled={autoHideEnabled}
           autoRepublishEnabled={autoRepublishEnabled}
           onClose={() => setEditProduct(null)}
-          onSaved={(patch) => {
-            const productId = editProduct.productId;
-            setLocalOverrides((prev) => ({ ...prev, [productId]: patch }));
-          }}
+          onSaved={(patch) => applyOptimisticPatch(editProduct.productId, patch)}
           onSaveError={(message) => setSaveErrorAfterClose(message)}
         />
       )}
-    </>
-  );
-}
-
-function ProductsPageSkeleton() {
-  return (
-    <>
-      <s-button slot="primary-action" disabled>Sync Products</s-button>
-      <s-section heading="">
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <SkeletonBlock width="100%" height={32} borderRadius={6} />
-        </div>
-        <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
-          {Array.from({ length: 5 }, (_, i) => <SkeletonBlock key={i} width={90} height={20} />)}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {Array.from({ length: 8 }, (_, i) => (
-            <SkeletonBlock key={i} width="100%" height={56} borderRadius={6} />
-          ))}
-        </div>
-      </s-section>
     </>
   );
 }
@@ -1369,71 +1105,6 @@ function timeAgo(iso: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function SyncButton({ pct, busy, onClick, slot }: { pct: number | null; busy: boolean; onClick: () => void; slot?: Lowercase<string> }) {
-  const syncing = pct !== null;
-  const displayPct = Math.round(pct ?? 0);
-  const active = syncing || busy;
-  return (
-    <s-button
-      slot={slot}
-      variant="primary"
-      disabled={active ? true : undefined}
-      onClick={!active ? onClick : undefined}
-    >
-      {syncing ? `Syncing ${displayPct}%` : busy ? "Syncing…" : "Sync Products"}
-    </s-button>
-  );
-}
-
-function ReorderBadge({ days, leadTime }: { days: number | null; leadTime: number }) {
-  if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
-  if (days === 0) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
-
-  const daysUntilReorder = days - leadTime;
-
-  if (daysUntilReorder <= 0) {
-    return (
-      <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-        Reorder now!
-      </span>
-    );
-  }
-
-  const reorderDate = new Date();
-  reorderDate.setDate(reorderDate.getDate() + daysUntilReorder);
-  const label = reorderDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const isUrgent = daysUntilReorder <= 3;
-
-  return (
-    <span style={{
-      background: isUrgent ? "#fef3c7" : "#f9fafb",
-      color: isUrgent ? "#92400e" : "#374151",
-      border: `1px solid ${isUrgent ? "#fde68a" : "#e5e7eb"}`,
-      padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: isUrgent ? 600 : 400,
-      whiteSpace: "nowrap",
-    }}>
-      {label}
-    </span>
-  );
-}
-
-function StockOutBadge({ days, isManual }: { days: number | null; isManual?: boolean }) {
-  if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
-  if (days === 0) return (
-    <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
-      0d
-    </span>
-  );
-  const bg    = days < 7  ? "#fee2e2" : days < 14 ? "#fef3c7" : "#d1fae5";
-  const color = days < 7  ? "#991b1b" : days < 14 ? "#92400e" : "#065f46";
-  return (
-    <span style={{ background: bg, color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}
-      title={isManual ? "Based on manual daily sales rate" : "Based on 30-day sales average"}>
-      ~{days}d{isManual ? " ✎" : ""}
-    </span>
-  );
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

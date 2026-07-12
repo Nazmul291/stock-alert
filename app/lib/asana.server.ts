@@ -43,11 +43,13 @@ export async function getValidAsanaAccessToken(shop: string): Promise<string | n
   return refreshed.access_token;
 }
 
-async function asanaGet(path: string, accessToken: string): Promise<any> {
+type AsanaApiResponse<T = unknown> = { data?: T; errors?: { message: string }[] };
+
+async function asanaGet<T = unknown>(path: string, accessToken: string): Promise<AsanaApiResponse<T>> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  const json = await res.json();
+  const json: AsanaApiResponse<T> = await res.json();
   if (!res.ok) {
     throw new Error(json?.errors?.[0]?.message || `Asana API error ${res.status}`);
   }
@@ -55,12 +57,15 @@ async function asanaGet(path: string, accessToken: string): Promise<any> {
 }
 
 export async function fetchWorkspaces(accessToken: string): Promise<{ gid: string; name: string }[]> {
-  const json = await asanaGet("/users/me?opt_fields=workspaces.gid,workspaces.name", accessToken);
+  const json = await asanaGet<{ workspaces: { gid: string; name: string }[] }>(
+    "/users/me?opt_fields=workspaces.gid,workspaces.name",
+    accessToken,
+  );
   return json?.data?.workspaces ?? [];
 }
 
 export async function fetchProjects(accessToken: string, workspaceGid: string): Promise<{ gid: string; name: string }[]> {
-  const json = await asanaGet(
+  const json = await asanaGet<{ gid: string; name: string }[]>(
     `/workspaces/${workspaceGid}/projects?opt_fields=name&archived=false`,
     accessToken,
   );
@@ -68,7 +73,7 @@ export async function fetchProjects(accessToken: string, workspaceGid: string): 
 }
 
 export async function fetchSections(accessToken: string, projectGid: string): Promise<{ gid: string; name: string }[]> {
-  const json = await asanaGet(`/projects/${projectGid}/sections?opt_fields=name`, accessToken);
+  const json = await asanaGet<{ gid: string; name: string }[]>(`/projects/${projectGid}/sections?opt_fields=name`, accessToken);
   return json?.data ?? [];
 }
 

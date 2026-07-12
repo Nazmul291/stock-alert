@@ -15,6 +15,48 @@ import { syncState } from "../lib/sync-state.server";
 import { computeStockOutDays } from "../lib/velocity.server";
 import { fireOutboundWebhook } from "../lib/outbound-webhook.server";
 import { canUseFeature } from "../lib/plan-limits";
+import { Prisma } from "@prisma/client";
+
+type WebhookAdminClient = Awaited<ReturnType<typeof authenticate.webhook>>["admin"];
+
+type InventoryLevelsUpdatePayload = {
+  inventory_item_id?: number | string;
+  location_id?: number | string;
+  available?: number;
+};
+
+type GraphQLUserError = { field?: string[] | null; message: string };
+
+type InventoryItemQueryResponse = {
+  data?: {
+    inventoryItem: {
+      variant: {
+        legacyResourceId: string;
+        title: string;
+        inventoryQuantity: number | null;
+        product: {
+          legacyResourceId: string;
+          handle: string;
+          featuredMedia: { preview: { image: { url: string } | null } | null } | null;
+        } | null;
+      } | null;
+    } | null;
+  };
+};
+
+type ProductMetafieldsQueryResponse = {
+  data?: {
+    product: {
+      customThreshold: { id: string; value: string } | null;
+      autoHide: { id: string; value: string } | null;
+      autoRepublish: { id: string; value: string } | null;
+    } | null;
+  };
+};
+
+type ProductStatusUpdateResponse = {
+  data?: { productUpdate: { userErrors: GraphQLUserError[] } | null };
+};
 
 // inventoryQuantity on a variant is already the cross-location total, so a
 // specific variant's own quantity is all that's needed — no need to walk
@@ -64,7 +106,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response(null, { status: 200 });
   }
 
-  const data = payload as any;
+  const data = payload as InventoryLevelsUpdatePayload;
   const inventoryItemId = data?.inventory_item_id?.toString();
   if (!inventoryItemId) return new Response(null, { status: 200 });
 
@@ -90,8 +132,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 async function processInventoryUpdate(
   shop: string,
   inventoryItemId: string,
-  data: any,
-  admin: any,
+  data: InventoryLevelsUpdatePayload,
+  admin: WebhookAdminClient,
 ) {
   if (!admin) {
     console.warn(`[Webhook] No admin client for shop ${shop} — skipping`);
@@ -102,7 +144,7 @@ async function processInventoryUpdate(
   const invRes = await admin.graphql(INVENTORY_ITEM_QUERY, {
     variables: { id: `gid://shopify/InventoryItem/${inventoryItemId}` },
   });
-  const invJson: any = await invRes.json();
+  const invJson: InventoryItemQueryResponse = await invRes.json();
   const variant = invJson.data?.inventoryItem?.variant;
   const product = variant?.product;
   const variantId: string | undefined = variant?.legacyResourceId;
@@ -158,7 +200,7 @@ async function processInventoryUpdate(
       const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
         variables: { id: `gid://shopify/Product/${productId}` },
       });
-      const json: any = await res.json();
+      const json: ProductMetafieldsQueryResponse = await res.json();
       const p = json.data?.product;
       if (p) {
         productMeta = {
@@ -368,8 +410,8 @@ async function processInventoryUpdate(
         `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
         { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ARCHIVED" } } },
       );
-      const json: any = await res.json();
-      const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
+      const json: ProductStatusUpdateResponse = await res.json();
+      const errs: string[] = json.data?.productUpdate?.userErrors?.map((e) => e.message) ?? [];
       if (errs.length > 0) {
         console.error(`[Webhook] Auto-hide failed for product ${productId}:`, errs.join(", "));
       } else {
@@ -402,8 +444,8 @@ async function processInventoryUpdate(
         `mutation productUpdate($product: ProductUpdateInput!) { productUpdate(product: $product) { userErrors { message } } }`,
         { variables: { product: { id: `gid://shopify/Product/${productId}`, status: "ACTIVE" } } },
       );
-      const json: any = await res.json();
-      const errs: string[] = json.data?.productUpdate?.userErrors?.map((e: any) => e.message) ?? [];
+      const json: ProductStatusUpdateResponse = await res.json();
+      const errs: string[] = json.data?.productUpdate?.userErrors?.map((e) => e.message) ?? [];
       if (errs.length > 0) {
         console.error(`[Webhook] Auto-republish failed for product ${productId}:`, errs.join(", "));
       } else {
@@ -449,8 +491,8 @@ async function upsertBufferAndSchedule(
 
     await tx.inventoryBuffer.upsert({
       where: { eventKey },
-      update: { payload: payload as any },
-      create: { eventKey, shop, productId, variantId, alertType, payload: payload as any },
+      update: { payload: payload as unknown as Prisma.InputJsonValue },
+      create: { eventKey, shop, productId, variantId, alertType, payload: payload as unknown as Prisma.InputJsonValue },
     });
 
     const jobId = await boss.send(QUEUE_NAME, { eventKey }, {

@@ -9,14 +9,21 @@ import { getCachedSettings, getCachedSession, invalidateShopCache } from "../lib
 import { revokeSlackToken, mintSlackOAuthState } from "../lib/slack-oauth.server";
 import { mintAsanaOAuthState } from "../lib/asana-oauth.server";
 import { sendWhatsAppTemplate } from "../lib/whatsapp.server";
-import { SkeletonBlock, SSEErrorRetry } from "../components/Skeleton";
+import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
-import type { IntegrationsData, AsanaMapping } from "../lib/integrations-data.server";
+import type { IntegrationsData } from "../lib/integrations-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
-import {
-  ConnectRow, ConnectModal, TestResultBanner, inputStyle, fieldLabel, helpText,
-  type TestResult,
-} from "../components/IntegrationControls";
+import { TestResultBanner, type TestResult } from "../components/IntegrationControls";
+import { useIntegrationsStore } from "../stores/integrations-store";
+import { EmailIntegrationSection } from "../components/integrations/EmailIntegrationSection";
+import { SlackIntegrationSection } from "../components/integrations/SlackIntegrationSection";
+import { WhatsAppIntegrationSection } from "../components/integrations/WhatsAppIntegrationSection";
+import { AsanaIntegrationSection } from "../components/integrations/AsanaIntegrationSection";
+import { KlaviyoIntegrationSection } from "../components/integrations/KlaviyoIntegrationSection";
+import { FlowIntegrationSection } from "../components/integrations/FlowIntegrationSection";
+import { OutboundWebhookSection } from "../components/integrations/OutboundWebhookSection";
+import { TestNotificationButton } from "../components/integrations/TestNotificationButton";
+import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
 import { canUseFeature } from "../lib/plan-limits";
 
 // Only the auth check blocks the response — integrations data loads entirely in
@@ -352,12 +359,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { intent: "save", success: true, message: "Integrations saved successfully." };
 };
 
-const FLOW_TRIGGERS = [
-  { name: "Low stock", desc: "Fires when a product's inventory drops to or below its threshold." },
-  { name: "Out of stock", desc: "Fires when a product's inventory reaches zero." },
-  { name: "Restock", desc: "Fires when a previously low/out-of-stock product is restocked." },
-];
-
 export default function IntegrationsPage() {
   const { token, slackConnectToken, asanaConnectToken } = useLoaderData<typeof loader>();
   const { data, error, retry } = useSSEData<IntegrationsData>(
@@ -366,6 +367,15 @@ export default function IntegrationsPage() {
   const [searchParams] = useSearchParams();
   const slackError = searchParams.get("slack_error") === "1";
   const asanaError = searchParams.get("asana_error") === "1";
+
+  const setLoaderData = useIntegrationsStore((s) => s.setLoaderData);
+  const setSSEState = useIntegrationsStore((s) => s.setSSEState);
+  useEffect(() => { setLoaderData({ slackConnectToken, asanaConnectToken }); }, [slackConnectToken, asanaConnectToken, setLoaderData]);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  // Gate on the store, not the local `data`/`error` above — see the rule
+  // established in dashboard-store.ts.
+  const storeError = useIntegrationsStore((s) => s.error);
 
   return (
     <s-page heading="Integrations" sub-heading="Connect Stock Alert to Slack, WhatsApp, Shopify Flow, Klaviyo, Asana, and your own systems">
@@ -379,32 +389,44 @@ export default function IntegrationsPage() {
           Couldn&apos;t connect to Asana — please try again.
         </div>
       )}
-      {error ? (
-        <SSEErrorRetry message={error} onRetry={retry} />
-      ) : data ? (
-        <IntegrationsContent data={data} slackConnectToken={slackConnectToken} asanaConnectToken={asanaConnectToken} retry={retry} />
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
       ) : (
-        <IntegrationsSkeleton />
+        <IntegrationsContent />
       )}
     </s-page>
   );
 }
 
-function IntegrationsContent({
-  data, slackConnectToken, asanaConnectToken, retry,
-}: {
-  data: IntegrationsData;
-  slackConnectToken: string;
-  asanaConnectToken: string;
-  retry: () => void;
-}) {
-  const { plan, storeEmail, settings, asanaMappings } = data;
+// Fallback shape while SSE data hasn't landed yet — mirrors the "no settings
+// row yet" branch of loadIntegrationsData in integrations-data.server.ts.
+const DEFAULT_SETTINGS: IntegrationsData["settings"] = {
+  emailNotifications: false,
+  notificationEmail: "",
+  slackConnected: false,
+  slackTeamName: "",
+  slackChannelName: "",
+  whatsappNotifications: false,
+  whatsappPhone: "",
+  whatsappPhoneVerified: false,
+  outboundWebhookUrl: "",
+  klaviyoEnabled: false,
+  asanaConnected: false,
+  asanaUserName: "",
+  asanaWorkspaceName: "",
+};
+
+// Always renders the real layout — descendants read `loading` off the store
+// themselves and apply the shared `.skeleton-text` class to just their
+// dynamic value nodes, so there's a single markup tree for both states
+// instead of a separate skeleton component to keep in sync.
+function IntegrationsContent() {
+  const data = useIntegrationsStore((s) => s.data);
+  const loading = data === null;
+  const plan = data?.plan ?? "basic";
+  const settings = data?.settings ?? DEFAULT_SETTINGS;
   const canSlack = canUseFeature(plan, "slackNotifications");
-  const canAsana = canUseFeature(plan, "asanaTaskCreation");
   const canKlaviyo = canUseFeature(plan, "klaviyoIntegration");
-  const canOutboundWebhook = canUseFeature(plan, "outboundWebhook");
-  const canMultipleRecipients = canUseFeature(plan, "multipleRecipients");
-  const asanaMappingByEvent = Object.fromEntries(asanaMappings.map((m) => [m.eventType, m]));
 
   const saveFetcher = useFetcher<typeof action>();
   const saving = saveFetcher.state !== "idle";
@@ -412,6 +434,16 @@ function IntegrationsContent({
 
   const [outboundWebhookUrl, setOutboundWebhookUrl] = useState(settings.outboundWebhookUrl);
   const [isDirty, setIsDirty] = useState(false);
+
+  // Re-seed the webhook field once real data lands — this component now
+  // mounts immediately (while `loading`), unlike before when it was only
+  // ever mounted after `storeData` was ready, so the initial useState above
+  // captures the loading-time default instead of the real saved value. This
+  // mirrors the remount that used to accomplish the same seeding.
+  useEffect(() => {
+    if (!loading) setOutboundWebhookUrl(settings.outboundWebhookUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   function markDirty() {
     setIsDirty(true);
@@ -430,62 +462,6 @@ function IntegrationsContent({
       ? (testFetcher.data as { intent: string; testResult: TestResult }).testResult
       : null;
 
-  const disconnectFetcher = useFetcher<typeof action>();
-  const disconnecting = disconnectFetcher.state !== "idle";
-
-  // WhatsApp — connect/disconnect via modal, same pattern as Email/Klaviyo,
-  // but with an extra step: phone number, then the code sent to it.
-  const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
-  const [whatsappStep, setWhatsappStep] = useState<"phone" | "code">("phone");
-  const [whatsappPhoneInput, setWhatsappPhoneInput] = useState(settings.whatsappPhone);
-  const [whatsappCodeInput, setWhatsappCodeInput] = useState("");
-  const [whatsappError, setWhatsappError] = useState<string | null>(null);
-  const whatsappSendFetcher = useFetcher<typeof action>();
-  const whatsappSending = whatsappSendFetcher.state !== "idle";
-  const whatsappVerifyFetcher = useFetcher<typeof action>();
-  const whatsappVerifying = whatsappVerifyFetcher.state !== "idle";
-  const whatsappDisconnectFetcher = useFetcher<typeof action>();
-  const whatsappDisconnecting = whatsappDisconnectFetcher.state !== "idle";
-
-  // Email — connect/disconnect via modal, same pattern as Slack/Klaviyo below.
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
-  const [emailInput, setEmailInput] = useState(settings.notificationEmail);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const emailFetcher = useFetcher<typeof action>();
-  const emailSaving = emailFetcher.state !== "idle";
-  const emailDisableFetcher = useFetcher<typeof action>();
-  const emailDisabling = emailDisableFetcher.state !== "idle";
-
-  // Klaviyo — connect/disconnect via modal. The API key is write-only (never
-  // sent to the client), so the input always starts blank.
-  const [klaviyoModalOpen, setKlaviyoModalOpen] = useState(false);
-  const [klaviyoInput, setKlaviyoInput] = useState("");
-  const [klaviyoError, setKlaviyoError] = useState<string | null>(null);
-  const klaviyoFetcher = useFetcher<typeof action>();
-  const klaviyoSaving = klaviyoFetcher.state !== "idle";
-  const klaviyoDisconnectFetcher = useFetcher<typeof action>();
-  const klaviyoDisconnecting = klaviyoDisconnectFetcher.state !== "idle";
-
-  // Asana — connected via OAuth (new tab, same as Slack), then per-event
-  // project/group mappings are configured inline once connected.
-  const asanaDisconnectFetcher = useFetcher<typeof action>();
-  const asanaDisconnecting = asanaDisconnectFetcher.state !== "idle";
-  const asanaProjectsFetcher = useFetcher<{ projects: { gid: string; name: string }[] }>();
-  const asanaWorkspacesFetcher = useFetcher<{ workspaces: { gid: string; name: string }[] }>();
-  const [asanaWorkspacePickerOpen, setAsanaWorkspacePickerOpen] = useState(false);
-  const asanaSelectWorkspaceFetcher = useFetcher<typeof action>();
-
-  useEffect(() => {
-    if (settings.asanaConnected) {
-      asanaProjectsFetcher.load("/api/asana/projects");
-    }
-    // Only re-fetch when the connection state itself changes — not on every
-    // render (asanaProjectsFetcher's identity is stable across renders from
-    // useFetcher, but including it would still be fine; omitted deliberately
-    // to only react to the thing that actually invalidates the project list).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.asanaConnected, settings.asanaWorkspaceName]);
-
   const [toastResult, setToastResult] = useState<TestResult | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -497,100 +473,15 @@ function IntegrationsContent({
     }
   }, [testData]);
 
-  // Refresh the SSE data after any connect/disconnect mutation so the row
-  // reflects the new state without a full page reload.
-  useEffect(() => {
-    const d = disconnectFetcher.data as any;
-    if (d?.intent === "disconnect_slack" && d?.success) retry();
-  }, [disconnectFetcher.data]);
+  const saveData = saveFetcher.data;
+  const saveMessage =
+    saveData && "intent" in saveData && saveData.intent === "save" && saveData.success
+      ? saveData.message
+      : null;
 
   useEffect(() => {
-    const d = emailFetcher.data as any;
-    if (d?.intent === "save_email") {
-      if (d.success) {
-        setEmailModalOpen(false);
-        setEmailError(null);
-        retry();
-      } else {
-        setEmailError(d.error ?? "Something went wrong.");
-      }
-    }
-  }, [emailFetcher.data]);
-
-  useEffect(() => {
-    const d = emailDisableFetcher.data as any;
-    if (d?.intent === "disable_email" && d?.success) retry();
-  }, [emailDisableFetcher.data]);
-
-  useEffect(() => {
-    const d = klaviyoFetcher.data as any;
-    if (d?.intent === "save_klaviyo") {
-      if (d.success) {
-        setKlaviyoModalOpen(false);
-        setKlaviyoError(null);
-        retry();
-      } else {
-        setKlaviyoError(d.error ?? "Something went wrong.");
-      }
-    }
-  }, [klaviyoFetcher.data]);
-
-  useEffect(() => {
-    const d = klaviyoDisconnectFetcher.data as any;
-    if (d?.intent === "disconnect_klaviyo" && d?.success) retry();
-  }, [klaviyoDisconnectFetcher.data]);
-
-  useEffect(() => {
-    const d = whatsappSendFetcher.data as any;
-    if (d?.intent === "send_whatsapp_code") {
-      if (d.success) {
-        setWhatsappStep("code");
-        setWhatsappError(null);
-      } else {
-        setWhatsappError(d.error ?? "Something went wrong.");
-      }
-    }
-  }, [whatsappSendFetcher.data]);
-
-  useEffect(() => {
-    const d = whatsappVerifyFetcher.data as any;
-    if (d?.intent === "verify_whatsapp_code") {
-      if (d.success) {
-        setWhatsappModalOpen(false);
-        setWhatsappError(null);
-        setWhatsappStep("phone");
-        setWhatsappCodeInput("");
-        retry();
-      } else {
-        setWhatsappError(d.error ?? "Incorrect or expired code.");
-      }
-    }
-  }, [whatsappVerifyFetcher.data]);
-
-  useEffect(() => {
-    const d = whatsappDisconnectFetcher.data as any;
-    if (d?.intent === "disconnect_whatsapp" && d?.success) retry();
-  }, [whatsappDisconnectFetcher.data]);
-
-  useEffect(() => {
-    const d = asanaDisconnectFetcher.data as any;
-    if (d?.intent === "disconnect_asana" && d?.success) retry();
-  }, [asanaDisconnectFetcher.data]);
-
-  useEffect(() => {
-    const d = asanaSelectWorkspaceFetcher.data as any;
-    if (d?.intent === "select_asana_workspace" && d?.success) {
-      setAsanaWorkspacePickerOpen(false);
-      retry();
-    }
-  }, [asanaSelectWorkspaceFetcher.data]);
-
-  const saveData = saveFetcher.data as any;
-  const saveSuccess = saveData && saveData.intent === "save" && saveData.success;
-
-  useEffect(() => {
-    const d = saveFetcher.data as any;
-    if (d?.intent === "save" && d?.success) setIsDirty(false);
+    const d = saveFetcher.data;
+    if (d && "intent" in d && d.intent === "save" && d.success) setIsDirty(false);
   }, [saveFetcher.data]);
 
   function handleSave() {
@@ -609,10 +500,10 @@ function IntegrationsContent({
     <>
       {isDirty && <div style={{ height: 57 }} />}
 
-      {saveSuccess && (
+      {saveMessage && (
         <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 8, padding: "12px 16px", marginBottom: 16, color: "#065f46", fontSize: 14, display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 18 }}>✓</span>
-          {saveData?.message}
+          {saveMessage}
         </div>
       )}
 
@@ -624,220 +515,26 @@ function IntegrationsContent({
             Send stock alerts by email, Slack, or WhatsApp.
           </p>
 
-          {/* Email — connect/disconnect via modal, no more inline toggle */}
-          <ConnectRow
-            icon={<span style={{ fontSize: 20 }}>✉️</span>}
-            title="Email"
-            connected={settings.emailNotifications}
-            connectLabel="Connect"
-            onConnect={() => { setEmailInput(settings.notificationEmail); setEmailError(null); setEmailModalOpen(true); }}
-            onDisconnect={() => emailDisableFetcher.submit({ intent: "disable_email" }, { method: "post" })}
-            disconnecting={emailDisabling}
-            connectedLabel={
-              <>Sending to <strong>{settings.notificationEmail || storeEmail || "the store owner email"}</strong>.</>
-            }
-          />
+          <EmailIntegrationSection />
 
-          {/* Slack — connected via OAuth, not a manual webhook-URL paste */}
-          <ConnectRow
-            icon={
-              <img
-                src="https://a.slack-edge.com/e6a93c1/img/icons/favicon-32.png"
-                alt=""
-                width={20}
-                height={20}
-                loading="lazy"
-                style={{ display: "block" }}
-              />
-            }
-            title="Slack"
-            badge={!canSlack ? "Pro" : null}
-            connected={canSlack && settings.slackConnected}
-            locked={!canSlack}
-            lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
-            connectLabel="Connect"
-            hideEdit
-            onConnect={() => {
-              window.open(`/api/slack/connect?token=${encodeURIComponent(slackConnectToken)}`, "_blank", "noopener,noreferrer");
-            }}
-            onDisconnect={() => {
-              if (confirm("Disconnect Slack? Alerts will stop sending until you reconnect.")) {
-                disconnectFetcher.submit({ intent: "disconnect_slack" }, { method: "post" });
-              }
-            }}
-            disconnecting={disconnecting}
-            connectedLabel={
-              <>Connected to <strong>#{settings.slackChannelName}</strong> in <strong>{settings.slackTeamName}</strong>.</>
-            }
-          />
+          <SlackIntegrationSection />
 
-          {/* WhatsApp — one number Stock Alert owns; "connecting" just proves
-              the merchant owns the personal phone they want alerts sent to */}
-          <ConnectRow
-            icon={
-              <img
-                src="https://static.whatsapp.net/rsrc.php/y1/r/FJbTMJqMap7.svg"
-                alt=""
-                width={20}
-                height={20}
-                loading="lazy"
-                style={{ display: "block" }}
-              />
-            }
-            title="WhatsApp"
-            connected={settings.whatsappPhoneVerified}
-            locked
-            lockedNode={<span style={{ color: "#9ca3af", fontSize: 13 }}>Coming Soon</span>}
-            hideEdit
-            onConnect={() => {
-              setWhatsappPhoneInput(settings.whatsappPhone);
-              setWhatsappCodeInput("");
-              setWhatsappStep("phone");
-              setWhatsappError(null);
-              setWhatsappModalOpen(true);
-            }}
-            onDisconnect={() => {
-              if (confirm("Disconnect WhatsApp? Alerts will stop sending until you reconnect.")) {
-                whatsappDisconnectFetcher.submit({ intent: "disconnect_whatsapp" }, { method: "post" });
-              }
-            }}
-            disconnecting={whatsappDisconnecting}
-            connectedLabel={
-              <>Connected to <strong>{settings.whatsappPhone}</strong>.</>
-            }
-          />
+          <WhatsAppIntegrationSection />
 
-          {/* Test notification — plain button to avoid nested-form issue */}
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              disabled={testing || noChannelsConfigured || isDirty}
-              onClick={() => testFetcher.submit({ intent: "test_notification" }, { method: "post" })}
-              title={
-                isDirty ? "Save your integrations before testing"
-                : noChannelsConfigured ? "Enable at least one integration below"
-                : undefined
-              }
-              style={{
-                padding: "8px 18px",
-                borderRadius: 8,
-                border: "1.5px solid #d1d5db",
-                background: "#fff",
-                color: noChannelsConfigured || isDirty ? "#9ca3af" : "#374151",
-                cursor: testing || noChannelsConfigured || isDirty ? "not-allowed" : "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              {testing ? "Sending…" : "Send Test Notification"}
-            </button>
-            {isDirty && <span style={{ fontSize: 12, color: "#9ca3af" }}>Save first to test.</span>}
-          </div>
+          <TestNotificationButton
+            testing={testing}
+            disabled={noChannelsConfigured || isDirty}
+            disabledReason={
+              isDirty ? "Save your integrations before testing"
+              : noChannelsConfigured ? "Enable at least one integration below"
+              : undefined
+            }
+            isDirty={isDirty}
+            onTest={() => testFetcher.submit({ intent: "test_notification" }, { method: "post" })}
+          />
         </s-section>
 
-        {/* ── Asana ── */}
-        <div style={{ marginTop: 24 }}>
-          <s-section heading="Asana">
-            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
-              Create a task for each stock event in an Asana project of your choice.{" "}
-              {!canAsana && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
-            </p>
-
-            <ConnectRow
-              icon={
-                <img
-                  src="https://d3ki9tyy5l5ruj.cloudfront.net/obj/df5bcec7e9873dddebdd1328901c287f0f069750/asana-logo-favicon@3x.png"
-                  alt=""
-                  width={20}
-                  height={20}
-                  loading="lazy"
-                  style={{ display: "block" }}
-                />
-              }
-              title="Asana"
-              badge={!canAsana ? "Pro" : null}
-              connected={canAsana && settings.asanaConnected}
-              locked={!canAsana}
-              lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
-              connectLabel="Connect"
-              hideEdit
-              onConnect={() => {
-                window.open(`/api/asana/connect?token=${encodeURIComponent(asanaConnectToken)}`, "_blank", "noopener,noreferrer");
-              }}
-              onDisconnect={() => {
-                if (confirm("Disconnect Asana? Tasks will stop being created until you reconnect.")) {
-                  asanaDisconnectFetcher.submit({ intent: "disconnect_asana" }, { method: "post" });
-                }
-              }}
-              disconnecting={asanaDisconnecting}
-              connectedLabel={
-                <>
-                  Connected as <strong>{settings.asanaUserName}</strong> in <strong>{settings.asanaWorkspaceName}</strong>.{" "}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAsanaWorkspacePickerOpen((v) => !v);
-                      if (!asanaWorkspacesFetcher.data) asanaWorkspacesFetcher.load("/api/asana/workspaces");
-                    }}
-                    style={{ background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", padding: 0, fontSize: 13, textDecoration: "underline" }}
-                  >
-                    Change workspace
-                  </button>
-                </>
-              }
-            />
-
-            {canAsana && settings.asanaConnected && asanaWorkspacePickerOpen && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-                <select
-                  style={{ ...inputStyle(), width: "auto", flex: 1 }}
-                  defaultValue=""
-                  onChange={(e) => {
-                    const opt = e.target.selectedOptions[0];
-                    asanaSelectWorkspaceFetcher.submit(
-                      { intent: "select_asana_workspace", workspaceGid: e.target.value, workspaceName: opt?.text ?? "" },
-                      { method: "post" },
-                    );
-                  }}
-                >
-                  <option value="" disabled>
-                    {asanaWorkspacesFetcher.state !== "idle" ? "Loading workspaces…" : "Choose a workspace"}
-                  </option>
-                  {(asanaWorkspacesFetcher.data?.workspaces ?? []).map((w) => (
-                    <option key={w.gid} value={w.gid}>{w.name}</option>
-                  ))}
-                </select>
-                <p style={{ ...helpText, margin: 0 }}>Switching clears existing project/group selections below.</p>
-              </div>
-            )}
-
-            {canAsana && settings.asanaConnected && (
-              <div style={{ marginTop: 8 }}>
-                <AsanaEventRow
-                  eventType="low_stock"
-                  label="Low stock"
-                  projects={asanaProjectsFetcher.data?.projects ?? []}
-                  mapping={asanaMappingByEvent.low_stock}
-                />
-                <AsanaEventRow
-                  eventType="out_of_stock"
-                  label="Out of stock"
-                  projects={asanaProjectsFetcher.data?.projects ?? []}
-                  mapping={asanaMappingByEvent.out_of_stock}
-                />
-                <AsanaEventRow
-                  eventType="restock"
-                  label="Restock"
-                  projects={asanaProjectsFetcher.data?.projects ?? []}
-                  mapping={asanaMappingByEvent.restock}
-                />
-              </div>
-            )}
-          </s-section>
-        </div>
+        <AsanaIntegrationSection />
 
         {/* ── Klaviyo ── */}
         <div style={{ marginTop: 24 }}>
@@ -854,216 +551,17 @@ function IntegrationsContent({
               </ul>
             </div>
 
-            <ConnectRow
-              icon={
-                <img
-                  src="https://www.klaviyo.com/icons/icon-32x32.png"
-                  alt=""
-                  width={20}
-                  height={20}
-                  loading="lazy"
-                  style={{ display: "block" }}
-                />
-              }
-              title="Klaviyo"
-              badge={!canKlaviyo ? "Pro" : null}
-              connected={canKlaviyo && settings.klaviyoEnabled}
-              locked={!canKlaviyo}
-              lockedNode={<s-link href="/app/billing">Upgrade to Pro →</s-link>}
-              connectLabel="Connect"
-              onConnect={() => { setKlaviyoInput(""); setKlaviyoError(null); setKlaviyoModalOpen(true); }}
-              onDisconnect={() => klaviyoDisconnectFetcher.submit({ intent: "disconnect_klaviyo" }, { method: "post" })}
-              disconnecting={klaviyoDisconnecting}
-              connectedLabel="Sending inventory events to your Klaviyo account."
-            />
+            <KlaviyoIntegrationSection />
           </s-section>
         </div>
 
-        {/* ── Shopify Flow ── */}
-        <div style={{ marginTop: 24 }}>
-          <s-section heading="Flow">
-            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
-              Stock Alert publishes three Flow triggers — no setup needed here. Build a workflow in{" "}
-              <a href="https://admin.shopify.com/admin/apps/flow" target="_blank" rel="noopener noreferrer" style={{ color: "#1d4ed8" }}>
-                Shopify Flow
-              </a>{" "}
-              and pick one of these as the trigger:
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {FLOW_TRIGGERS.map((t) => (
-                <div key={t.name} style={{ display: "flex", alignItems: "flex-start", gap: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
-                  <span style={{ fontSize: 18, flexShrink: 0 }}>⚡</span>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{t.name}</div>
-                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{t.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </s-section>
-        </div>
+        <FlowIntegrationSection />
 
-        {/* ── Outbound Webhook ── */}
-        <div style={{ marginTop: 24 }}>
-          <s-section heading="Outbound Webhook">
-            <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
-              Fire a JSON POST to any URL on every stock event. Connect Zapier, Make, or your own ERP.{" "}
-              {!canOutboundWebhook && <><span style={{ color: "#9ca3af" }}>Requires Professional plan.</span> <s-link href="/app/billing">Upgrade →</s-link></>}
-            </p>
-
-            <div style={{ opacity: canOutboundWebhook ? 1 : 0.45, pointerEvents: canOutboundWebhook ? "auto" : "none" }}>
-              <label style={fieldLabel}>Webhook URL</label>
-              <input
-                type="url"
-                name="outboundWebhookUrl"
-                value={outboundWebhookUrl}
-                onChange={(e) => { setOutboundWebhookUrl(e.target.value); markDirty(); }}
-                placeholder="https://hooks.zapier.com/hooks/catch/..."
-                disabled={!canOutboundWebhook}
-                style={inputStyle()}
-              />
-              <p style={helpText}>Stock Alert will POST a JSON payload to this URL whenever an alert is triggered.</p>
-
-              {canOutboundWebhook && outboundWebhookUrl && (
-                <div style={{ marginTop: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, padding: "12px 14px" }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", margin: "0 0 6px" }}>Example payload</p>
-                  <pre style={{ fontSize: 11, color: "#4b5563", margin: 0, overflow: "auto" }}>{JSON.stringify({
-                    event: "low_stock",
-                    shop: "your-store.myshopify.com",
-                    productId: "1234567890",
-                    productTitle: "Blue T-Shirt",
-                    sku: "BTS-001",
-                    currentQuantity: 3,
-                    threshold: 5,
-                    timestamp: new Date().toISOString(),
-                  }, null, 2)}</pre>
-                </div>
-              )}
-            </div>
-          </s-section>
-        </div>
+        <OutboundWebhookSection
+          value={outboundWebhookUrl}
+          onChange={(v) => { setOutboundWebhookUrl(v); markDirty(); }}
+        />
       </Form>
-
-      {emailModalOpen && (
-        <ConnectModal
-          title="Email"
-          icon={<span style={{ fontSize: 20 }}>✉️</span>}
-          onClose={() => setEmailModalOpen(false)}
-          onSubmit={() => emailFetcher.submit({ intent: "save_email", notificationEmail: emailInput }, { method: "post" })}
-          submitting={emailSaving}
-          submitLabel={settings.emailNotifications ? "Save" : "Connect"}
-          error={emailError}
-        >
-          <label style={fieldLabel}>
-            Notification email{canMultipleRecipients ? " — multiple allowed" : ""}
-          </label>
-          <input
-            type="text"
-            value={emailInput}
-            onChange={(e) => setEmailInput(e.target.value)}
-            placeholder={canMultipleRecipients ? "alerts@example.com, team@example.com" : "alerts@example.com"}
-            style={inputStyle(!!emailError)}
-            autoFocus
-          />
-          <p style={helpText}>
-            {canMultipleRecipients
-              ? "Separate multiple addresses with commas."
-              : storeEmail
-              ? `Leave empty to use store email (${storeEmail}).`
-              : "Leave empty to use the store owner email."}
-          </p>
-        </ConnectModal>
-      )}
-
-      {klaviyoModalOpen && (
-        <ConnectModal
-          title="Klaviyo"
-          icon={
-            <img
-              src="https://www.klaviyo.com/icons/icon-32x32.png"
-              alt=""
-              width={20}
-              height={20}
-              loading="lazy"
-              style={{ display: "block" }}
-            />
-          }
-          onClose={() => setKlaviyoModalOpen(false)}
-          onSubmit={() => klaviyoFetcher.submit({ intent: "save_klaviyo", klaviyoApiKey: klaviyoInput }, { method: "post" })}
-          submitting={klaviyoSaving}
-          submitLabel="Connect"
-          error={klaviyoError}
-        >
-          <label style={fieldLabel}>Private API key</label>
-          <input
-            type="password"
-            value={klaviyoInput}
-            onChange={(e) => setKlaviyoInput(e.target.value)}
-            placeholder="pk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            style={inputStyle(!!klaviyoError)}
-            autoFocus
-          />
-          <p style={helpText}>
-            Create one in Klaviyo under <strong>Settings → API Keys → Create Private API Key</strong>. Needs
-            write access to Events and Profiles.
-          </p>
-        </ConnectModal>
-      )}
-
-      {whatsappModalOpen && (
-        <ConnectModal
-          title="WhatsApp"
-          icon={
-            <img
-              src="https://static.whatsapp.net/rsrc.php/y1/r/FJbTMJqMap7.svg"
-              alt=""
-              width={20}
-              height={20}
-              loading="lazy"
-              style={{ display: "block" }}
-            />
-          }
-          onClose={() => setWhatsappModalOpen(false)}
-          onSubmit={() => {
-            if (whatsappStep === "phone") {
-              whatsappSendFetcher.submit({ intent: "send_whatsapp_code", phone: whatsappPhoneInput }, { method: "post" });
-            } else {
-              whatsappVerifyFetcher.submit({ intent: "verify_whatsapp_code", code: whatsappCodeInput }, { method: "post" });
-            }
-          }}
-          submitting={whatsappStep === "phone" ? whatsappSending : whatsappVerifying}
-          submitLabel={whatsappStep === "phone" ? "Send code" : "Verify"}
-          error={whatsappError}
-        >
-          {whatsappStep === "phone" ? (
-            <>
-              <label style={fieldLabel}>WhatsApp number</label>
-              <input
-                type="text"
-                value={whatsappPhoneInput}
-                onChange={(e) => setWhatsappPhoneInput(e.target.value)}
-                placeholder="14155552671"
-                style={inputStyle(!!whatsappError)}
-                autoFocus
-              />
-              <p style={helpText}>Include country code, no +. We&apos;ll text you a verification code on WhatsApp.</p>
-            </>
-          ) : (
-            <>
-              <label style={fieldLabel}>Verification code</label>
-              <input
-                type="text"
-                value={whatsappCodeInput}
-                onChange={(e) => setWhatsappCodeInput(e.target.value)}
-                placeholder="123456"
-                style={inputStyle(!!whatsappError)}
-                autoFocus
-              />
-              <p style={helpText}>Sent to {whatsappPhoneInput} via WhatsApp. Expires in 10 minutes.</p>
-            </>
-          )}
-        </ConnectModal>
-      )}
 
       {/* ── Test notification toast ── */}
       {toastResult && (
@@ -1076,188 +574,9 @@ function IntegrationsContent({
         </div>
       )}
 
-      {/* ── Sticky unsaved changes bar ── */}
       {isDirty && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0,
-          background: "#fff", borderBottom: "1px solid #e5e7eb",
-          padding: "12px 24px",
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-          zIndex: 1000, boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-        }}>
-          <span style={{ fontSize: 14, color: "#6b7280" }}>You have unsaved changes</span>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              type="button"
-              onClick={handleDiscard}
-              style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 13, fontWeight: 600 }}
-            >
-              Discard
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}
-            >
-              {saving ? "Saving…" : "Save Integrations"}
-            </button>
-          </div>
-        </div>
+        <UnsavedChangesBar saving={saving} onDiscard={handleDiscard} onSave={handleSave} />
       )}
-    </>
-  );
-}
-
-// One row per stock event — project is always required. The "Group" select
-// is always visible but stays disabled until a project with sections is
-// picked (an empty sections list means the task is just created directly in
-// the project), so the layout doesn't jump around while it loads. Each row
-// auto-saves on change via its own fetcher, independent of the big
-// dirty-tracking Form used for outboundWebhookUrl.
-function AsanaEventRow({
-  eventType, label, projects, mapping,
-}: {
-  eventType: "low_stock" | "out_of_stock" | "restock";
-  label: string;
-  projects: { gid: string; name: string }[];
-  mapping: AsanaMapping | undefined;
-}) {
-  const [projectGid, setProjectGid] = useState(mapping?.projectGid ?? "");
-  const [sectionGid, setSectionGid] = useState(mapping?.sectionGid ?? "");
-  const [taskMode, setTaskMode] = useState(mapping?.taskMode ?? "multi_task");
-  const sectionsFetcher = useFetcher<{ sections: { gid: string; name: string }[]; error?: string }>();
-  const saveFetcher = useFetcher<typeof action>();
-
-  useEffect(() => {
-    if (projectGid) {
-      sectionsFetcher.load(`/api/asana/sections?projectGid=${encodeURIComponent(projectGid)}`);
-    }
-    // Only re-fetch when the selected project changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectGid]);
-
-  const sections = sectionsFetcher.data?.sections ?? [];
-  const sectionsError = sectionsFetcher.data?.error;
-  const sectionsLoading = !!projectGid && sectionsFetcher.state !== "idle" && !sectionsFetcher.data;
-  const groupDisabled = !projectGid || sectionsLoading || sections.length === 0;
-  const groupPlaceholder = !projectGid
-    ? "Pick a project first"
-    : sectionsLoading
-    ? "Loading groups…"
-    : "No group (top of project)";
-
-  function save(newProjectGid: string, newSectionGid: string, newTaskMode: string) {
-    const project = projects.find((p) => p.gid === newProjectGid);
-    const section = sections.find((s) => s.gid === newSectionGid);
-    saveFetcher.submit(
-      {
-        intent: "save_asana_mapping",
-        eventType,
-        projectGid: newProjectGid,
-        projectName: project?.name ?? "",
-        sectionGid: newSectionGid,
-        sectionName: section?.name ?? "",
-        taskMode: newTaskMode,
-      },
-      { method: "post" },
-    );
-  }
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
-      <div>
-        <label style={fieldLabel}>{label} — Project</label>
-        <select
-          style={inputStyle()}
-          value={projectGid}
-          onChange={(e) => {
-            const newProjectGid = e.target.value;
-            setProjectGid(newProjectGid);
-            setSectionGid("");
-            save(newProjectGid, "", taskMode);
-          }}
-        >
-          <option value="">Not set</option>
-          {projects.map((p) => (
-            <option key={p.gid} value={p.gid}>{p.name}</option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label style={fieldLabel}>Group</label>
-        <select
-          style={{ ...inputStyle(), ...(groupDisabled ? { background: "#f3f4f6", color: "#9ca3af", cursor: "not-allowed" } : {}) }}
-          value={sectionGid}
-          disabled={groupDisabled}
-          onChange={(e) => {
-            const newSectionGid = e.target.value;
-            setSectionGid(newSectionGid);
-            save(projectGid, newSectionGid, taskMode);
-          }}
-        >
-          <option value="">{groupPlaceholder}</option>
-          {sections.map((s) => (
-            <option key={s.gid} value={s.gid}>{s.name}</option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label style={fieldLabel}>Task creation</label>
-        <select
-          style={inputStyle()}
-          value={taskMode}
-          onChange={(e) => {
-            const newTaskMode = e.target.value;
-            setTaskMode(newTaskMode);
-            save(projectGid, sectionGid, newTaskMode);
-          }}
-        >
-          <option value="multi_task">One task per event</option>
-          <option value="daily">One task per day (events as subtasks)</option>
-          <option value="lifetime">One task forever (events as subtasks)</option>
-        </select>
-      </div>
-      {projectGid && sections.length === 0 && sectionsError && (
-        <p style={{ ...helpText, color: "#b91c1c", gridColumn: "1 / -1", margin: 0 }}>{sectionsError}</p>
-      )}
-    </div>
-  );
-}
-
-function IntegrationsSkeleton() {
-  return (
-    <>
-      <s-section heading="Notifications">
-        {Array.from({ length: 3 }, (_, i) => (
-          <div key={i} style={{ border: "1.5px solid #e5e7eb", borderRadius: 10, marginBottom: 12, padding: "14px 16px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <SkeletonBlock width={120} height={16} />
-              <SkeletonBlock width={44} height={24} borderRadius={12} />
-            </div>
-          </div>
-        ))}
-      </s-section>
-
-      <div style={{ marginTop: 24 }}>
-        <s-section heading="Marketing Automation">
-          <SkeletonBlock width="100%" height={56} borderRadius={10} />
-        </s-section>
-      </div>
-
-      <div style={{ marginTop: 24 }}>
-        <s-section heading="Shopify Flow">
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {Array.from({ length: 3 }, (_, i) => <SkeletonBlock key={i} width="100%" height={48} borderRadius={8} />)}
-          </div>
-        </s-section>
-      </div>
-
-      <div style={{ marginTop: 24 }}>
-        <s-section heading="Outbound Webhook">
-          <SkeletonBlock width="100%" height={36} borderRadius={8} />
-        </s-section>
-      </div>
     </>
   );
 }
