@@ -14,13 +14,13 @@ export function KlaviyoIntegrationSection() {
   const [klaviyoModalOpen, setKlaviyoModalOpen] = useState(false);
   const [klaviyoInput, setKlaviyoInput] = useState("");
   const [klaviyoError, setKlaviyoError] = useState<string | null>(null);
-  const klaviyoFetcher = useFetcher();
+  const klaviyoFetcher = useFetcher<{ intent: string; success: boolean; error?: string }>();
   const klaviyoSaving = klaviyoFetcher.state !== "idle";
-  const klaviyoDisconnectFetcher = useFetcher();
+  const klaviyoDisconnectFetcher = useFetcher<{ intent: string; success: boolean }>();
   const klaviyoDisconnecting = klaviyoDisconnectFetcher.state !== "idle";
 
   useEffect(() => {
-    const d = klaviyoFetcher.data as any;
+    const d = klaviyoFetcher.data;
     if (d?.intent === "save_klaviyo") {
       if (d.success) {
         setKlaviyoModalOpen(false);
@@ -34,7 +34,7 @@ export function KlaviyoIntegrationSection() {
   }, [klaviyoFetcher.data]);
 
   useEffect(() => {
-    const d = klaviyoDisconnectFetcher.data as any;
+    const d = klaviyoDisconnectFetcher.data;
     if (d?.intent === "disconnect_klaviyo" && d?.success) retry();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [klaviyoDisconnectFetcher.data]);

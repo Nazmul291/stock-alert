@@ -4,6 +4,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
 import prisma from "../db.server";
+import type { Plan } from "@prisma/client";
 import { getIsTestStore } from "../services/billing.server";
 import { invalidateShopCache } from "../lib/shop-cache.server";
 import { invalidateBillingCache } from "../services/billing.server";
@@ -43,27 +44,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // without the query param).
     const intendedName = intendedPlan === "pro" ? BILLING_PLAN_PRO : intendedPlan === "basic" ? BILLING_PLAN_BASIC : null;
     const confirmed =
-      appSubscriptions.find((s: any) => s.name === intendedName) ??
-      appSubscriptions.find((s: any) => s.name === BILLING_PLAN_PRO) ??
-      appSubscriptions.find((s: any) => s.name === BILLING_PLAN_BASIC);
+      appSubscriptions.find((s) => s.name === intendedName) ??
+      appSubscriptions.find((s) => s.name === BILLING_PLAN_PRO) ??
+      appSubscriptions.find((s) => s.name === BILLING_PLAN_BASIC);
 
     if (!confirmed) {
       return { status: "declined", message: "No active subscription found. You may have declined the charge, or approval is still pending. Please return to the billing page and select a plan to continue." };
     }
 
-    const activePlan = confirmed.name === BILLING_PLAN_PRO ? "pro" : "basic";
+    const activePlan: Plan = confirmed.name === BILLING_PLAN_PRO ? "pro" : "basic";
 
     // Cancel any other still-active subscription (the one this plan switch
     // was meant to replace) now that the new one is confirmed active.
     await Promise.all(
       appSubscriptions
-        .filter((s: any) => s.id !== confirmed.id)
-        .map((s: any) => billing.cancel({ subscriptionId: s.id, isTest, prorate: false }).catch(() => {})),
+        .filter((s) => s.id !== confirmed.id)
+        .map((s) => billing.cancel({ subscriptionId: s.id, isTest, prorate: false }).catch(() => {})),
     );
 
     await prisma.session.updateMany({
       where: { shop, isOnline: false },
-      data: { plan: activePlan as any },
+      data: { plan: activePlan },
     });
     // Evict both cache layers so the next /app load sees hasActivePayment=true.
     // invalidateShopCache covers Redis + shop-cache memoryFallback;

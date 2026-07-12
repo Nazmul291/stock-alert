@@ -18,12 +18,12 @@ export function AsanaIntegrationSection() {
   const mappingByEvent = Object.fromEntries(asanaMappings.map((m) => [m.eventType, m]));
   const retry = useIntegrationsStore((s) => s.retry)!;
 
-  const asanaDisconnectFetcher = useFetcher();
+  const asanaDisconnectFetcher = useFetcher<{ intent: string; success: boolean }>();
   const asanaDisconnecting = asanaDisconnectFetcher.state !== "idle";
   const asanaProjectsFetcher = useFetcher<{ projects: { gid: string; name: string }[] }>();
   const asanaWorkspacesFetcher = useFetcher<{ workspaces: { gid: string; name: string }[] }>();
   const [asanaWorkspacePickerOpen, setAsanaWorkspacePickerOpen] = useState(false);
-  const asanaSelectWorkspaceFetcher = useFetcher();
+  const asanaSelectWorkspaceFetcher = useFetcher<{ intent: string; success: boolean }>();
 
   useEffect(() => {
     if (connected) {
@@ -37,13 +37,13 @@ export function AsanaIntegrationSection() {
   }, [connected, workspaceName]);
 
   useEffect(() => {
-    const d = asanaDisconnectFetcher.data as any;
+    const d = asanaDisconnectFetcher.data;
     if (d?.intent === "disconnect_asana" && d?.success) retry();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asanaDisconnectFetcher.data]);
 
   useEffect(() => {
-    const d = asanaSelectWorkspaceFetcher.data as any;
+    const d = asanaSelectWorkspaceFetcher.data;
     if (d?.intent === "select_asana_workspace" && d?.success) {
       setAsanaWorkspacePickerOpen(false);
       retry();

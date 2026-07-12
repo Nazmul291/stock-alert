@@ -67,6 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const rawDigestFrequency = form.get("digestFrequency") as string;
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
+  const rawMonitoringFilter = form.get("monitoringFilter");
   const data = {
     autoHideEnabled: bool("autoHideEnabled"),
     autoRepublishEnabled: bool("autoRepublishEnabled"),
@@ -74,7 +75,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     digestEnabled: bool("digestEnabled"),
     digestFrequency: canUseFeature(plan, "dailyDigest") && rawDigestFrequency === "daily" ? "daily" : "weekly",
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
-    monitoringFilter: (["all", "collection", "tags"] as const).includes(form.get("monitoringFilter") as any) ? form.get("monitoringFilter") as string : "all",
+    monitoringFilter:
+      rawMonitoringFilter === "all" || rawMonitoringFilter === "collection" || rawMonitoringFilter === "tags"
+        ? rawMonitoringFilter
+        : "all",
     monitoringCollectionId: ((form.get("monitoringCollectionId") as string) ?? "").trim() || null,
     monitoringTags: ((form.get("monitoringTags") as string) ?? "").trim() || null,
     ...(canUseFeature(plan, "whiteLabelEmails") ? {
@@ -182,7 +186,7 @@ function SettingsContent() {
     setIsDirty(false);
   }
 
-  const saveData = saveFetcher.data as any;
+  const saveData = saveFetcher.data;
 
   const saveErrors =
     saveData && saveData.intent === "save" && !saveData.success
@@ -192,7 +196,7 @@ function SettingsContent() {
   const saveSuccess = saveData && saveData.intent === "save" && saveData.success;
 
   useEffect(() => {
-    const data = saveFetcher.data as any;
+    const data = saveFetcher.data;
     if (data?.intent === "save" && data?.success) setIsDirty(false);
   }, [saveFetcher.data]);
 

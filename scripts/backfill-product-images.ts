@@ -22,6 +22,12 @@ const NODES_QUERY = `
 
 const CHUNK = 100;
 
+type ProductImageNode = {
+  id: string;
+  featuredMedia?: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
+} | null;
+type NodesQueryResponse = { data?: { nodes: ProductImageNode[] } };
+
 async function main() {
   const shops = await prisma.session.findMany({ where: { isOnline: false }, select: { shop: true } });
   let totalUpdated = 0;
@@ -46,8 +52,8 @@ async function main() {
       const gids = chunk.map((r) => `gid://shopify/Product/${r.productId}`);
 
       const res = await admin.graphql(NODES_QUERY, { variables: { ids: gids } });
-      const json: any = await res.json();
-      const nodes: any[] = json.data?.nodes ?? [];
+      const json: NodesQueryResponse = await res.json();
+      const nodes = json.data?.nodes ?? [];
 
       for (let j = 0; j < chunk.length; j++) {
         const node = nodes[j];

@@ -2,8 +2,32 @@ import prisma from "../db.server";
 import { getMaxProducts } from "./plan-limits";
 import { syncState } from "./sync-state.server";
 import { classifyProductStatus, countDistinctProducts, paginatedProductIdsByStatus } from "./inventory-rollup.server";
+import type { RollupStatus } from "./inventory-rollup.server";
 import type { ProductRow, VariantStatusRow } from "../components/products/ProductEditModal";
 import type { InventoryTracking } from "@prisma/client";
+import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+
+type ProductsQueryVariantEdge = {
+  node: {
+    sku: string | null;
+    inventoryQuantity: number | null;
+    inventoryItem: { id: string; tracked: boolean } | null;
+  };
+};
+type ProductsQueryEdge = {
+  node: {
+    id: string;
+    title: string;
+    status: string;
+    featuredMedia: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
+    variants: { edges: ProductsQueryVariantEdge[] };
+  };
+};
+type ProductsQueryResponse = {
+  data?: {
+    products: { edges: ProductsQueryEdge[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+  };
+};
 
 const PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String, $query: String) {
@@ -96,7 +120,7 @@ function buildTrackedProductRow(
 }
 
 export async function loadProductsData({ admin, shop, search, after, filter }: {
-  admin: any; shop: string; search: string; after: string | null; filter: string;
+  admin: AdminApiContext; shop: string; search: string; after: string | null; filter: string;
 }): Promise<ProductsData> {
   const pageSize = 50;
 
@@ -127,7 +151,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
   // variants must count once, not once per variant.
   if (STATUS_FILTERS.has(filter) || filter === "tracked") {
     const skip = after ? parseInt(after, 10) : 0;
-    const { productIds, total } = await paginatedProductIdsByStatus(shop, filter as any, search, skip, pageSize);
+    const { productIds, total } = await paginatedProductIdsByStatus(shop, filter as RollupStatus | "tracked", search, skip, pageSize);
 
     const [rows, trackedCountDb] = await Promise.all([
       productIds.length > 0
@@ -164,7 +188,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     };
   }
 
-  let shopifyEdges: any[] = [];
+  let shopifyEdges: ProductsQueryEdge[] = [];
   let pageInfo = { hasNextPage: false, endCursor: null as string | null };
 
   try {
@@ -172,7 +196,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     const gqlResponse = await admin.graphql(PRODUCTS_GRAPHQL, {
       variables: { first: pageSize, after, query: shopifyQuery },
     });
-    const gqlJson: any = await gqlResponse.json();
+    const gqlJson: ProductsQueryResponse = await gqlResponse.json();
     const productsData = gqlJson.data?.products;
     if (productsData) {
       shopifyEdges = productsData.edges;
@@ -182,7 +206,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     // Fall back gracefully
   }
 
-  const productIds = shopifyEdges.map((e: any) => BigInt(e.node.id.split("/").pop()));
+  const productIds = shopifyEdges.map((e) => BigInt(e.node.id.split("/").pop() as string));
   const [trackingRecords, trackedCount] = await Promise.all([
     productIds.length > 0
       ? prisma.inventoryTracking.findMany({ where: { shop, productId: { in: productIds } } })
@@ -197,7 +221,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     trackingMap.get(key)!.push(t);
   }
 
-  const allProducts = shopifyEdges.map((e: any) => {
+  const allProducts = shopifyEdges.map((e) => {
     const p = e.node;
     const productId = p.id.split("/").pop() as string;
     const trackingRows = trackingMap.get(productId) ?? [];

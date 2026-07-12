@@ -12,11 +12,11 @@ export function SlackIntegrationSection() {
   const canSlack = canUseFeature(useIntegrationsStore((s) => s.data!.plan), "slackNotifications");
   const slackConnectToken = useIntegrationsStore((s) => s.slackConnectToken)!;
   const retry = useIntegrationsStore((s) => s.retry)!;
-  const disconnectFetcher = useFetcher();
+  const disconnectFetcher = useFetcher<{ intent: string; success: boolean }>();
   const disconnecting = disconnectFetcher.state !== "idle";
 
   useEffect(() => {
-    const d = disconnectFetcher.data as any;
+    const d = disconnectFetcher.data;
     if (d?.intent === "disconnect_slack" && d?.success) retry();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disconnectFetcher.data]);

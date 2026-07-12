@@ -8,7 +8,7 @@ import { getActiveSubscriptionPlan, invalidateBillingCache } from "../services/b
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, payload } = await authenticate.webhook(request);
-  const data = payload as any;
+  const data = payload as { app_subscription?: { status?: string; name?: string } };
   const sub = data?.app_subscription;
 
   if (!sub) return new Response(null, { status: 200 });

@@ -16,15 +16,15 @@ export function WhatsAppIntegrationSection() {
   const [whatsappPhoneInput, setWhatsappPhoneInput] = useState(phone);
   const [whatsappCodeInput, setWhatsappCodeInput] = useState("");
   const [whatsappError, setWhatsappError] = useState<string | null>(null);
-  const whatsappSendFetcher = useFetcher();
+  const whatsappSendFetcher = useFetcher<{ intent: string; success: boolean; error?: string }>();
   const whatsappSending = whatsappSendFetcher.state !== "idle";
-  const whatsappVerifyFetcher = useFetcher();
+  const whatsappVerifyFetcher = useFetcher<{ intent: string; success: boolean; error?: string }>();
   const whatsappVerifying = whatsappVerifyFetcher.state !== "idle";
-  const whatsappDisconnectFetcher = useFetcher();
+  const whatsappDisconnectFetcher = useFetcher<{ intent: string; success: boolean }>();
   const whatsappDisconnecting = whatsappDisconnectFetcher.state !== "idle";
 
   useEffect(() => {
-    const d = whatsappSendFetcher.data as any;
+    const d = whatsappSendFetcher.data;
     if (d?.intent === "send_whatsapp_code") {
       if (d.success) {
         setWhatsappStep("code");
@@ -37,7 +37,7 @@ export function WhatsAppIntegrationSection() {
   }, [whatsappSendFetcher.data]);
 
   useEffect(() => {
-    const d = whatsappVerifyFetcher.data as any;
+    const d = whatsappVerifyFetcher.data;
     if (d?.intent === "verify_whatsapp_code") {
       if (d.success) {
         setWhatsappModalOpen(false);
@@ -53,7 +53,7 @@ export function WhatsAppIntegrationSection() {
   }, [whatsappVerifyFetcher.data]);
 
   useEffect(() => {
-    const d = whatsappDisconnectFetcher.data as any;
+    const d = whatsappDisconnectFetcher.data;
     if (d?.intent === "disconnect_whatsapp" && d?.success) retry();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whatsappDisconnectFetcher.data]);

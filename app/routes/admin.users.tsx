@@ -3,9 +3,10 @@ import {
   makeAdminUsersLoader,
   makeAdminUsersAction,
 } from "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/users";
+import type { UsersDb } from "@nazmulcodes/shopify-admin-and-support-chat/routes/admin/users";
 import db from "~/db.server";
 
-const opts = { db: db as any, sessionSecret: process.env.SESSION_SECRET };
+const opts = { db: db as unknown as UsersDb, sessionSecret: process.env.SESSION_SECRET };
 export const loader = makeAdminUsersLoader(opts);
 export const action = makeAdminUsersAction(opts);
 

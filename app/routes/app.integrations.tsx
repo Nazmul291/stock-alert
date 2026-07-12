@@ -442,12 +442,15 @@ function IntegrationsContent() {
     }
   }, [testData]);
 
-  const saveData = saveFetcher.data as any;
-  const saveSuccess = saveData && saveData.intent === "save" && saveData.success;
+  const saveData = saveFetcher.data;
+  const saveMessage =
+    saveData && "intent" in saveData && saveData.intent === "save" && saveData.success
+      ? saveData.message
+      : null;
 
   useEffect(() => {
-    const d = saveFetcher.data as any;
-    if (d?.intent === "save" && d?.success) setIsDirty(false);
+    const d = saveFetcher.data;
+    if (d && "intent" in d && d.intent === "save" && d.success) setIsDirty(false);
   }, [saveFetcher.data]);
 
   function handleSave() {
@@ -466,10 +469,10 @@ function IntegrationsContent() {
     <>
       {isDirty && <div style={{ height: 57 }} />}
 
-      {saveSuccess && (
+      {saveMessage && (
         <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 8, padding: "12px 16px", marginBottom: 16, color: "#065f46", fontSize: 14, display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 18 }}>✓</span>
-          {saveData?.message}
+          {saveMessage}
         </div>
       )}
 

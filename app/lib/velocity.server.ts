@@ -1,4 +1,21 @@
 import prisma from "../db.server";
+import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+
+type OrdersQueryResponse = {
+  data?: {
+    orders: {
+      edges: Array<{
+        node: {
+          lineItems: {
+            edges: Array<{ node: { quantity: number; product: { legacyResourceId: string } | null } }>;
+          } | null;
+        };
+      }>;
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    };
+  };
+  extensions?: { cost?: { throttleStatus?: { currentlyAvailable: number; restoreRate: number } } };
+};
 
 const ORDERS_QUERY = `
   query GetOrderItems($query: String!, $after: String) {
@@ -29,7 +46,7 @@ const MAX_ORDERS = 2000;
  * runaway GraphQL cost on large stores.
  */
 export async function calcSalesVelocity(
-  admin: any,
+  admin: AdminApiContext,
 ): Promise<Map<string, number>> {
   const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const queryStr = `created_at:>'${since.toISOString()}' -status:cancelled`;
@@ -42,7 +59,7 @@ export async function calcSalesVelocity(
     const res = await admin.graphql(ORDERS_QUERY, {
       variables: { query: queryStr, ...(cursor ? { after: cursor } : {}) },
     });
-    const json: any = await res.json();
+    const json: OrdersQueryResponse = await res.json();
 
     const throttle = json.extensions?.cost?.throttleStatus;
     if (throttle && throttle.currentlyAvailable < throttle.restoreRate * 1.5) {
@@ -85,7 +102,7 @@ export function computeStockOutDays(qty: number, avgDailySales: number | null | 
 // and the daily velocity cron (see workers/inventory-buffer.worker.ts).
 // Reads current rows from the DB rather than taking a caller-supplied list,
 // so both callers get identical behavior without duplicating the update loop.
-export async function refreshShopVelocity(shop: string, admin: any): Promise<{ updatedProducts: number }> {
+export async function refreshShopVelocity(shop: string, admin: AdminApiContext): Promise<{ updatedProducts: number }> {
   const velocity = await calcSalesVelocity(admin);
   const rows = await prisma.inventoryTracking.findMany({
     where: { shop },

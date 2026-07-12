@@ -16,13 +16,13 @@ export function EmailIntegrationSection() {
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailInput, setEmailInput] = useState(notificationEmail);
   const [emailError, setEmailError] = useState<string | null>(null);
-  const emailFetcher = useFetcher();
+  const emailFetcher = useFetcher<{ intent: string; success: boolean; error?: string }>();
   const emailSaving = emailFetcher.state !== "idle";
-  const emailDisableFetcher = useFetcher();
+  const emailDisableFetcher = useFetcher<{ intent: string; success: boolean }>();
   const emailDisabling = emailDisableFetcher.state !== "idle";
 
   useEffect(() => {
-    const d = emailFetcher.data as any;
+    const d = emailFetcher.data;
     if (d?.intent === "save_email") {
       if (d.success) {
         setEmailModalOpen(false);
@@ -36,7 +36,7 @@ export function EmailIntegrationSection() {
   }, [emailFetcher.data]);
 
   useEffect(() => {
-    const d = emailDisableFetcher.data as any;
+    const d = emailDisableFetcher.data;
     if (d?.intent === "disable_email" && d?.success) retry();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emailDisableFetcher.data]);

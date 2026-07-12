@@ -24,6 +24,91 @@ import { ProductsPagination } from "../components/products/ProductsPagination";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { ProductsData } from "../lib/products-data.server";
 import { useProductsStore } from "../stores/products-store";
+import type { InventoryStatus } from "@prisma/client";
+
+type AdminClient = Awaited<ReturnType<typeof authenticate.admin>>["admin"];
+
+type GraphQLUserError = { field?: string[] | null; message: string };
+type GraphQLResponse<T> = {
+  data?: T;
+  errors?: { message: string }[];
+  extensions?: { cost?: { throttleStatus?: { currentlyAvailable: number; restoreRate: number } } };
+};
+
+type InventoryLevelEdge = {
+  node: {
+    location: { id: string; name: string };
+    quantities: Array<{ name: string; quantity: number }>;
+  };
+};
+type ProductInventoryVariantEdge = {
+  node: {
+    id: string;
+    title: string;
+    sku: string | null;
+    inventoryItem: {
+      id: string;
+      tracked: boolean;
+      inventoryLevels?: { edges: InventoryLevelEdge[] };
+    } | null;
+  };
+};
+type ProductInventoryResponse = GraphQLResponse<{
+  product: { variants: { edges: ProductInventoryVariantEdge[] } } | null;
+}>;
+
+type ProductMetafieldsResponse = GraphQLResponse<{
+  product: {
+    customThreshold: { id: string; value: string } | null;
+    autoHide: { id: string; value: string } | null;
+    autoRepublish: { id: string; value: string } | null;
+  } | null;
+}>;
+
+type CollectionsResponse = GraphQLResponse<{
+  collections: {
+    edges: Array<{ node: { id: string; title: string; legacyResourceId: string } }>;
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
+}>;
+
+type SyncProductVariantEdge = {
+  node: {
+    id: string; title: string; sku: string | null; inventoryQuantity: number | null;
+    inventoryItem: { tracked: boolean } | null;
+  };
+};
+type SyncProductEdge = {
+  node: {
+    id: string; title: string; status: string;
+    featuredMedia: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
+    customThreshold: { value: string } | null;
+    variants: { edges: SyncProductVariantEdge[] };
+  };
+};
+type SyncProductsResponse = GraphQLResponse<{
+  products: { edges: SyncProductEdge[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+}>;
+
+type InventoryItemUpdateResponse = GraphQLResponse<{
+  inventoryItemUpdate: { inventoryItem: { id: string; tracked: boolean } | null; userErrors: GraphQLUserError[] };
+}>;
+type ProductUpdateResponse = GraphQLResponse<{
+  productUpdate: { product: { id: string; status: string } | null; userErrors: GraphQLUserError[] };
+}>;
+type InventorySetQuantitiesResponse = GraphQLResponse<{
+  inventorySetQuantities: { userErrors: GraphQLUserError[] };
+}>;
+type MetafieldsSetResponse = GraphQLResponse<{
+  metafieldsSet: { userErrors: GraphQLUserError[] };
+}>;
+type MetafieldInput = { ownerId: string; namespace: string; key: string; value: string; type: string };
+
+type SyncVariantRow = {
+  productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
+  sku: string | null; currentQuantity: number; inventoryStatus: "in_stock" | "low_stock" | "out_of_stock";
+  imageUrl: string | null; imageAlt: string | null;
+};
 
 const SYNC_PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String, $query: String) {
@@ -136,7 +221,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // as before.
   if (url.searchParams.get("intent") === "export_csv") {
     const csvFilter = url.searchParams.get("filter") ?? "all";
-    const statusFilter: string[] =
+    const statusFilter: InventoryStatus[] =
       csvFilter === "out_of_stock" ? ["out_of_stock"]
       : csvFilter === "low_stock"  ? ["low_stock"]
       : csvFilter === "in_stock"   ? ["in_stock"]
@@ -146,7 +231,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // quantity) is what makes this actionable for reordering; a rolled-up
     // per-product row would lose exactly that.
     const rows = await prisma.inventoryTracking.findMany({
-      where: { shop, inventoryStatus: { in: statusFilter as any }, monitoringEnabled: true },
+      where: { shop, inventoryStatus: { in: statusFilter }, monitoringEnabled: true },
       orderBy: [{ inventoryStatus: "asc" }, { currentQuantity: "asc" }],
       select: {
         productId: true, productTitle: true, variantTitle: true, sku: true,
@@ -184,7 +269,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let hasNext = true;
     while (hasNext && collections.length < 250) {
       const res = await admin.graphql(COLLECTIONS_GRAPHQL, { variables: { first: 50, ...(cursor ? { after: cursor } : {}) } });
-      const json: any = await res.json();
+      const json: CollectionsResponse = await res.json();
       const page = json.data?.collections;
       if (!page) break;
       for (const e of page.edges) collections.push({ id: e.node.legacyResourceId, title: e.node.title });
@@ -200,19 +285,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
         variables: { id: `gid://shopify/Product/${productId}` },
       });
-      const json: any = await res.json();
+      const json: ProductInventoryResponse = await res.json();
 
       if (json.errors?.length) {
-        const msg = json.errors.map((e: any) => e.message).join("; ");
+        const msg = json.errors.map((e) => e.message).join("; ");
         console.error("[get_product_inventory] GraphQL errors:", msg);
         return { inventoryData: null, inventoryError: `GraphQL error: ${msg}` };
       }
 
-      const variants: VariantInventory[] = (json.data?.product?.variants?.edges ?? []).map((e: any) => {
+      const variants: VariantInventory[] = (json.data?.product?.variants?.edges ?? []).map((e) => {
         const v = e.node;
-        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le: any) => {
-          const quantities: any[] = le.node.quantities ?? [];
-          const available = quantities.find((q: any) => q.name === "available");
+        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le) => {
+          const quantities = le.node.quantities ?? [];
+          const available = quantities.find((q) => q.name === "available");
           return {
             locationId: le.node.location.id,
             locationName: le.node.location.name,
@@ -243,7 +328,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
         variables: { id: `gid://shopify/Product/${productId}` },
       });
-      const json: any = await res.json();
+      const json: ProductMetafieldsResponse = await res.json();
       const p = json.data?.product;
       return {
         productSettings: {
@@ -275,10 +360,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 
 async function runProductSync({ admin, shop, plan, maxProducts, threshold, monitoringFilter, monitoringCollectionId, monitoringTags }: {
-  admin: any; shop: string; plan: string; maxProducts: number; threshold: number;
+  admin: AdminClient; shop: string; plan: string; maxProducts: number; threshold: number;
   monitoringFilter?: string; monitoringCollectionId?: string | null; monitoringTags?: string | null;
 }) {
-  const allVariants: any[] = [];
+  const allVariants: SyncVariantRow[] = [];
   const seenProductIds = new Set<string>();
   let cursor: string | null = null;
   let hasNextPage = true;
@@ -297,7 +382,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       const gqlResponse = await admin.graphql(SYNC_PRODUCTS_GRAPHQL, {
         variables: { first: batchSize, after: cursor, query: syncQuery },
       });
-      const gqlJson: any = await gqlResponse.json();
+      const gqlJson: SyncProductsResponse = await gqlResponse.json();
 
       const throttle = gqlJson.extensions?.cost?.throttleStatus;
       if (throttle && throttle.currentlyAvailable < throttle.restoreRate * 1.5) {
@@ -311,7 +396,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
       for (const edge of page.edges) {
         const p = edge.node;
-        const productId = p.id.split("/").pop();
+        const productId = p.id.split("/").pop() as string;
         seenProductIds.add(productId);
         const imageUrl = p.featuredMedia?.preview?.image?.url ?? null;
         const imageAlt = p.featuredMedia?.preview?.image?.altText ?? null;
@@ -333,7 +418,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
 
           allVariants.push({
             productId: BigInt(productId),
-            variantId: BigInt(v.id.split("/").pop()),
+            variantId: BigInt(v.id.split("/").pop() as string),
             productTitle: p.title,
             variantTitle: v.title,
             sku: v.sku || null,
@@ -460,9 +545,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const res = await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
           variables: { id: shopifyInventoryItemId, input: { tracked: true } },
         });
-        const json: any = await res.json();
+        const json: InventoryItemUpdateResponse = await res.json();
         const errs = json.data?.inventoryItemUpdate?.userErrors ?? [];
-        if (errs.length > 0) errors.push(errs.map((e: any) => e.message).join(", "));
+        if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
       } catch (err) {
         errors.push(`Inventory tracking enable failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -472,9 +557,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const res = await admin.graphql(PRODUCT_UPDATE_MUTATION, {
         variables: { product: { id: `gid://shopify/Product/${productId}`, status: shopifyStatus } },
       });
-      const json: any = await res.json();
+      const json: ProductUpdateResponse = await res.json();
       const errs = json.data?.productUpdate?.userErrors ?? [];
-      if (errs.length > 0) errors.push(errs.map((e: any) => e.message).join(", "));
+      if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
     } catch (err) {
       errors.push(`Status update failed: ${err instanceof Error ? err.message : "Unknown"}`);
     }
@@ -491,9 +576,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           },
         });
-        const invJson: any = await invRes.json();
+        const invJson: InventorySetQuantitiesResponse = await invRes.json();
         const invErrs = invJson.data?.inventorySetQuantities?.userErrors ?? [];
-        if (invErrs.length > 0) errors.push(invErrs.map((e: any) => e.message).join(", "));
+        if (invErrs.length > 0) errors.push(invErrs.map((e) => e.message).join(", "));
       } catch (err) {
         errors.push(`Quantity update failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -533,15 +618,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
           variables: { id: `gid://shopify/Product/${productId}` },
         });
-        const json: any = await res.json();
-        if (json.errors?.length) throw new Error(json.errors.map((e: any) => e.message).join("; "));
+        const json: ProductInventoryResponse = await res.json();
+        if (json.errors?.length) throw new Error(json.errors.map((e) => e.message).join("; "));
         const edges = json.data?.product?.variants?.edges ?? [];
         variantsFresh = edges
-          .filter((e: any) => e.node.inventoryItem?.tracked !== false)
-          .map((e: any) => {
+          .filter((e) => e.node.inventoryItem?.tracked !== false)
+          .map((e) => {
             const v = e.node;
-            const qty = (v.inventoryItem?.inventoryLevels?.edges ?? []).reduce((sum: number, le: any) => {
-              const avail = (le.node.quantities ?? []).find((q: any) => q.name === "available");
+            const qty = (v.inventoryItem?.inventoryLevels?.edges ?? []).reduce((sum: number, le) => {
+              const avail = (le.node.quantities ?? []).find((q) => q.name === "available");
               return sum + (avail?.quantity ?? 0);
             }, 0);
             return { variantId: v.id.split("/").pop() as string, variantTitle: v.title ?? null, sku: v.sku || null, qty };
@@ -652,7 +737,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const customThresholdMetafieldId = ((form.get("customThresholdMetafieldId") as string) ?? "").trim() || null;
       const ownerId = `gid://shopify/Product/${productId}`;
 
-      const metafieldsToSet: any[] = [
+      const metafieldsToSet: MetafieldInput[] = [
         { ownerId, namespace: "stock_alert", key: "auto_hide", value: String(autoHide), type: "boolean" },
         { ownerId, namespace: "stock_alert", key: "auto_republish", value: String(autoRepublish), type: "boolean" },
       ];
@@ -663,9 +748,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       try {
         const mfRes = await admin.graphql(METAFIELDS_SET_MUTATION, { variables: { metafields: metafieldsToSet } });
-        const mfJson: any = await mfRes.json();
+        const mfJson: MetafieldsSetResponse = await mfRes.json();
         const mfErrs = mfJson.data?.metafieldsSet?.userErrors ?? [];
-        if (mfErrs.length > 0) errors.push(mfErrs.map((e: any) => e.message).join(", "));
+        if (mfErrs.length > 0) errors.push(mfErrs.map((e) => e.message).join(", "));
       } catch (err) {
         errors.push(`Metafield update failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -691,22 +776,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const invRes = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
         variables: { id: `gid://shopify/Product/${productId}` },
       });
-      const invJson: any = await invRes.json();
+      const invJson: ProductInventoryResponse = await invRes.json();
       const edges = invJson.data?.product?.variants?.edges ?? [];
 
       for (const edge of edges) {
         const itemId = edge.node.inventoryItem?.id;
-        if (itemId && !edge.node.inventoryItem.tracked) {
+        if (itemId && !edge.node.inventoryItem?.tracked) {
           await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
             variables: { id: itemId, input: { tracked: true } },
           });
         }
       }
 
-      const variants: VariantInventory[] = edges.map((e: any) => {
+      const variants: VariantInventory[] = edges.map((e) => {
         const v = e.node;
-        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le: any) => {
-          const available = (le.node.quantities ?? []).find((q: any) => q.name === "available");
+        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le) => {
+          const available = (le.node.quantities ?? []).find((q) => q.name === "available");
           return { locationId: le.node.location.id, locationName: le.node.location.name, quantity: available?.quantity ?? 0 };
         });
         return { id: v.id, title: v.title, sku: v.sku || null, inventoryItemId: v.inventoryItem?.id ?? null, tracked: true, locations };
@@ -787,7 +872,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function ProductsPage() {
-  const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as any;
+  const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as {
+    search: string; filter: string; after: string | null; prev: string; token: string;
+  };
   const { data, error, retry } = useSSEData<ProductsData>(
     `/api/products-stream?token=${encodeURIComponent(token)}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
   );
@@ -828,7 +915,7 @@ function ProductsPageContent() {
 
   const actionData = useActionData<typeof action>();
   useEffect(() => {
-    if ((actionData as any)?.status === "started") openStream();
+    if (actionData && "status" in actionData && actionData.status === "started") openStream();
   }, [actionData, openStream]);
 
   const bulkFetcher = useFetcher<typeof action>();
@@ -912,7 +999,8 @@ function ProductsPageContent() {
       )}
       {(actionData && "message" in actionData || bulkFetcher.data && "message" in bulkFetcher.data) && (
         <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#065f46" }}>
-          {(bulkFetcher.data as any)?.message ?? (actionData as any)?.message}
+          {(bulkFetcher.data && "message" in bulkFetcher.data ? bulkFetcher.data.message : undefined)
+            ?? (actionData && "message" in actionData ? actionData.message : undefined)}
         </div>
       )}
       {syncStreamError && (

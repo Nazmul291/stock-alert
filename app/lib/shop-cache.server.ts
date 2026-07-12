@@ -76,7 +76,7 @@ export async function getCachedShopEmail(shop: string): Promise<string | null> {
   try {
     const { admin } = await unauthenticated.admin(shop);
     const res = await admin.graphql(`query { shop { email } }`);
-    const json: any = await res.json();
+    const json: { data?: { shop?: { email: string | null } } } = await res.json();
     email = json.data?.shop?.email ?? null;
   } catch {
     // Non-fatal — caller falls back to a generic message in the UI

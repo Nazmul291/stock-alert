@@ -4,6 +4,33 @@ import prisma from "../db.server";
 import { canAddProduct } from "../lib/plan-enforcement";
 import { canUseFeature } from "../lib/plan-limits";
 
+type WebhookAdminClient = Awaited<ReturnType<typeof authenticate.webhook>>["admin"];
+
+type ProductVariantPayload = {
+  id?: number | string;
+  title?: string | null;
+  sku?: string | null;
+  inventory_management?: string | null;
+  inventory_quantity?: number | null;
+};
+
+type ProductWebhookPayload = {
+  id?: number | string;
+  title?: string;
+  status?: string;
+  image?: { src?: string | null; alt?: string | null } | null;
+  variants?: ProductVariantPayload[];
+};
+
+type ProductVariantsInventoryResponse = {
+  data?: {
+    product: {
+      customThreshold: { value: string } | null;
+      variants: { edges: Array<{ node: { legacyResourceId: string; inventoryQuantity: number | null } }> } | null;
+    } | null;
+  };
+};
+
 // The REST payload's inventory_quantity is only a single location's count,
 // unreliable for multi-location stores — inventoryQuantity on a GraphQL
 // variant is the reliable cross-location total (same field
@@ -24,14 +51,15 @@ const PRODUCT_VARIANTS_INVENTORY_QUERY = `
 `;
 
 async function fetchTrueInventory(
-  admin: any,
+  admin: WebhookAdminClient,
   productId: string,
 ): Promise<{ qtyByVariantId: Map<string, number>; customThreshold: number | null } | null> {
+  if (!admin) return null;
   try {
     const res = await admin.graphql(PRODUCT_VARIANTS_INVENTORY_QUERY, {
       variables: { id: `gid://shopify/Product/${productId}` },
     });
-    const json: any = await res.json();
+    const json: ProductVariantsInventoryResponse = await res.json();
     const p = json.data?.product;
     if (!p) return null;
     const qtyByVariantId = new Map<string, number>();
@@ -47,7 +75,7 @@ async function fetchTrueInventory(
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { topic, shop, payload, admin } = await authenticate.webhook(request);
-  const data = payload as any;
+  const data = payload as ProductWebhookPayload;
 
   try {
 
@@ -57,8 +85,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Skip variants with inventory tracking disabled in Shopify individually
     // rather than skipping the whole product.
-    const variants: any[] = data?.variants ?? [];
-    const trackedVariants = variants.filter((v: any) => v.inventory_management === "shopify");
+    const variants: ProductVariantPayload[] = data?.variants ?? [];
+    const trackedVariants = variants.filter((v) => v.inventory_management === "shopify");
     if (trackedVariants.length === 0) return new Response(null, { status: 200 });
 
     // Respect the plan's product cap — don't add if the merchant is already at the limit.
@@ -133,7 +161,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!productId) return new Response(null, { status: 200 });
 
     const title: string = data?.title ?? "Unknown";
-    const variants: any[] = data?.variants ?? [];
+    const variants: ProductVariantPayload[] = data?.variants ?? [];
     // This is a REST-shaped webhook payload (confirmed by the snake_case
     // fields elsewhere in this handler, e.g. inventory_management), and
     // Shopify's REST Admin API returns status as lowercase "active" /
@@ -161,7 +189,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       if (!existing) {
         // Product just became active — start tracking it again (mirrors PRODUCTS_CREATE).
-        const trackedVariants = variants.filter((v: any) => v.inventory_management === "shopify");
+        const trackedVariants = variants.filter((v) => v.inventory_management === "shopify");
         if (trackedVariants.length === 0) return new Response(null, { status: 200 });
 
         const { canAdd } = await canAddProduct(shop);

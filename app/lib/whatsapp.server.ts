@@ -29,7 +29,7 @@ export async function sendWhatsAppTemplate(to: string, templateName: string, bod
     }),
   });
   if (!res.ok) {
-    const err: any = await res.json().catch(() => ({}));
+    const err: { error?: { message?: string } } = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `WhatsApp API error ${res.status}`);
   }
 }

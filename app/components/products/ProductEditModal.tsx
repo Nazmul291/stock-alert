@@ -95,9 +95,13 @@ type Props = {
   onSaveError?: (message: string) => void;
 };
 
+type SaveActionResult =
+  | { success: true; message: string; updatedProductId: string }
+  | { error: string; updatedProductId: string };
+
 export function ProductEditModal({ product, plan, threshold, autoHideEnabled, autoRepublishEnabled, onClose, onSaved, onSaveError }: Props) {
   const canPerProductThreshold = canUseFeature(plan, "perProductThresholds");
-  const saveFetcher = useFetcher<any>();
+  const saveFetcher = useFetcher<SaveActionResult>();
   const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
   const enableTrackingFetcher = useFetcher<{ enabledInventory?: { variants: VariantInventory[] }; error?: string }>();
   const settingsFetcher = useFetcher<{ productSettings?: ProductSettings | null; settingsError?: string }>();
@@ -163,7 +167,7 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
     } else if ("error" in saveFetcher.data && closedRef.current) {
       // Already force-closed — the modal's own error banner is gone, so
       // surface it at the page level instead of losing it silently.
-      onSaveError?.(saveFetcher.data.error as string);
+      onSaveError?.(saveFetcher.data.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveFetcher.state, saveFetcher.data]);
