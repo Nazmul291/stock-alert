@@ -1,4 +1,5 @@
 import { Form, Link } from "react-router";
+import { useProductsStore, buildProductsUrl } from "../../stores/products-store";
 
 const FILTER_TABS = [
   { key: "all",           label: "All Products" },
@@ -8,13 +9,15 @@ const FILTER_TABS = [
   { key: "not_tracked",   label: "Not Tracked" },
 ];
 
-export function ProductsToolbar({ search, filter, buildUrl, onExportCsv, exporting }: {
-  search: string;
-  filter: string;
-  buildUrl: (params: Record<string, string | null>) => string;
+export function ProductsToolbar({ onExportCsv, exporting }: {
   onExportCsv: () => void;
   exporting: boolean;
 }) {
+  const search = useProductsStore((s) => s.search);
+  const filter = useProductsStore((s) => s.filter);
+  const prev = useProductsStore((s) => s.prev);
+  const buildUrl = (params: Record<string, string | null>) => buildProductsUrl({ search, filter, prev }, params);
+
   return (
     <>
       <Form method="get" style={{ display: "flex", gap: 8, marginBottom: 12 }}>

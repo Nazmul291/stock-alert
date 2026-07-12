@@ -1,11 +1,15 @@
 import { Link } from "react-router";
+import { useProductsStore, buildProductsUrl } from "../../stores/products-store";
 
-export function ProductsPagination({ after, prevList, pageInfo, buildUrl }: {
-  after: string | null;
-  prevList: string[];
-  pageInfo: { hasNextPage: boolean; endCursor: string | null };
-  buildUrl: (params: Record<string, string | null>) => string;
-}) {
+export function ProductsPagination() {
+  const search = useProductsStore((s) => s.search);
+  const filter = useProductsStore((s) => s.filter);
+  const after = useProductsStore((s) => s.after);
+  const prev = useProductsStore((s) => s.prev);
+  const pageInfo = useProductsStore((s) => s.data!.pageInfo);
+  const buildUrl = (params: Record<string, string | null>) => buildProductsUrl({ search, filter, prev }, params);
+
+  const prevList = prev ? prev.split(",") : [];
   const prevPageAfter = prevList[prevList.length - 1] ?? null;
   const prevPagePrev = prevList.slice(0, -1).join(",") || null;
   const nextPagePrev = [prevList.join(","), after].filter(Boolean).join(",") || null;

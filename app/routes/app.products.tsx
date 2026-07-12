@@ -11,8 +11,8 @@ import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { refreshShopVelocity } from "../lib/velocity.server";
-import { ProductEditModal, rollupVariantStatuses } from "../components/products/ProductEditModal";
-import type { ProductRow, OptimisticPatch } from "../components/products/ProductEditModal";
+import { ProductEditModal } from "../components/products/ProductEditModal";
+import type { ProductRow } from "../components/products/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/products/InventorySection";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { ProductsPageSkeleton } from "../components/products/ProductsPageSkeleton";
@@ -23,6 +23,7 @@ import { ProductsBulkActionBar } from "../components/products/ProductsBulkAction
 import { ProductsPagination } from "../components/products/ProductsPagination";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { ProductsData } from "../lib/products-data.server";
+import { useProductsStore } from "../stores/products-store";
 
 const SYNC_PRODUCTS_GRAPHQL = `
   query getProducts($first: Int!, $after: String, $query: String) {
@@ -785,67 +786,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { error: "Unknown action." };
 };
 
-// Overlays a just-saved product-edit modal's OptimisticPatch onto its server
-// row so the table reflects the change instantly instead of waiting for a
-// page reload. Purely a display overlay — the real DB write (and any alert)
-// still comes from the inventory webhook; see ProductEditModal.tsx.
-function applyOptimisticPatch(p: ProductRow, patch: OptimisticPatch): ProductRow {
-  if (!patch.isTracked) {
-    return {
-      ...p,
-      isTracked: false,
-      inventoryStatus: "not_tracked",
-      currentQuantity: 0,
-      monitoringEnabled: false,
-      expectedRestockDate: patch.expectedRestockDate,
-      manualDailySales: patch.manualDailySales,
-      variants: [],
-      variantCount: 0,
-      variantsAtRiskCount: 0,
-    };
-  }
-
-  if (!patch.variantPatches) {
-    // Inventory data hadn't loaded when saved (e.g. a very fast save) — only
-    // the non-quantity fields are safe to reflect optimistically.
-    return {
-      ...p,
-      monitoringEnabled: patch.monitoringEnabled,
-      expectedRestockDate: patch.expectedRestockDate,
-      manualDailySales: patch.manualDailySales,
-    };
-  }
-
-  const variants = (p.variants ?? []).map((v) => {
-    const vPatch = patch.variantPatches![v.variantId];
-    return vPatch ? { ...v, ...vPatch } : v;
-  });
-  const statuses = variants.map((v) => v.inventoryStatus);
-
-  return {
-    ...p,
-    monitoringEnabled: patch.monitoringEnabled,
-    expectedRestockDate: patch.expectedRestockDate,
-    manualDailySales: patch.manualDailySales,
-    variants,
-    currentQuantity: variants.reduce((sum, v) => sum + v.currentQuantity, 0),
-    inventoryStatus: rollupVariantStatuses(statuses),
-    variantsAtRiskCount: statuses.filter((s) => s === "low_stock" || s === "out_of_stock").length,
-  };
-}
-
 export default function ProductsPage() {
   const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as any;
   const { data, error, retry } = useSSEData<ProductsData>(
     `/api/products-stream?token=${encodeURIComponent(token)}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
   );
 
+  const setLoaderData = useProductsStore((s) => s.setLoaderData);
+  const setSSEState = useProductsStore((s) => s.setSSEState);
+  useEffect(() => { setLoaderData({ search, filter, after, prev }); }, [search, filter, after, prev, setLoaderData]);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  // Gate on the store, not the local `data`/`error` above — see the rule
+  // established in dashboard-store.ts.
+  const storeData = useProductsStore((s) => s.data);
+  const storeError = useProductsStore((s) => s.error);
+
   return (
     <s-page heading="Products" sub-heading="Monitor and manage your tracked inventory">
-      {error ? (
-        <SSEErrorRetry message={error} onRetry={retry} />
-      ) : data ? (
-        <ProductsPageContent data={data} search={search} filter={filter} after={after} prev={prev} />
+      {storeError ? (
+        <SSEErrorRetry message={storeError} onRetry={retry} />
+      ) : storeData ? (
+        <ProductsPageContent />
       ) : (
         <ProductsPageSkeleton />
       )}
@@ -853,14 +815,10 @@ export default function ProductsPage() {
   );
 }
 
-function ProductsPageContent({ data, search, filter, after, prev }: {
-  data: ProductsData;
-  search: string;
-  filter: string;
-  after: string | null;
-  prev: string;
-}) {
-  const { shop, plan, maxProducts, trackedCount, threshold, products, pageInfo, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled, supplierLeadTimeDays } = data;
+function ProductsPageContent() {
+  const { shop, plan, maxProducts, trackedCount, threshold, products, syncRunning, lastSyncCompletedAt, lastSyncCount, autoHideEnabled, autoRepublishEnabled } = useProductsStore((s) => s.data!);
+  const filter = useProductsStore((s) => s.filter);
+  const applyOptimisticPatch = useProductsStore((s) => s.applyOptimisticPatch);
 
   const nav = useNavigation();
   const submit = useSubmit();
@@ -906,17 +864,9 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
     });
   };
 
-  // Local display overlay applied on top of server data after a product-edit
-  // save — see applyOptimisticPatch above. There's no auto-refresh after a
-  // save (use-sse-data.ts loads once and closes), so without this the table
-  // would show stale values until the next full page reload.
-  const [localOverrides, setLocalOverrides] = useState<Record<string, OptimisticPatch>>({});
   const [saveErrorAfterClose, setSaveErrorAfterClose] = useState<string | null>(null);
-  const displayProducts = (products as ProductRow[]).map((p) =>
-    localOverrides[p.productId] ? applyOptimisticPatch(p, localOverrides[p.productId]) : p,
-  );
 
-  const selectableIds = displayProducts.filter((p) => p.isTracked).map((p) => p.productId);
+  const selectableIds = (products as ProductRow[]).filter((p) => p.isTracked).map((p) => p.productId);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
 
   const toggleSelectAll = () => {
@@ -937,18 +887,6 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
   };
 
   const [editProduct, setEditProduct] = useState<ProductRow | null>(null);
-
-  const buildUrl = (params: Record<string, string | null>) => {
-    const p = new URLSearchParams();
-    if (search) p.set("search", search);
-    if (filter !== "all") p.set("filter", filter);
-    if (prev) p.set("prev", prev);
-    Object.entries(params).forEach(([k, v]) => { if (v) p.set(k, v); else p.delete(k); });
-    const qs = p.toString();
-    return `/app/products${qs ? `?${qs}` : ""}`;
-  };
-
-  const prevList = prev ? prev.split(",") : [];
 
   return (
     <>
@@ -1008,17 +946,12 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
 
       <s-section heading="">
         <ProductsToolbar
-          search={search}
-          filter={filter}
-          buildUrl={buildUrl}
           onExportCsv={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
           exporting={csvFetcher.state !== "idle"}
         />
         <div style={{ marginBottom: 16 }} />
 
         <ProductsTable
-          products={displayProducts}
-          filter={filter}
           selectedIds={selectedIds}
           toggleSelect={toggleSelect}
           allSelected={allSelected}
@@ -1026,7 +959,6 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
           selectableIds={selectableIds}
           expandedProductIds={expandedProductIds}
           toggleExpandProduct={toggleExpandProduct}
-          supplierLeadTimeDays={supplierLeadTimeDays}
           onEditProduct={setEditProduct}
         />
 
@@ -1040,7 +972,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
           />
         )}
 
-        <ProductsPagination after={after} prevList={prevList} pageInfo={pageInfo} buildUrl={buildUrl} />
+        <ProductsPagination />
       </s-section>
 
       {editProduct && (
@@ -1051,10 +983,7 @@ function ProductsPageContent({ data, search, filter, after, prev }: {
           autoHideEnabled={autoHideEnabled}
           autoRepublishEnabled={autoRepublishEnabled}
           onClose={() => setEditProduct(null)}
-          onSaved={(patch) => {
-            const productId = editProduct.productId;
-            setLocalOverrides((prev) => ({ ...prev, [productId]: patch }));
-          }}
+          onSaved={(patch) => applyOptimisticPatch(editProduct.productId, patch)}
           onSaveError={(message) => setSaveErrorAfterClose(message)}
         />
       )}

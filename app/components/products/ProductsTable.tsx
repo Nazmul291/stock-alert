@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import type { ProductRow } from "./ProductEditModal";
 import { StockOutBadge } from "./StockOutBadge";
 import { ReorderBadge } from "./ReorderBadge";
+import { useProductsStore } from "../../stores/products-store";
 
 export const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   in_stock: { bg: "#d1fae5", color: "#065f46", label: "In Stock" },
@@ -13,8 +14,6 @@ export const STATUS_STYLE: Record<string, { bg: string; color: string; label: st
 };
 
 export function ProductsTable({
-  products,
-  filter,
   selectedIds,
   toggleSelect,
   allSelected,
@@ -22,11 +21,8 @@ export function ProductsTable({
   selectableIds,
   expandedProductIds,
   toggleExpandProduct,
-  supplierLeadTimeDays,
   onEditProduct,
 }: {
-  products: ProductRow[];
-  filter: string;
   selectedIds: Set<string>;
   toggleSelect: (productId: string) => void;
   allSelected: boolean;
@@ -34,9 +30,12 @@ export function ProductsTable({
   selectableIds: string[];
   expandedProductIds: Set<string>;
   toggleExpandProduct: (productId: string) => void;
-  supplierLeadTimeDays: number | null;
   onEditProduct: (product: ProductRow) => void;
 }) {
+  const products = useProductsStore((s) => s.data!.products);
+  const filter = useProductsStore((s) => s.filter);
+  const supplierLeadTimeDays = useProductsStore((s) => s.data!.supplierLeadTimeDays);
+
   if (products.length === 0) {
     return (
       <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>
