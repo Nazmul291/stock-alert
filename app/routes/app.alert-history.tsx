@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -7,6 +8,7 @@ import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { AlertsData } from "../lib/alert-history-data.server";
 import { useSSEData } from "../hooks/use-sse-data";
+import { useAlertHistoryStore } from "../stores/alert-history-store";
 import { AlertHistoryToolbar } from "../components/alert-history/AlertHistoryToolbar";
 import { AlertsTable, AlertsTableSkeleton } from "../components/alert-history/AlertsTable";
 
@@ -56,35 +58,25 @@ export default function AlertHistoryPage() {
     `/api/alert-history-stream?token=${encodeURIComponent(token)}&page=${page}&type=${encodeURIComponent(typeFilter)}&product=${encodeURIComponent(productSearch)}`,
   );
 
-  const buildUrl = (overrides: Record<string, string | number | null>) => {
-    const p = new URLSearchParams();
-    if (typeFilter !== "all") p.set("type", typeFilter);
-    if (productSearch) p.set("product", productSearch);
-    if (page > 1) p.set("page", String(page));
-    for (const [k, v] of Object.entries(overrides)) {
-      if (v === null || v === "all" || v === 1) p.delete(k);
-      else p.set(k, String(v));
-    }
-    const qs = p.toString();
-    return `/app/alert-history${qs ? `?${qs}` : ""}`;
-  };
+  const setLoaderData = useAlertHistoryStore((s) => s.setLoaderData);
+  const setSSEState = useAlertHistoryStore((s) => s.setSSEState);
+  useEffect(() => { setLoaderData({ page, typeFilter, productSearch }); }, [page, typeFilter, productSearch, setLoaderData]);
+  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  const storeData = useAlertHistoryStore((s) => s.data);
+  const storeError = useAlertHistoryStore((s) => s.error);
 
   return (
     <s-page heading="Alert History" sub-heading="Track every low-stock and back-in-stock alert">
       <s-button slot="primary-action" variant="primary" href="/app">Back to Dashboard</s-button>
 
       <s-section heading="">
-        <AlertHistoryToolbar
-          typeFilter={typeFilter}
-          productSearch={productSearch}
-          buildUrl={buildUrl}
-          clearAllTotal={data ? data.total : null}
-        />
+        <AlertHistoryToolbar />
 
-        {error ? (
-          <SSEErrorRetry message={error} onRetry={retry} />
-        ) : data ? (
-          <AlertsTable data={data} page={page} buildUrl={buildUrl} />
+        {storeError ? (
+          <SSEErrorRetry message={storeError} onRetry={retry} />
+        ) : storeData ? (
+          <AlertsTable />
         ) : (
           <AlertsTableSkeleton />
         )}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useFetcher } from "react-router";
 import { format } from "date-fns";
-import type { AlertsData } from "../../lib/alert-history-data.server";
+import { useAlertHistoryStore, buildAlertHistoryUrl } from "../../stores/alert-history-store";
 import { SkeletonBlock } from "../Skeleton";
 
 const ALERT_STYLES: Record<string, { label: string; bg: string; color: string }> = {
@@ -10,12 +10,13 @@ const ALERT_STYLES: Record<string, { label: string; bg: string; color: string }>
   restock:      { label: "Back in Stock", bg: "#d1fae5", color: "#065f46" },
 };
 
-export function AlertsTable({ data, page, buildUrl }: {
-  data: AlertsData;
-  page: number;
-  buildUrl: (overrides: Record<string, string | number | null>) => string;
-}) {
-  const { alerts, totalPages } = data;
+export function AlertsTable() {
+  const { alerts, totalPages } = useAlertHistoryStore((s) => s.data!);
+  const typeFilter = useAlertHistoryStore((s) => s.typeFilter);
+  const productSearch = useAlertHistoryStore((s) => s.productSearch);
+  const page = useAlertHistoryStore((s) => s.page);
+  const buildUrl = (overrides: Record<string, string | number | null>) =>
+    buildAlertHistoryUrl({ typeFilter, productSearch, page }, overrides);
   const deleteFetcher = useFetcher();
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
 

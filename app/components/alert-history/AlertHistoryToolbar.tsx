@@ -1,4 +1,5 @@
 import { Link, Form } from "react-router";
+import { useAlertHistoryStore, buildAlertHistoryUrl } from "../../stores/alert-history-store";
 
 const TYPE_TABS = [
   { key: "all",          label: "All" },
@@ -26,12 +27,14 @@ function ClearAllButton({ total }: { total: number }) {
   );
 }
 
-export function AlertHistoryToolbar({ typeFilter, productSearch, buildUrl, clearAllTotal }: {
-  typeFilter: string;
-  productSearch: string;
-  buildUrl: (overrides: Record<string, string | number | null>) => string;
-  clearAllTotal: number | null;
-}) {
+export function AlertHistoryToolbar() {
+  const typeFilter = useAlertHistoryStore((s) => s.typeFilter);
+  const productSearch = useAlertHistoryStore((s) => s.productSearch);
+  const page = useAlertHistoryStore((s) => s.page);
+  const clearAllTotal = useAlertHistoryStore((s) => s.data?.total ?? null);
+  const buildUrl = (overrides: Record<string, string | number | null>) =>
+    buildAlertHistoryUrl({ typeFilter, productSearch, page }, overrides);
+
   return (
     <>
       {/* Top bar: search + clear all — search renders immediately (URL-derived,
