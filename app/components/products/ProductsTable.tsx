@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import type { ProductRow } from "./ProductEditModal";
 import { StockOutBadge } from "./StockOutBadge";
+import { SalesVelocityBadge } from "./SalesVelocityBadge";
 import { ReorderBadge } from "./ReorderBadge";
 import { useProductsStore } from "../../stores/products-store";
 
@@ -32,6 +33,7 @@ const PLACEHOLDER_ROWS: ProductRow[] = Array.from({ length: 5 }, (_, i) => ({
   shopifyStatus: "ACTIVE",
   inventoryItemId: null,
   stockOutDays: null,
+  avgDailySales: null,
   manualDailySales: null,
   expectedRestockDate: null,
   variants: [],
@@ -95,15 +97,22 @@ export function ProductsTable({
             </th>
             {[
               { label: "Product" },
-              { label: "SKU" },
               { label: "Quantity" },
-              { label: "Status", width: 130 },
+              { label: "Status", width: 90 },
+              { label: "Sales Velocity" },
               { label: "Days Left" },
               { label: "Reorder By" },
               { label: "Monitor Alert" },
               { label: "Action" },
             ].map(({ label, width }) => (
-              <th key={label} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap", ...(width ? { width, minWidth: width } : {}) }}>{label}</th>
+              <th key={label} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap", ...(width ? { width, minWidth: width } : {}) }}>
+                {label === "Product" ? (
+                  <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "center", gap: 10 }}>
+                    <span style={{ width: 10, flexShrink: 0 }} />
+                    <span>{label}</span>
+                  </div>
+                ) : label}
+              </th>
             ))}
           </tr>
         </thead>
@@ -128,7 +137,7 @@ export function ProductsTable({
                   />
                 </td>
                 <td style={{ padding: "10px 12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "center", gap: 10 }}>
                     {hasVariants ? (
                       <button
                         type="button"
@@ -139,7 +148,7 @@ export function ProductsTable({
                         ▸
                       </button>
                     ) : (
-                      <span style={{ width: 18, flexShrink: 0 }} />
+                      <span style={{ width: 10, flexShrink: 0 }} />
                     )}
                     {loading ? (
                       <div className="skeleton-text" style={{ width: 40, height: 40, borderRadius: 6, flexShrink: 0 }} />
@@ -154,13 +163,10 @@ export function ProductsTable({
                     <span className={loading ? "skeleton-text" : undefined} style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
                   </div>
                 </td>
-                <td style={{ padding: "10px 12px", color: "#6b7280" }}>
-                  <span className={loading ? "skeleton-text" : undefined} style={{ whiteSpace: "nowrap" }}>{hasVariants ? `${p.variantCount} variants` : (p.sku ?? "—")}</span>
-                </td>
                 <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.inventoryStatus === "out_of_stock" ? "#dc2626" : p.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
                   <span className={loading ? "skeleton-text" : undefined}>{isNotTracked ? "—" : p.currentQuantity}</span>
                 </td>
-                <td style={{ padding: "10px 12px", width: 130, minWidth: 130 }}>
+                <td style={{ padding: "10px 12px", width: 90, minWidth: 90 }}>
                   {mixedVariants ? (
                     <span className={loading ? "skeleton-text" : undefined} style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
                       {p.variantsAtRiskCount} of {p.variantCount} low
@@ -170,6 +176,11 @@ export function ProductsTable({
                       {s.label}
                     </span>
                   )}
+                </td>
+                <td style={{ padding: "10px 12px" }}>
+                  <span className={loading ? "skeleton-text" : undefined}>
+                    <SalesVelocityBadge unitsPerDay={p.isTracked ? (p.avgDailySales ?? null) : null} isManual={!!p.manualDailySales} />
+                  </span>
                 </td>
                 <td style={{ padding: "10px 12px" }}>
                   <span className={loading ? "skeleton-text" : undefined}>
