@@ -28,6 +28,7 @@ export type ProductRow = {
   shopifyStatus: string;
   inventoryItemId: string | null;
   stockOutDays?: number | null;
+  avgDailySales?: number | null;
   manualDailySales?: number | null;
   expectedRestockDate?: string | null;
   variants?: VariantStatusRow[];

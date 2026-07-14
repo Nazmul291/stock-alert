@@ -86,6 +86,10 @@ function buildTrackedProductRow(
   const first = rows[0];
   const statuses = rows.map((r) => r.inventoryStatus as string);
   const stockOutDaysValues = rows.map((r) => r.stockOutDays).filter((d): d is number => d != null);
+  // Effective per-variant rate (manual override takes precedence, same as
+  // webhooks.inventory.tsx's stockOutDays recompute), summed across variants
+  // so the product row shows total units/day across all of a product's SKUs.
+  const salesVelocityValues = rows.map((r) => r.manualDailySales ?? r.avgDailySales).filter((v): v is number => v != null);
 
   const variants: VariantStatusRow[] = rows.map((r) => ({
     id: r.id,
@@ -111,6 +115,7 @@ function buildTrackedProductRow(
     shopifyStatus: overrides?.shopifyStatus ?? "ACTIVE",
     inventoryItemId: null,
     stockOutDays: stockOutDaysValues.length > 0 ? Math.min(...stockOutDaysValues) : null,
+    avgDailySales: salesVelocityValues.length > 0 ? salesVelocityValues.reduce((sum, v) => sum + v, 0) : null,
     manualDailySales: first.manualDailySales ?? null,
     expectedRestockDate: first.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
     variants,
