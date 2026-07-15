@@ -28,15 +28,17 @@
 }
 
 .sa-blogList {
-  max-width: 900px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 24px 24px 80px;
   display: grid;
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 24px;
 }
 
 .sa-blogCard {
-  display: block;
+  display: flex;
+  flex-direction: column;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 28px;
@@ -58,6 +60,7 @@
 }
 
 .sa-blogCard p {
+  flex: 1;
   font-size: 15px;
   line-height: 1.6;
   color: #4b5563;

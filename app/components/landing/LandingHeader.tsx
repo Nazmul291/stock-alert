@@ -11,7 +11,7 @@ export function LandingHeader({ appName, appStoreUrl }: { appName: string; appSt
         <nav className="sa-nav">
           <a href="#features">Features</a>
           <a href="#pricing">Pricing</a>
-          <a href="/blog">Blog</a>
+          <a href="/blog">Blogs</a>
         </nav>
         <a
           className="sa-headerCta"
