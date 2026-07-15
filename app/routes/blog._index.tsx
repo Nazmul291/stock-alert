@@ -83,6 +83,7 @@ export default function BlogIndex() {
                 year: "numeric",
                 month: "long",
                 day: "numeric",
+                timeZone: "UTC",
               })}
               {" · "}
               {post.minutes} min read
