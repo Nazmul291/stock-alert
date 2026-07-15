@@ -9,8 +9,10 @@ type AlertHistoryStore = {
   data: AlertsData | null;
   error: string | null;
   retry: (() => void) | null;
+  lastFetchedAt: number;
+  lastKey: string | null;
   setLoaderData: (fields: { page: number; typeFilter: string; productSearch: string }) => void;
-  setSSEState: (state: { data: AlertsData | null; error: string | null; retry: () => void }) => void;
+  setSSEState: (state: { data: AlertsData | null; error: string | null; retry: () => void; lastFetchedAt: number; lastKey: string }) => void;
 };
 
 export const useAlertHistoryStore = create<AlertHistoryStore>((set) => ({
@@ -20,6 +22,8 @@ export const useAlertHistoryStore = create<AlertHistoryStore>((set) => ({
   data: null,
   error: null,
   retry: null,
+  lastFetchedAt: 0,
+  lastKey: null,
   setLoaderData: (fields) => {
     assertClientOnly("useAlertHistoryStore", "setLoaderData");
     set(fields);

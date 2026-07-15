@@ -39,6 +39,8 @@ export default function Auth() {
               variant="primary"
               href="https://apps.shopify.com/stock-alert-4"
               target="_blank"
+              // @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type
+              suppressHydrationWarning
             >
               Go to App Store listing
             </s-button>
@@ -55,7 +57,8 @@ export default function Auth() {
                 autocomplete="on"
                 error={errors.shop}
               ></s-text-field>
-              <s-button type="submit">Log in</s-button>
+              {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
+              <s-button type="submit" suppressHydrationWarning>Log in</s-button>
             </Form>
           </s-section>
         </s-page>

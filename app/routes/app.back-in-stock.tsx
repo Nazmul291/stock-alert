@@ -7,7 +7,7 @@ import prisma from "../db.server";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { BackInStockData } from "../lib/back-in-stock-data.server";
-import { useSSEData } from "../hooks/use-sse-data";
+import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { useBackInStockStore } from "../stores/back-in-stock-store";
 import { BackInStockStatCards } from "../components/back-in-stock/BackInStockStatCards";
 import { BackInStockProductGroups } from "../components/back-in-stock/BackInStockProductGroups";
@@ -55,21 +55,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function BackInStockPage() {
   const { page, token } = useLoaderData<typeof loader>();
-  const { data, error, retry } = useSSEData<BackInStockData>(
-    `/api/back-in-stock-stream?token=${encodeURIComponent(token)}&page=${page}`,
-  );
 
   const setLoaderData = useBackInStockStore((s) => s.setLoaderData);
-  const setSSEState = useBackInStockStore((s) => s.setSSEState);
   useEffect(() => { setLoaderData({ page }); }, [page, setLoaderData]);
-  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  const cachedData = useBackInStockStore((s) => s.data);
+  const cachedKey = useBackInStockStore((s) => s.lastKey);
+  const lastFetchedAt = useBackInStockStore((s) => s.lastFetchedAt);
+  const setSSEState = useBackInStockStore((s) => s.setSSEState);
+  useCachedSSEData<BackInStockData>(
+    `${page}`,
+    () => `/api/back-in-stock-stream?token=${encodeURIComponent(token)}&page=${page}`,
+    "back-in-stock",
+    cachedData,
+    cachedKey,
+    lastFetchedAt,
+    setSSEState,
+  );
 
   const storeError = useBackInStockStore((s) => s.error);
+  const retry = useBackInStockStore((s) => s.retry);
 
   return (
     <s-page heading="Back in Stock" sub-heading="Manage customers waiting for restocked products">
       {storeError ? (
-        <SSEErrorRetry message={storeError} onRetry={retry} />
+        <SSEErrorRetry message={storeError} onRetry={retry ?? (() => {})} />
       ) : (
         <BackInStockContent />
       )}

@@ -3,14 +3,25 @@ import { useAnalyticsStore } from "../../stores/analytics-store";
 // All-zero placeholder while loading — renders as the same neutral/empty bars
 // the chart already shows for real zero-count days, so no separate skeleton
 // treatment is needed for the SVG shapes themselves.
-const DEFAULT_DAILY30 = Array.from({ length: 30 }, (_, i) => {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - (29 - i));
-  return { day: d.toISOString().slice(0, 10), count: 0 };
-});
+//
+// Computed fresh inside the component (not at module scope) — unlike other
+// skeleton placeholders, these day labels are actually visible text, not
+// masked by .skeleton-text, so they can't be a fixed constant either. A
+// module-scope `new Date()` would be computed once when the module first
+// loads and then stay cached for the server process's whole lifetime,
+// showing increasingly wrong day-of-month labels the longer the process
+// stays up, and drifting out of sync with the client's own fresh
+// computation at page-load time (a hydration mismatch).
+function buildDefaultDaily30() {
+  return Array.from({ length: 30 }, (_, i) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - (29 - i));
+    return { day: d.toISOString().slice(0, 10), count: 0 };
+  });
+}
 
 export function DailyBarChart() {
-  const data = useAnalyticsStore((s) => s.data?.daily30) ?? DEFAULT_DAILY30;
+  const data = useAnalyticsStore((s) => s.data?.daily30) ?? buildDefaultDaily30();
   const BAR_W = 16;
   const GAP   = 4;
   const BAR_H = 64;

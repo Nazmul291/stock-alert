@@ -1,4 +1,5 @@
 import prisma from '../db.server';
+import { publishEvent } from './broadcast.server';
 
 export const syncState = {
   async start(shop: string): Promise<void> {
@@ -23,6 +24,10 @@ export const syncState = {
       create: { shop, running: false, progress: 100, startedAt: new Date(), completedAt: new Date(), syncedCount: synced },
       update: { running: false, progress: 100, completedAt: new Date(), syncedCount: synced, error: null },
     });
+    // Tells the dashboard/products pages to refresh in the background instead
+    // of the old useRevalidator().revalidate() full-loader-rerun — see
+    // use-sync-stream.ts.
+    publishEvent(shop, ['products', 'dashboard', 'analytics']).catch(() => {});
   },
 
   async fail(shop: string, error: string): Promise<void> {

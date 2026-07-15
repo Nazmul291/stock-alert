@@ -5,11 +5,18 @@ import { useDashboardStore } from "../../stores/dashboard-store";
 // there are any alerts, so this assumes there are (matching the rest of the
 // dashboard's "reserve space" loading behavior) rather than flashing the
 // empty state first.
+//
+// sentAt is a fixed constant, not `new Date()` — this module loads once and
+// stays cached for the server process's whole lifetime, so `new Date()`
+// here would freeze at server-start time while the client re-evaluates it
+// fresh on every page load, drifting further apart the longer the server
+// stays up and causing a hydration text mismatch. The actual value is
+// irrelevant anyway since this span is masked by .skeleton-text while loading.
 const PLACEHOLDER_ALERTS = Array.from({ length: 3 }, (_, i) => ({
   id: `skeleton-${i}`,
   productTitle: "Product name",
   alertType: "low_stock",
-  sentAt: new Date().toISOString(),
+  sentAt: "2024-01-01T00:00:00.000Z",
 }));
 
 export function RecentAlertsSection() {

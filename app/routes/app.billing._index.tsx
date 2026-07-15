@@ -55,7 +55,8 @@ export default function BillingPage() {
 
   return (
     <s-page heading="Billing &amp; Plans" sub-heading="All plans include a 30-day free trial">
-      <s-button slot="primary-action" variant="primary" href="/app">Back to Dashboard</s-button>
+      {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
+      <s-button slot="primary-action" variant="primary" href="/app" suppressHydrationWarning>Back to Dashboard</s-button>
 
       {actionData && "error" in actionData && (
         <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "12px 16px", marginBottom: 16, color: "#991b1b" }}>

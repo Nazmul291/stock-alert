@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
+import { publishEvent } from "../lib/broadcast.server";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -88,6 +89,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       update: { subscribedAt: new Date(), notifiedAt: null, firstName: trimName(firstName), lastName: trimName(lastName) },
       create: { shop, productId: BigInt(productId), productTitle: productTitle ?? null, email, firstName: trimName(firstName), lastName: trimName(lastName) },
     });
+    publishEvent(shop, ["back-in-stock"]).catch(() => {});
     return json({ success: true, message: "You'll be notified when this product is back in stock." });
   } catch (error) {
     console.error("[back-in-stock] failed to upsert subscriber:", error);

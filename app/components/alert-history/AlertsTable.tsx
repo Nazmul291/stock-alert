@@ -12,6 +12,13 @@ const ALERT_STYLES: Record<string, { label: string; bg: string; color: string }>
 // Shown in place of real rows while loading — always reserved (the pagination
 // footer below only appears once `totalPages` is known, i.e. never while
 // these are showing) since we don't yet know whether there are any alerts.
+//
+// sentAt is a fixed constant, not `new Date()` — this module loads once and
+// stays cached for the server process's whole lifetime, so `new Date()`
+// here would freeze at server-start time while the client re-evaluates it
+// fresh on every page load, drifting further apart the longer the server
+// stays up and causing a hydration text mismatch. The actual value is
+// irrelevant anyway since this cell is masked by .skeleton-text while loading.
 const PLACEHOLDER_ALERTS = Array.from({ length: 6 }, (_, i) => ({
   id: `skeleton-${i}`,
   productTitle: "Product name",
@@ -20,7 +27,7 @@ const PLACEHOLDER_ALERTS = Array.from({ length: 6 }, (_, i) => ({
   thresholdTriggered: 0,
   sentToEmail: "name@example.com",
   sentToSlack: false,
-  sentAt: new Date().toISOString(),
+  sentAt: "2024-01-01T00:00:00.000Z",
 }));
 
 export function AlertsTable() {

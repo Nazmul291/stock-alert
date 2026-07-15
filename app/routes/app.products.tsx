@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSubmit, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
-import { useSSEData } from "../hooks/use-sse-data";
+import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -874,23 +874,32 @@ export default function ProductsPage() {
   const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as {
     search: string; filter: string; after: string | null; prev: string; token: string;
   };
-  const { data, error, retry } = useSSEData<ProductsData>(
-    `/api/products-stream?token=${encodeURIComponent(token)}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+  const setLoaderData = useProductsStore((s) => s.setLoaderData);
+  useEffect(() => { setLoaderData({ search, filter, after, prev }); }, [search, filter, after, prev, setLoaderData]);
+
+  const cachedData = useProductsStore((s) => s.data);
+  const cachedKey = useProductsStore((s) => s.lastKey);
+  const lastFetchedAt = useProductsStore((s) => s.lastFetchedAt);
+  const setSSEState = useProductsStore((s) => s.setSSEState);
+  useCachedSSEData<ProductsData>(
+    `${search}|${filter}|${after ?? ""}`,
+    () => `/api/products-stream?token=${encodeURIComponent(token)}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+    "products",
+    cachedData,
+    cachedKey,
+    lastFetchedAt,
+    setSSEState,
   );
 
-  const setLoaderData = useProductsStore((s) => s.setLoaderData);
-  const setSSEState = useProductsStore((s) => s.setSSEState);
-  useEffect(() => { setLoaderData({ search, filter, after, prev }); }, [search, filter, after, prev, setLoaderData]);
-  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
-
-  // Gate on the store, not the local `data`/`error` above — see the rule
-  // established in dashboard-store.ts.
+  // Gate on the store, not a local hook result — see the rule established
+  // in dashboard-store.ts.
   const storeError = useProductsStore((s) => s.error);
+  const retry = useProductsStore((s) => s.retry);
 
   return (
     <s-page heading="Products" sub-heading="Monitor and manage your tracked inventory">
       {storeError ? (
-        <SSEErrorRetry message={storeError} onRetry={retry} />
+        <SSEErrorRetry message={storeError} onRetry={retry ?? (() => {})} />
       ) : (
         <ProductsPageContent />
       )}

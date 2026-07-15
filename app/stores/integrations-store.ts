@@ -8,8 +8,10 @@ type IntegrationsStore = {
   data: IntegrationsData | null;
   error: string | null;
   retry: (() => void) | null;
+  lastFetchedAt: number;
+  lastKey: string | null;
   setLoaderData: (fields: { slackConnectToken: string; asanaConnectToken: string }) => void;
-  setSSEState: (state: { data: IntegrationsData | null; error: string | null; retry: () => void }) => void;
+  setSSEState: (state: { data: IntegrationsData | null; error: string | null; retry: () => void; lastFetchedAt: number; lastKey: string }) => void;
 };
 
 export const useIntegrationsStore = create<IntegrationsStore>((set) => ({
@@ -18,6 +20,8 @@ export const useIntegrationsStore = create<IntegrationsStore>((set) => ({
   data: null,
   error: null,
   retry: null,
+  lastFetchedAt: 0,
+  lastKey: null,
   setLoaderData: (fields) => {
     assertClientOnly("useIntegrationsStore", "setLoaderData");
     set(fields);

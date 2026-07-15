@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { canAddProduct } from "../lib/plan-enforcement";
 import { canUseFeature } from "../lib/plan-limits";
+import { publishEvent } from "../lib/broadcast.server";
 
 type WebhookAdminClient = Awaited<ReturnType<typeof authenticate.webhook>>["admin"];
 
@@ -145,6 +146,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     console.log(`[Webhook] Auto-added new product ${productId} (${title}) — ${trackedVariants.length} variant(s) for ${shop}`);
+    publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
   }
 
   if (topic === "PRODUCTS_DELETE") {
@@ -153,6 +155,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.inventoryTracking.deleteMany({
         where: { shop, productId: BigInt(productId) },
       });
+      publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
     }
   }
 
@@ -178,6 +181,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.inventoryTracking.deleteMany({
         where: { shop, productId: BigInt(productId) },
       });
+      publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
       return new Response(null, { status: 200 });
     }
 
@@ -236,6 +240,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           });
         }
         console.log(`[Webhook] Re-added product ${productId} (${title}) — ${trackedVariants.length} variant(s) for ${shop} after status change to ACTIVE`);
+        publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
         return new Response(null, { status: 200 });
       }
     }
@@ -259,6 +264,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         data: { sku: v.sku || null, variantTitle: v.title ?? null },
       });
     }
+    // Deliberately no publishEvent here — this branch only ever touches
+    // cosmetic fields (title/image/sku), never quantity/status, so there's
+    // no row to add/remove and nothing the existing inventory delta doesn't
+    // already cover. A live push here would force a full products-list
+    // refetch (Shopify GraphQL + DB) on every minor product edit for a
+    // benefit no merchant is likely to need instantly — title/image changes
+    // show up next time the page is loaded/navigated to instead.
   }
 
   } catch (err) {

@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -6,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { AnalyticsData } from "../lib/analytics-data.server";
-import { useSSEData } from "../hooks/use-sse-data";
+import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { useAnalyticsStore } from "../stores/analytics-store";
 import { AnalyticsStatCards } from "../components/analytics/AnalyticsStatCards";
 import { AlertTypeBreakdown } from "../components/analytics/AlertTypeBreakdown";
@@ -29,21 +28,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function AnalyticsPage() {
   const { token } = useLoaderData<typeof loader>();
-  const { data, error, retry } = useSSEData<AnalyticsData>(
-    `/api/analytics-stream?token=${encodeURIComponent(token)}`,
+
+  const cachedData = useAnalyticsStore((s) => s.data);
+  const cachedKey = useAnalyticsStore((s) => s.lastKey);
+  const lastFetchedAt = useAnalyticsStore((s) => s.lastFetchedAt);
+  const setSSEState = useAnalyticsStore((s) => s.setSSEState);
+  useCachedSSEData<AnalyticsData>(
+    "",
+    () => `/api/analytics-stream?token=${encodeURIComponent(token)}`,
+    "analytics",
+    cachedData,
+    cachedKey,
+    lastFetchedAt,
+    setSSEState,
   );
 
-  const setSSEState = useAnalyticsStore((s) => s.setSSEState);
-  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
-
-  // Gate on the store, not the local `data`/`error` above — see the rule
-  // established in dashboard-store.ts.
+  // Gate on the store, not a local hook result — see the rule established
+  // in dashboard-store.ts.
   const storeError = useAnalyticsStore((s) => s.error);
+  const retry = useAnalyticsStore((s) => s.retry);
 
   return (
     <s-page heading="Analytics" sub-heading="Alert trends and inventory health over the last 30 days">
       {storeError ? (
-        <SSEErrorRetry message={storeError} onRetry={retry} />
+        <SSEErrorRetry message={storeError} onRetry={retry ?? (() => {})} />
       ) : (
         <AnalyticsContent />
       )}

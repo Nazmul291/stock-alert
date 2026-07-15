@@ -13,6 +13,7 @@ import {
 import { fireFlowTrigger } from './flow-trigger.server';
 import { sendKlaviyoEvent } from './klaviyo.server';
 import { sendWhatsAppTemplate } from './whatsapp.server';
+import { publishEvent } from './broadcast.server';
 import { getValidAsanaAccessToken, createAsanaTask, createAsanaSubtask, AsanaApiError } from './asana.server';
 
 const transporter = nodemailer.createTransport({
@@ -258,6 +259,7 @@ async function logAlert(
         data: { lastAlertSentAt: now, lastAlertType: alertType },
       }),
     ]);
+    publishEvent(shop, ['alerts', 'dashboard', 'analytics']).catch(() => {});
   } catch (err) {
     console.error('[Notifications] Failed to log alert:', err);
   }
@@ -817,6 +819,7 @@ export async function sendBackInStockNotifications(
   }
 
   console.log(`[Notifications] Back-in-stock: notified ${sent}/${subscribers.length} subscribers for ${productTitle} (${shop})`);
+  if (sent > 0) publishEvent(shop, ['back-in-stock']).catch(() => {});
   return sent;
 }
 

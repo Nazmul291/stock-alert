@@ -7,7 +7,7 @@ import prisma from "../db.server";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { AlertsData } from "../lib/alert-history-data.server";
-import { useSSEData } from "../hooks/use-sse-data";
+import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { useAlertHistoryStore } from "../stores/alert-history-store";
 import { AlertHistoryToolbar } from "../components/alert-history/AlertHistoryToolbar";
 import { AlertsTable } from "../components/alert-history/AlertsTable";
@@ -54,26 +54,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function AlertHistoryPage() {
   const { typeFilter, productSearch, page, token } = useLoaderData<typeof loader>();
-  const { data, error, retry } = useSSEData<AlertsData>(
-    `/api/alert-history-stream?token=${encodeURIComponent(token)}&page=${page}&type=${encodeURIComponent(typeFilter)}&product=${encodeURIComponent(productSearch)}`,
-  );
 
   const setLoaderData = useAlertHistoryStore((s) => s.setLoaderData);
-  const setSSEState = useAlertHistoryStore((s) => s.setSSEState);
   useEffect(() => { setLoaderData({ page, typeFilter, productSearch }); }, [page, typeFilter, productSearch, setLoaderData]);
-  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
+
+  const cachedData = useAlertHistoryStore((s) => s.data);
+  const cachedKey = useAlertHistoryStore((s) => s.lastKey);
+  const lastFetchedAt = useAlertHistoryStore((s) => s.lastFetchedAt);
+  const setSSEState = useAlertHistoryStore((s) => s.setSSEState);
+  useCachedSSEData<AlertsData>(
+    `${page}|${typeFilter}|${productSearch}`,
+    () => `/api/alert-history-stream?token=${encodeURIComponent(token)}&page=${page}&type=${encodeURIComponent(typeFilter)}&product=${encodeURIComponent(productSearch)}`,
+    "alerts",
+    cachedData,
+    cachedKey,
+    lastFetchedAt,
+    setSSEState,
+  );
 
   const storeError = useAlertHistoryStore((s) => s.error);
+  const retry = useAlertHistoryStore((s) => s.retry);
 
   return (
     <s-page heading="Alert History" sub-heading="Track every low-stock and back-in-stock alert">
-      <s-button slot="primary-action" variant="primary" href="/app">Back to Dashboard</s-button>
+      {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
+      <s-button slot="primary-action" variant="primary" href="/app" suppressHydrationWarning>Back to Dashboard</s-button>
 
       <s-section heading="">
         <AlertHistoryToolbar />
 
         {storeError ? (
-          <SSEErrorRetry message={storeError} onRetry={retry} />
+          <SSEErrorRetry message={storeError} onRetry={retry ?? (() => {})} />
         ) : (
           <AlertsTable />
         )}

@@ -12,7 +12,8 @@ import { sendWhatsAppTemplate } from "../lib/whatsapp.server";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { IntegrationsData } from "../lib/integrations-data.server";
-import { useSSEData } from "../hooks/use-sse-data";
+import { useCachedSSEData } from "../hooks/use-cached-sse-data";
+import { useLiveEventsStore } from "../stores/live-events-store";
 import { TestResultBanner, type TestResult } from "../components/IntegrationControls";
 import { useIntegrationsStore } from "../stores/integrations-store";
 import { EmailIntegrationSection } from "../components/integrations/EmailIntegrationSection";
@@ -361,21 +362,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function IntegrationsPage() {
   const { token, slackConnectToken, asanaConnectToken } = useLoaderData<typeof loader>();
-  const { data, error, retry } = useSSEData<IntegrationsData>(
-    `/api/integrations-stream?token=${encodeURIComponent(token)}`,
-  );
   const [searchParams] = useSearchParams();
   const slackError = searchParams.get("slack_error") === "1";
   const asanaError = searchParams.get("asana_error") === "1";
 
   const setLoaderData = useIntegrationsStore((s) => s.setLoaderData);
-  const setSSEState = useIntegrationsStore((s) => s.setSSEState);
   useEffect(() => { setLoaderData({ slackConnectToken, asanaConnectToken }); }, [slackConnectToken, asanaConnectToken, setLoaderData]);
-  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
 
-  // Gate on the store, not the local `data`/`error` above — see the rule
-  // established in dashboard-store.ts.
+  const cachedData = useIntegrationsStore((s) => s.data);
+  const cachedKey = useIntegrationsStore((s) => s.lastKey);
+  const lastFetchedAt = useIntegrationsStore((s) => s.lastFetchedAt);
+  const setSSEState = useIntegrationsStore((s) => s.setSSEState);
+  useCachedSSEData<IntegrationsData>(
+    "",
+    () => `/api/integrations-stream?token=${encodeURIComponent(token)}`,
+    "integrations",
+    cachedData,
+    cachedKey,
+    lastFetchedAt,
+    setSSEState,
+  );
+
+  // Gate on the store, not a local hook result — see the rule established
+  // in dashboard-store.ts.
   const storeError = useIntegrationsStore((s) => s.error);
+  const retry = useIntegrationsStore((s) => s.retry);
 
   return (
     <s-page heading="Integrations" sub-heading="Connect Stock Alert to Slack, WhatsApp, Shopify Flow, Klaviyo, Asana, and your own systems">
@@ -390,7 +401,7 @@ export default function IntegrationsPage() {
         </div>
       )}
       {storeError ? (
-        <SSEErrorRetry message={storeError} onRetry={retry} />
+        <SSEErrorRetry message={storeError} onRetry={retry ?? (() => {})} />
       ) : (
         <IntegrationsContent />
       )}
@@ -479,10 +490,17 @@ function IntegrationsContent() {
       ? saveData.message
       : null;
 
+  const bumpLiveEvents = useLiveEventsStore((s) => s.bump);
   useEffect(() => {
     const d = saveFetcher.data;
-    if (d && "intent" in d && d.intent === "save" && d.success) setIsDirty(false);
-  }, [saveFetcher.data]);
+    if (d && "intent" in d && d.intent === "save" && d.success) {
+      setIsDirty(false);
+      // No webhook writes integration config — this is the only source of
+      // change, so invalidate the cache locally instead of wiring real SSE
+      // push for a race that can't happen. See use-cached-sse-data.ts.
+      bumpLiveEvents(["integrations"]);
+    }
+  }, [saveFetcher.data, bumpLiveEvents]);
 
   function handleSave() {
     const fd = new FormData(formRef.current ?? undefined);
