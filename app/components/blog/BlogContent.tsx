@@ -37,6 +37,29 @@ export function BlogContent({ blocks }: { blocks: BlogBlock[] }) {
                 ))}
               </ol>
             );
+          case "table":
+            return (
+              <div className="sa-blogTableWrap" key={i}>
+                <table>
+                  <thead>
+                    <tr>
+                      {block.headers.map((header, j) => (
+                        <th key={j}>{renderInline(header)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, j) => (
+                      <tr key={j}>
+                        {row.map((cell, k) => (
+                          <td key={k}>{renderInline(cell)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
           case "p":
           default:
             return <p key={i}>{renderInline(block.text)}</p>;

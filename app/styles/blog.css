@@ -145,6 +145,43 @@
   color: #111827;
 }
 
+.sa-blogTableWrap {
+  overflow-x: auto;
+  margin: 0 0 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.sa-blogBody table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+}
+
+.sa-blogBody th,
+.sa-blogBody td {
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: top;
+}
+
+.sa-blogBody th {
+  background: #f9fafb;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+}
+
+.sa-blogBody td {
+  color: #374151;
+  line-height: 1.5;
+}
+
+.sa-blogBody tr:last-child td {
+  border-bottom: none;
+}
+
 .sa-blogCta {
   margin-top: 48px;
   padding: 28px;
