@@ -9,6 +9,7 @@ import { authenticate } from "../shopify.server";
 import { mintSseToken } from "../lib/sse-token.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 import { useSSEData } from "../hooks/use-sse-data";
+import { useLiveEvents } from "../hooks/use-live-events";
 import { useAppGateStore, type GateData } from "../stores/app-gate-store";
 
 // Only auth blocks the response now — the billing/onboarding gate check and the
@@ -29,31 +30,38 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 
-function GlobalStyles() {
-  return (
-    <style>{`
-      @keyframes nav-spin { to { transform: rotate(360deg); } }
-      @keyframes btn-spin { to { transform: rotate(360deg); } }
-      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+// Applied to a dynamic value's own wrapper (a plain span/div we render, never
+// the s-* web component itself — its text lives in light DOM slotted
+// content, so this cascades normally). The element keeps rendering its real
+// markup with a placeholder/default value so its size matches the eventual
+// real content (no layout shift); this class just hides that text and
+// paints a pulsing gray bar over it. Remove the class once real data
+// arrives — everything else about the element stays untouched.
+const GLOBAL_STYLES = `
+  @keyframes nav-spin { to { transform: rotate(360deg); } }
+  @keyframes btn-spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
-      /* Applied to a dynamic value's own wrapper (a plain span/div we render,
-         never the s-* web component itself — its text lives in light DOM
-         slotted content, so this cascades normally). The element keeps
-         rendering its real markup with a placeholder/default value so its
-         size matches the eventual real content (no layout shift); this class
-         just hides that text and paints a pulsing gray bar over it. Remove
-         the class once real data arrives — everything else about the element
-         stays untouched. */
-      .skeleton-text {
-        color: transparent !important;
-        background-color: #e5e7eb;
-        border-radius: 4px;
-        animation: pulse 1.5s ease-in-out infinite;
-      }
-      .skeleton-text * { visibility: hidden; }
-      .skeleton-text svg { display: none; }
-    `}</style>
-  );
+  .skeleton-text {
+    color: transparent !important;
+    background-color: #e5e7eb;
+    border-radius: 4px;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  .skeleton-text * { visibility: hidden; }
+  .skeleton-text svg { display: none; }
+`;
+
+function GlobalStyles() {
+  // dangerouslySetInnerHTML instead of a text child: <style> is a raw-text
+  // HTML element (like <script>), so browsers never decode HTML entities
+  // inside it. React's server renderer still escapes special characters
+  // (e.g. an apostrophe becomes &#x27;) the way it would for any text node,
+  // which the browser then keeps completely literal — causing a hydration
+  // mismatch the moment this CSS contains a quote, apostrophe, or ampersand.
+  // dangerouslySetInnerHTML writes the raw string with no escaping, which is
+  // safe here since it's a hardcoded constant, never user input.
+  return <style dangerouslySetInnerHTML={{ __html: GLOBAL_STYLES }} />;
 }
 
 function NavigationLoadingOverlay() {
@@ -107,6 +115,12 @@ export default function App() {
     `/api/app-gate-stream?token=${encodeURIComponent(token)}&isPublicRoute=${isPublicRoute ? "1" : "0"}`,
   );
   const alertsToday = gate?.alertsToday ?? 0;
+
+  // One persistent push connection for the whole session — not per page —
+  // since this component doesn't remount between /app/* pages (see
+  // shouldRevalidate below). Feeds live-events-store, which every page's
+  // useCachedSSEData call reads to decide whether its cached data is stale.
+  useLiveEvents(!isPublicRoute);
 
   const setGateState = useAppGateStore((s) => s.setGateState);
   const setAppStatus = useAppGateStore((s) => s.setAppStatus);

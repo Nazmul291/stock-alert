@@ -91,7 +91,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      // no-store, not no-cache — see sse.server.ts's singleShotSSE for why.
+      "Cache-Control": "no-store",
       "Connection": "keep-alive",
       "X-Accel-Buffering": "no",
     },

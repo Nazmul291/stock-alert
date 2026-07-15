@@ -15,6 +15,7 @@ import { syncState } from "../lib/sync-state.server";
 import { computeStockOutDays } from "../lib/velocity.server";
 import { fireOutboundWebhook } from "../lib/outbound-webhook.server";
 import { canUseFeature } from "../lib/plan-limits";
+import { publishEvent } from "../lib/broadcast.server";
 import { Prisma } from "@prisma/client";
 
 type WebhookAdminClient = Awaited<ReturnType<typeof authenticate.webhook>>["admin"];
@@ -252,6 +253,12 @@ async function processInventoryUpdate(
         ...(effectiveDailySales ? { stockOutDays: newStockOutDays } : {}),
       },
     });
+    publishEvent(shop, ["products", "dashboard", "analytics"], {
+      productId,
+      variantId,
+      currentQuantity: newQty,
+      inventoryStatus: newStatus,
+    }).catch(() => {});
   }
 
   // ── 5. Determine alert type ───────────────────────────────────────────────

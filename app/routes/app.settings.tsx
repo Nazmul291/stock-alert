@@ -8,9 +8,10 @@ import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server"
 import { SSEErrorRetry } from "../components/Skeleton";
 import { mintSseToken } from "../lib/sse-token.server";
 import type { SettingsData } from "../lib/settings-data.server";
-import { useSSEData } from "../hooks/use-sse-data";
+import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { canUseFeature } from "../lib/plan-limits";
 import { useSettingsStore } from "../stores/settings-store";
+import { useLiveEventsStore } from "../stores/live-events-store";
 import { PlanCard } from "../components/settings/PlanCard";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
 import { DigestEmailsSection } from "../components/settings/DigestEmailsSection";
@@ -124,21 +125,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function SettingsPage() {
   const { token } = useLoaderData<typeof loader>();
-  const { data, error, retry } = useSSEData<SettingsData>(
-    `/api/settings-stream?token=${encodeURIComponent(token)}`,
+
+  const cachedData = useSettingsStore((s) => s.data);
+  const cachedKey = useSettingsStore((s) => s.lastKey);
+  const lastFetchedAt = useSettingsStore((s) => s.lastFetchedAt);
+  const setSSEState = useSettingsStore((s) => s.setSSEState);
+  useCachedSSEData<SettingsData>(
+    "",
+    () => `/api/settings-stream?token=${encodeURIComponent(token)}`,
+    "settings",
+    cachedData,
+    cachedKey,
+    lastFetchedAt,
+    setSSEState,
   );
 
-  const setSSEState = useSettingsStore((s) => s.setSSEState);
-  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
-
-  // Gate on the store, not the local `data`/`error` above — see the rule
-  // established in dashboard-store.ts.
+  // Gate on the store, not a local hook result — see the rule established
+  // in dashboard-store.ts.
   const storeError = useSettingsStore((s) => s.error);
+  const retry = useSettingsStore((s) => s.retry);
 
   return (
     <s-page heading="Settings" sub-heading="Configure your inventory monitoring preferences">
       {storeError ? (
-        <SSEErrorRetry message={storeError} onRetry={retry} />
+        <SSEErrorRetry message={storeError} onRetry={retry ?? (() => {})} />
       ) : (
         <SettingsContent />
       )}
@@ -240,10 +250,17 @@ function SettingsContent() {
 
   const saveSuccess = saveData && saveData.intent === "save" && saveData.success;
 
+  const bumpLiveEvents = useLiveEventsStore((s) => s.bump);
   useEffect(() => {
     const data = saveFetcher.data;
-    if (data?.intent === "save" && data?.success) setIsDirty(false);
-  }, [saveFetcher.data]);
+    if (data?.intent === "save" && data?.success) {
+      setIsDirty(false);
+      // No webhook writes storeSettings — this is the only source of change,
+      // so invalidate the cache locally instead of wiring real SSE push for
+      // a race that can't happen. See use-cached-sse-data.ts.
+      bumpLiveEvents(["settings"]);
+    }
+  }, [saveFetcher.data, bumpLiveEvents]);
 
   function handleSave() {
     const fd = new FormData(formRef.current ?? undefined);

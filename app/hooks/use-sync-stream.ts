@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRevalidator } from "react-router";
 
 export function useSyncStream(shop: string, syncRunning: boolean) {
   const [syncPct, setSyncPct] = useState<number | null>(null);
   const [syncStreamError, setSyncStreamError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
-  const { revalidate } = useRevalidator();
 
   const openStream = useCallback(() => {
     if (esRef.current) return;
@@ -19,7 +17,10 @@ export function useSyncStream(shop: string, syncRunning: boolean) {
         setSyncPct(100);
         es.close();
         esRef.current = null;
-        setTimeout(() => { setSyncPct(null); revalidate(); }, 1000);
+        // sync-state.server.ts's done() publishes a "products"/"dashboard"
+        // live event — the dashboard/products pages refresh themselves via
+        // useCachedSSEData instead of this hook forcing a full loader rerun.
+        setTimeout(() => setSyncPct(null), 1000);
       }
       if (data.type === "idle") {
         es.close();
@@ -39,7 +40,7 @@ export function useSyncStream(shop: string, syncRunning: boolean) {
       esRef.current = null;
       setSyncPct(null);
     };
-  }, [shop, revalidate]);
+  }, [shop]);
 
   useEffect(() => {
     if (syncRunning && !esRef.current) openStream();

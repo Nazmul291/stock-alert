@@ -6,6 +6,14 @@ import { useBackInStockStore } from "../../stores/back-in-stock-store";
 // there are any subscribers, so this assumes there are (matching the rest of
 // the page's "reserve space" loading behavior) rather than flashing the
 // empty state first.
+//
+// subscribedAt is a fixed constant, not `new Date()` — this module loads
+// once and stays cached for the server process's whole lifetime, so
+// `new Date()` here would freeze at server-start time while the client
+// re-evaluates it fresh on every page load, drifting further apart the
+// longer the server stays up and causing a hydration text mismatch. The
+// actual value is irrelevant anyway since this cell is masked by
+// .skeleton-text while loading.
 const PLACEHOLDER_SUBSCRIBERS = Array.from({ length: 5 }, (_, i) => ({
   id: `skeleton-${i}`,
   productId: "0",
@@ -13,7 +21,7 @@ const PLACEHOLDER_SUBSCRIBERS = Array.from({ length: 5 }, (_, i) => ({
   email: "customer@example.com",
   firstName: "First",
   lastName: "Last",
-  subscribedAt: new Date().toISOString(),
+  subscribedAt: "2024-01-01T00:00:00.000Z",
   notifiedAt: null as string | null,
 }));
 

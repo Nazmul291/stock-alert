@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
-import { useSSEData } from "../hooks/use-sse-data";
+import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { mintSseToken } from "../lib/sse-token.server";
@@ -34,25 +34,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function Dashboard() {
   const { shop, token } = useLoaderData<typeof loader>();
-  const { data, error, retry } = useSSEData<DashboardData>(
-    `/api/dashboard-stream?token=${encodeURIComponent(token)}`,
-  );
 
   const setLoaderData = useDashboardStore((s) => s.setLoaderData);
-  const setSSEState = useDashboardStore((s) => s.setSSEState);
   useEffect(() => { setLoaderData({ shop }); }, [shop, setLoaderData]);
-  useEffect(() => { setSSEState({ data, error, retry }); }, [data, error, retry, setSSEState]);
 
+  const cachedData = useDashboardStore((s) => s.data);
+  const cachedKey = useDashboardStore((s) => s.lastKey);
+  const lastFetchedAt = useDashboardStore((s) => s.lastFetchedAt);
+  const setSSEState = useDashboardStore((s) => s.setSSEState);
+  useCachedSSEData<DashboardData>(
+    "",
+    () => `/api/dashboard-stream?token=${encodeURIComponent(token)}`,
+    "dashboard",
+    cachedData,
+    cachedKey,
+    lastFetchedAt,
+    setSSEState,
+  );
+
+  const retry = useDashboardStore((s) => s.retry);
   const storeError = useDashboardStore((s) => s.error);
 
   return (
     <s-page heading="Dashboard" sub-heading="Monitor your inventory and alerts">
-      <s-button slot="primary-action" variant="primary" href="/app/products">
+      {/* suppressHydrationWarning: s-button is a Shopify Polaris web
+          component that injects its own `style` attribute during server
+          rendering, outside anything declared in this JSX — React's
+          hydration diff otherwise flags that as a false-positive mismatch.
+          The generated JSX type for this custom element doesn't extend
+          React's base DOM attributes (so it doesn't know about this prop),
+          even though React honors it on any element at runtime. */}
+      {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
+      <s-button slot="primary-action" variant="primary" href="/app/products" suppressHydrationWarning>
         Manage Products
       </s-button>
 
       {storeError ? (
-        <SSEErrorRetry message={storeError} onRetry={retry} />
+        <SSEErrorRetry message={storeError} onRetry={retry ?? (() => {})} />
       ) : (
         <DashboardContent />
       )}
@@ -115,12 +133,17 @@ function DashboardContent() {
 
       <InventoryOverviewSection />
 
-      {/* Held back until data confirms they're actually needed, same
-          reasoning as the setup checklist above — most loads won't need
-          either of these, so don't reserve space for them by default. */}
+      {/* Held back until data confirms it's actually needed, same reasoning
+          as the setup checklist above — most loads won't need this, so
+          don't reserve space for it by default. */}
       {(!loading && stockOutSoonCount > 0) && <StockOutSoonBanner />}
 
-      {(!loading && atRiskProducts.length > 0) && <ProductsAtRiskSection />}
+      {/* Unlike the two above, this one renders during loading too (showing
+          its own internal skeleton — see ProductsAtRiskSection.tsx's
+          PLACEHOLDER_ROWS) and only disappears once data confirms there's
+          genuinely nothing at risk, matching RecentAlertsSection's
+          always-mounted strategy below. */}
+      {(loading || atRiskProducts.length > 0) && <ProductsAtRiskSection />}
 
       <RecentAlertsSection />
 
@@ -167,8 +190,13 @@ function DashboardContent() {
               </button>
             </div>
           )}
-          <s-button href="/app/settings">Configure Settings</s-button>
-          {plan !== "pro" && <s-button href="/app/billing">Upgrade to Pro</s-button>}
+          {/* suppressHydrationWarning on these s-button elements: see the comment above the "Manage Products" button. */}
+          {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
+          <s-button href="/app/settings" suppressHydrationWarning>Configure Settings</s-button>
+          {plan !== "pro" && (
+            // @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type
+            <s-button href="/app/billing" suppressHydrationWarning>Upgrade to Pro</s-button>
+          )}
         </s-stack>
       </s-section>
     </>
