@@ -1131,6 +1131,94 @@ const posts: BlogPost[] = [
       },
     ],
   },
+  {
+    handle: "holiday-season-inventory-survival-guide",
+    title: "Holiday Season Inventory Survival Guide: How to Avoid Stockouts During Your Busiest Sales Period",
+    description:
+      "BFCM and holiday stockouts cost more than any other time of year. A practical shopify holiday inventory management guide covering pre-season prep, in-season monitoring, and a week-by-week checklist.",
+    publishedAt: "2026-07-27",
+    updatedAt: "2026-07-27",
+    blocks: [
+      {
+        type: "p",
+        text: "Black Friday, Cyber Monday, and the weeks leading into the holidays are when a stockout hurts the most. It's not just a lost sale — it's a lost sale during the exact window when you spent the most on ads, traffic, and marketing to earn it. A stockout in March costs you a sale. A stockout during BFCM can cost you the sale, the ad spend that drove it, and the once-a-year customer who was never coming back to check twice.",
+      },
+      {
+        type: "p",
+        text: "The good news: holiday stockouts are almost always predictable, not random. With the right prep, you can see them coming weeks in advance instead of discovering them mid-sale.",
+      },
+      { type: "h2", text: "Why the Stakes Are Higher During Peak Season" },
+      {
+        type: "p",
+        text: "A few things make holiday stockouts uniquely damaging compared to a normal week:",
+      },
+      {
+        type: "ul",
+        items: [
+          "**Traffic spikes are compressed into days, not weeks.** A product that normally sells 5 units a day might sell 50 during a BFCM weekend — and a threshold set for normal velocity will trigger far too late to matter.",
+          "**Ad spend is concentrated and expensive.** Holiday CPMs are higher than any other time of year, so every click sent to a product that's about to sell out is a more expensive click wasted.",
+          "**Supplier lead times don't shrink for your sale.** Your suppliers are dealing with their own holiday backlog, meaning a “quick reorder” that normally takes a week might take three during peak season.",
+          "**Customers have nowhere to wait.** During the one week they're actually ready to buy gifts, a sold-out product often just means a lost sale to a competitor, not a patient customer who'll check back in January.",
+        ],
+      },
+      { type: "h2", text: "Pre-Season Prep: What to Do Before the Rush" },
+      { type: "h3", text: "Forecast Based on Last Year, Not Last Month" },
+      {
+        type: "p",
+        text: "Your normal sales velocity (say, from October) tells you almost nothing about what November or December will look like. Pull last year's holiday sales data for your top products, if you have it, and use that as your baseline instead of extrapolating from a quiet month. If this is your first holiday season, look at category benchmarks or your own BFCM-week traffic projections rather than assuming a flat multiplier on normal sales.",
+      },
+      { type: "h3", text: "Build in Extra Safety Stock" },
+      {
+        type: "p",
+        text: "Your normal safety stock buffer (calculated from average daily sales × supplier lead time) needs a seasonal multiplier for anything you expect to be a bestseller. If a product usually needs a 40-unit buffer, doubling or tripling that for your top 20% of SKUs is often cheaper than the lost sales and rush shipping fees from running out mid-sale.",
+      },
+      { type: "h3", text: "Confirm Supplier Lead Times Early" },
+      {
+        type: "p",
+        text: "Don't assume your supplier's normal turnaround holds during their own busy season. Reach out weeks in advance to confirm realistic lead times for a holiday reorder, and place any borderline reorders early rather than waiting until you're already looking at a low-stock alert.",
+      },
+      { type: "h2", text: "In-Season Monitoring: What to Watch Once the Sale Is Live" },
+      { type: "h3", text: "Real-Time Alerts, Not Daily Check-Ins" },
+      {
+        type: "p",
+        text: "During a normal week, checking stock levels once a day is often fine. During BFCM, inventory can move from “comfortable” to “sold out” within hours. Real-time alerts — not a once-a-day glance at your admin — are the only way to catch a fast-moving stockout while there's still time to react (pause an ad, bump up a reorder, or adjust a promotion).",
+      },
+      { type: "h3", text: "Stock-Out Predictions, Not Just Static Thresholds" },
+      {
+        type: "p",
+        text: "A static threshold (like “alert at 10 units”) doesn't account for how much velocity changes hour to hour during a sale. A stock-out prediction based on current sales velocity — estimating “days (or hours) remaining” rather than just a fixed unit count — gives you a much more accurate warning during a period when normal sales patterns are temporarily meaningless.",
+      },
+      { type: "h3", text: "Daily Digest Emails for the Big Picture" },
+      {
+        type: "p",
+        text: "Real-time alerts are for urgent, individual events. A daily digest — a single summary of everything running low or trending toward a stockout — is what lets you (or your team) step back each morning and make broader decisions: which products need a reorder today, which ads should be paused, and which categories are performing better than forecasted.",
+      },
+      { type: "h2", text: "Your Holiday Inventory Prep Checklist" },
+      {
+        type: "p",
+        text: "Use this as a rough timeline, adjusting based on your own supplier lead times.",
+      },
+      {
+        type: "ul",
+        items: [
+          "**8 weeks out** — Pull last year's holiday sales data (or category benchmarks), forecast expected demand for your top SKUs, and place any long-lead-time reorders now.",
+          "**4 weeks out** — Finalize seasonal safety stock buffers for your bestsellers, confirm supplier lead times directly, and set up real-time low-stock alerts if you haven't already.",
+          "**1 week out** — Do a final stock check on every product going into a promotion or featured placement, and make sure your notification channel (email, Slack, or WhatsApp) is one your team is actually watching during the sale.",
+          "**During the sale** — Monitor real-time alerts continuously, act on stock-out predictions as soon as they flag a product, and be ready to pause ads or adjust promotions the moment a bestseller starts running low.",
+        ],
+      },
+      { type: "h2", text: "Where Stock Alert Fits In" },
+      {
+        type: "p",
+        text: "Static thresholds are a reasonable baseline the rest of the year, but they struggle to keep up with how fast sales velocity shifts during a holiday sale. Stock Alert's stock-out prediction feature estimates how much time a product has left based on its actual current sales pace — not just a fixed unit count — so you get a meaningful early warning even when a bestseller's sales speed changes hour to hour, alongside instant alerts across email, Slack, or WhatsApp the moment it matters.",
+      },
+      { type: "h2", text: "Prep Now, React Less Later" },
+      {
+        type: "p",
+        text: "The merchants who make it through BFCM and the holiday season without a painful stockout aren't the ones reacting the fastest — they're the ones who did the forecasting and buffer work weeks in advance, so there's less to react to in the first place. Start your prep checklist now, set up real-time monitoring before the rush hits, and go into your busiest sales period knowing your inventory can actually keep up with your marketing.",
+      },
+    ],
+  },
 ];
 
 export function getAllBlogPosts(): BlogPost[] {
