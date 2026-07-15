@@ -135,6 +135,239 @@ const posts: BlogPost[] = [
       },
     ],
   },
+  {
+    handle: "back-in-stock-notifications-recover-lost-sales",
+    title: "Back-in-Stock Notifications: The Underrated Feature That Recovers Lost Sales",
+    description:
+      "Sold-out pages don't have to be dead ends. See why customers rarely come back on their own, and how a shopify back in stock notification system turns high-intent shoppers into recovered sales.",
+    publishedAt: "2026-07-17",
+    updatedAt: "2026-07-17",
+    blocks: [
+      {
+        type: "p",
+        text: "A customer lands on your product page ready to buy. Wrong size, wrong color, doesn't matter — the item is sold out, and there's nothing on the page inviting them to do anything but leave. So they leave.",
+      },
+      {
+        type: "p",
+        text: "Most Shopify merchants treat this moment as a lost cause. It isn't. It's actually one of the highest-intent moments in your entire funnel — a shopper who already decided to buy is standing at your door, and the only thing missing is a way for them to raise their hand. A **shopify back in stock notification** system turns that dead end into a queued-up sale. Here's why it works, and how to set it up so it actually converts.",
+      },
+      { type: "h2", text: "Why Shoppers Don't Come Back On Their Own" },
+      {
+        type: "p",
+        text: "It's tempting to assume interested customers will just check back later. In practice, almost none of them do.",
+      },
+      {
+        type: "p",
+        text: "Think about your own shopping behavior: how many out-of-stock product pages have you bookmarked, or set a calendar reminder to revisit? Almost none. The moment a shopper hits “sold out,” their buying momentum breaks, and momentum is fragile. They don't file your product away for later — they open a new tab, search the same product on a competitor's site, or simply forget the idea entirely.",
+      },
+      {
+        type: "p",
+        text: "A few things make this worse:",
+      },
+      {
+        type: "ul",
+        items: [
+          "There's no natural trigger to remind them. Unlike an abandoned cart (which can be nudged with an email a few hours later), a sold-out page visit often isn't tracked or followed up on at all.",
+          "Attention is the scarcest resource in ecommerce. If a shopper found your product through an ad, an influencer post, or a search result, that context — and their motivation — evaporates the second they close the tab.",
+          "Every day the product stays unavailable is a day a competitor's ad, email, or organic listing might catch that same shopper first.",
+        ],
+      },
+      {
+        type: "p",
+        text: "Without a mechanism to close the loop, an out-of-stock page isn't a pause in the sale. It's the end of it.",
+      },
+      { type: "h2", text: "The Psychology of “Notify Me” Signups" },
+      {
+        type: "p",
+        text: "This is what makes back-in-stock signups so effective: they capture intent at the exact peak moment, before it decays.",
+      },
+      {
+        type: "p",
+        text: "When someone hits “sold out” and immediately sees a “Notify Me When Available” option, three psychological things happen at once:",
+      },
+      {
+        type: "ol",
+        items: [
+          "**It validates the decision they already made.** They don't have to re-decide whether they want the product — they already did that. The form just asks them to wait, not to reconsider.",
+          "**It's a low-friction micro-commitment.** Typing an email address takes five seconds and feels almost inconsequential compared to a purchase — which is exactly why conversion on these forms tends to be high relative to almost any other on-site signup.",
+          "**It creates a personal restock event.** A generic “back in stock” social post competes with everything else in someone's feed. A direct notification, sent specifically because they asked for it, doesn't have to compete with anything — it lands in their inbox as a message meant just for them, at the moment they're most likely to act on it.",
+        ],
+      },
+      {
+        type: "p",
+        text: "In short, “Notify Me” doesn't ask a shopper to want your product. It asks them to hold onto a want they already have. That's a much easier ask — and it's why these signups convert to actual purchases at a meaningfully higher rate than most other email capture methods on a store.",
+      },
+      { type: "h2", text: "Where to Place Signup Forms for Maximum Conversion" },
+      {
+        type: "p",
+        text: "A back-in-stock form only works if shoppers actually see it at the right moment. Placement matters as much as the feature itself.",
+      },
+      { type: "h3", text: "On the Product Page Itself" },
+      {
+        type: "p",
+        text: "This is non-negotiable. The moment “Add to Cart” becomes unavailable, a “Notify Me When Available” form should appear in that same visual space — not buried in a tab, not below the fold. The shopper's eyes are already on that button; replace it, don't relocate the ask.",
+      },
+      { type: "h3", text: "Per-Variant, Not Just Per-Product" },
+      {
+        type: "p",
+        text: "If a product has ten variants and only the size Large is sold out, don't just mark the whole product unavailable — let shoppers sign up for the specific variant they wanted. A blanket “email me” on a mostly-in-stock product creates noise and sends irrelevant restock alerts to people who never wanted that particular variant.",
+      },
+      { type: "h3", text: "Collection and Search Pages" },
+      {
+        type: "p",
+        text: "Sold-out items still show up in collection grids and search results. A small “Notify Me” badge or tag on the product card — instead of a plain “Sold Out” label — keeps that page from being a dead end for shoppers who never even clicked through.",
+      },
+      { type: "h3", text: "Confirm the Signup Immediately" },
+      {
+        type: "p",
+        text: "A short confirmation (“We'll email you the second this is back”) reduces the anxiety of “did that actually work?” and reinforces that the shopper made a smart move by signing up instead of leaving.",
+      },
+      { type: "h2", text: "Manual Restocking Communication vs. Automated Notifications" },
+      {
+        type: "p",
+        text: "Plenty of merchants still handle restocks the old way: post on Instagram, send a blast email to the full list, hope the right people see it. It's better than nothing, but it has real limits compared to an automated shopify back in stock notification system.",
+      },
+      {
+        type: "ul",
+        items: [
+          "**Reach** — a manual social post or blast email only reaches people currently following or subscribed and online at that moment; automated alerts reach every shopper who specifically asked for that product.",
+          "**Relevance** — a blast sends the same message to everyone regardless of interest; automated alerts go only to people who wanted that exact item.",
+          "**Timing** — manual posts go out whenever you remember to post; automated alerts fire instantly, the moment inventory updates.",
+          "**Effort** — manual communication takes fresh work every single restock; automated alerts are set up once and run on their own.",
+          "**Signal strength** — a blast competes with everything else in a feed or inbox; a personal restock alert arrives as an expected, high-signal message.",
+        ],
+      },
+      {
+        type: "p",
+        text: "The gap isn't small. A blast email might reach thousands of inboxes and convert a handful of buyers. A targeted back-in-stock alert reaches a much smaller list — but it's a list of people who already decided to buy, which is why it routinely converts at a far higher rate per message sent.",
+      },
+      { type: "h2", text: "Where Stock Alert Fits In" },
+      {
+        type: "p",
+        text: "Manually tracking which customers wanted which sold-out variant — and remembering to email each one the second it restocks — isn't realistic once you're managing more than a handful of SKUs. Stock Alert handles this automatically: it adds a signup widget to your sold-out product pages, tracks per-variant interest, and fires an instant email the moment that item is back in stock, with no manual list-building or blast emails required.",
+      },
+      { type: "h2", text: "Turn Your Sold-Out Pages Into a Sales Channel" },
+      {
+        type: "p",
+        text: "Every sold-out product page that doesn't offer a way to reconnect is a sale you're actively choosing to lose. The fix isn't complicated — it's a form in the right place, at the right moment, connected to an automatic message when the moment comes back around.",
+      },
+      {
+        type: "p",
+        text: "If you've never added back-in-stock signups to your store, this is the highest-leverage, lowest-effort feature you're not using yet. Add it to your sold-out pages today, and start turning “we'll never know how many sales we missed” into a number you can actually recover.",
+      },
+    ],
+  },
+  {
+    handle: "right-low-stock-threshold-per-product",
+    title: "How to Set the Right Low-Stock Threshold for Every Product in Your Shopify Store",
+    description:
+      "A single 'low stock at 5 units' rule fails most of your catalog. Learn the factors, a simple formula, and worked examples for setting a proper shopify low stock alert threshold per product.",
+    publishedAt: "2026-07-18",
+    updatedAt: "2026-07-18",
+    blocks: [
+      {
+        type: "p",
+        text: "If you've set a single “alert me when stock hits 5 units” rule for your entire catalog, you've probably already been burned by it — either a bestseller sold out before the alert gave you time to react, or a slow mover sat at “low stock” for months without ever actually running out. A flat threshold feels simple, but it quietly fails almost every product it's supposed to protect. Getting a proper **shopify low stock alert threshold** in place means treating it as a per-product calculation, not a store-wide setting.",
+      },
+      { type: "h2", text: "Why “Low Stock at 5 Units” Doesn't Work for Your Whole Catalog" },
+      {
+        type: "p",
+        text: "A single threshold assumes every product behaves the same way. In reality, your catalog is full of products with wildly different sales speeds, supplier relationships, and price points — and a rule built for one breaks for the rest.",
+      },
+      {
+        type: "p",
+        text: "Consider what a flat “5 units” threshold actually means for two different products:",
+      },
+      {
+        type: "ul",
+        items: [
+          "A bestseller selling 20 units a day blows past 5 units in a matter of hours. By the time the alert fires, you may already be out of stock — the warning arrives too late to do anything useful.",
+          "A slow-moving product selling 1 unit a month sits at “low stock” for weeks, training you to ignore the alert entirely. When every alert looks the same, you stop trusting any of them.",
+        ],
+      },
+      {
+        type: "p",
+        text: "Both outcomes defeat the purpose of having alerts at all. The first misses the window to reorder. The second creates so much noise that real warnings get lost in it. A useful threshold has to reflect how fast a specific product actually moves — not a number that felt reasonable when you set it once and forgot about it.",
+      },
+      { type: "h2", text: "The Factors That Should Actually Set Your Threshold" },
+      {
+        type: "p",
+        text: "Instead of one number for everything, base each product's threshold on a handful of factors that genuinely differ across your catalog.",
+      },
+      { type: "h3", text: "Sales Velocity" },
+      {
+        type: "p",
+        text: "This is the single biggest driver. A product that sells 10 units a day needs a much higher unit threshold than one that sells 1 unit a week — not because it's more “important,” but because it burns through inventory faster and needs more runway to react.",
+      },
+      { type: "h3", text: "Supplier Lead Time" },
+      {
+        type: "p",
+        text: "If your supplier can restock in 3 days, you don't need much buffer. If it takes 6 weeks to get a container across an ocean, your threshold needs to account for weeks of sales, not days. Lead time is often the most overlooked factor — merchants set thresholds based on how the product sells, but forget how long it takes to actually fix a shortage once the alert fires.",
+      },
+      { type: "h3", text: "Seasonality" },
+      {
+        type: "p",
+        text: "A product's velocity isn't constant. A swimwear line that sells slowly in October and rapidly in June needs a threshold that flexes with the season, or at minimum, a manual review before your peak period starts. Applying a January threshold to a June sales rate guarantees you'll get blindsided.",
+      },
+      { type: "h3", text: "Price Point and Margin" },
+      {
+        type: "p",
+        text: "High-margin, high-ticket items usually justify a more conservative (higher) threshold, since a single missed sale is expensive and customers researching a big purchase are less likely to wait around for a restock. Lower-margin, low-price items can tolerate a tighter threshold since the cost of an occasional stockout is smaller relative to the effort of managing tighter inventory buffers on every SKU.",
+      },
+      { type: "h2", text: "A Simple Formula You Can Use" },
+      {
+        type: "p",
+        text: "You don't need an inventory science degree to get a reasonable number. This formula gets you most of the way there:",
+      },
+      {
+        type: "p",
+        text: "**Threshold = (Average Daily Sales × Supplier Lead Time in Days) + Safety Buffer**",
+      },
+      {
+        type: "ul",
+        items: [
+          "**Average Daily Sales** — pull your last 30-60 days of sales for the product and divide by the number of days. Use a shorter, more recent window for seasonal products.",
+          "**Supplier Lead Time** — how many days it actually takes from placing a reorder to having stock available to sell, not just the shipping time — include your own processing and receiving delays.",
+          "**Safety Buffer** — an extra cushion (commonly 20-50% of the calculated amount) to absorb demand spikes, supplier delays, or the time it takes you to notice the alert and act on it.",
+        ],
+      },
+      {
+        type: "p",
+        text: "The result is a threshold that gives you enough runway to reorder before you actually run out — not a round number that happens to look tidy.",
+      },
+      { type: "h2", text: "Example: Three Products, Three Different Thresholds" },
+      {
+        type: "p",
+        text: "Here's how the formula plays out across products with different profiles:",
+      },
+      {
+        type: "ul",
+        items: [
+          "**Bestselling t-shirt** — sells 15 units/day, 5-day supplier lead time, moderate buffer. Threshold = (15 × 5) + 25% ≈ 95 units. High velocity demands a high unit threshold, even though it looks like a lot of stock sitting on the shelf.",
+          "**Mid-tier accessory** — sells 3 units/day, 10-day lead time, standard buffer. Threshold = (3 × 10) + 30% ≈ 40 units. Slower sales, but a longer lead time still requires meaningful runway.",
+          "**Niche/slow-moving item** — sells 0.3 units/day, 14-day lead time, smaller buffer. Threshold = (0.3 × 14) + 20% ≈ 5 units. Low velocity means a low threshold is genuinely appropriate here — this is the one product where “alert at 5” was actually right all along.",
+        ],
+      },
+      {
+        type: "p",
+        text: "Notice that the three thresholds span nearly a 20x range. That's the whole point: a single store-wide number can only ever be correct for one of these products, and wrong for the other two.",
+      },
+      { type: "h2", text: "Where Stock Alert Fits In" },
+      {
+        type: "p",
+        text: "Calculating and updating a threshold like this for every SKU by hand doesn't scale past a handful of products. Stock Alert lets you set a sensible global default for your store, then override it per product, per collection, or per tag — so your bestsellers get an early warning while slow movers don't clutter your alerts, all through real-time email and Slack notifications the moment any of those thresholds are crossed.",
+      },
+      { type: "h2", text: "Set It Once, Trust It Every Time" },
+      {
+        type: "p",
+        text: "The goal of a low-stock threshold isn't to pick a number that looks safe — it's to give yourself enough time to act before a product actually runs out. That time window is different for every product in your catalog, which means your thresholds should be too.",
+      },
+      {
+        type: "p",
+        text: "Start with your top 10-20 bestsellers, run them through the formula above, and set thresholds that reflect how each one actually sells. You'll spend a little more time up front, but you'll end up with alerts you can actually trust — instead of ones you've learned to ignore.",
+      },
+    ],
+  },
 ];
 
 export function getAllBlogPosts(): BlogPost[] {
