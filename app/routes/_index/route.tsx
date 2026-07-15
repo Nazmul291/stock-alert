@@ -13,6 +13,9 @@ import { LandingFooter } from "../../components/landing/LandingFooter";
 // page has zero render-blocking network requests — the CSS ships in the same
 // response as the HTML.
 import inlineCss from "./styles.css?raw";
+import chromeCss from "../../styles/site-chrome.css?raw";
+
+const pageCss = `${chromeCss}\n${inlineCss}`;
 
 const APP_NAME = "Stock Alert";
 const APP_STORE_URL = "https://apps.shopify.com/stock-alert-4";
@@ -122,7 +125,7 @@ export default function LandingPage() {
   return (
     <div className="sa-page">
       {/* eslint-disable-next-line react/no-danger */}
-      <style dangerouslySetInnerHTML={{ __html: inlineCss }} />
+      <style dangerouslySetInnerHTML={{ __html: pageCss }} />
       <script
         type="application/ld+json"
         // eslint-disable-next-line react/no-danger
