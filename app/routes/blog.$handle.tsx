@@ -102,6 +102,7 @@ export default function BlogPost() {
               year: "numeric",
               month: "long",
               day: "numeric",
+              timeZone: "UTC",
             })}
           </time>
           {" · "}
