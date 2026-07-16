@@ -4,13 +4,12 @@ import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
+import { getCachedSession } from "../lib/shop-cache.server";
 import { canUseFeature } from "../lib/plan-limits";
+import { createSupplier, updateSupplier, deleteSupplier } from "../lib/supplier.server";
 import { SupplierList, type SupplierRow } from "../components/suppliers/SupplierList";
 import { SupplierFormModal } from "../components/suppliers/SupplierFormModal";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -55,53 +54,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = form.get("intent") as string;
 
-  if (intent === "create_supplier" || intent === "update_supplier") {
+  const input = {
+    name: (form.get("name") as string) ?? "",
+    email: (form.get("email") as string) ?? "",
+    phone: (form.get("phone") as string) ?? "",
+    notes: (form.get("notes") as string) ?? "",
+    leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
+  };
+
+  if (intent === "create_supplier") {
+    const result = await createSupplier(shop, input);
+    return { ...result, intent };
+  }
+
+  if (intent === "update_supplier") {
     const id = (form.get("id") as string) ?? "";
-    const name = ((form.get("name") as string) ?? "").trim();
-    const email = ((form.get("email") as string) ?? "").trim();
-    const phone = ((form.get("phone") as string) ?? "").trim();
-    const notes = ((form.get("notes") as string) ?? "").trim();
-    const rawLeadTime = (form.get("leadTimeDays") as string) ?? "";
-
-    if (!name) {
-      return { success: false as const, error: "Supplier name is required." };
-    }
-    if (email && !EMAIL_RE.test(email)) {
-      return { success: false as const, error: `"${email}" is not a valid email address.` };
-    }
-    const leadTimeDays =
-      rawLeadTime.trim() !== "" && !isNaN(parseInt(rawLeadTime)) && parseInt(rawLeadTime) > 0
-        ? parseInt(rawLeadTime)
-        : null;
-
-    const data = { name, email: email || null, phone: phone || null, notes: notes || null, leadTimeDays };
-
-    if (intent === "create_supplier") {
-      await prisma.supplier.create({ data: { shop, ...data } });
-    } else {
-      if (!id) return { success: false as const, error: "Missing supplier id." };
-      const result = await prisma.supplier.updateMany({ where: { id, shop }, data });
-      if (result.count === 0) return { success: false as const, error: "Supplier not found." };
-    }
-
-    invalidateShopCache(shop);
-    return { success: true as const, intent };
+    const result = await updateSupplier(shop, id, input);
+    return { ...result, intent };
   }
 
   if (intent === "delete_supplier") {
     const id = (form.get("id") as string) ?? "";
-    if (!id) return { success: false as const, error: "Missing supplier id." };
-
-    const poCount = await prisma.purchaseOrder.count({ where: { shop, supplierId: id } });
-    if (poCount > 0) {
-      return { success: false as const, error: `Cannot delete — this supplier has ${poCount} purchase order(s). Cancel or reassign them first.` };
-    }
-
-    const result = await prisma.supplier.deleteMany({ where: { id, shop } });
-    if (result.count === 0) return { success: false as const, error: "Supplier not found." };
-
-    invalidateShopCache(shop);
-    return { success: true as const, intent };
+    const result = await deleteSupplier(shop, id);
+    return { ...result, intent };
   }
 
   return { success: false as const, error: "Unknown action." };

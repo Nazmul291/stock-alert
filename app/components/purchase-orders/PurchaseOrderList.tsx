@@ -58,7 +58,7 @@ export function PurchaseOrderList({ orders, activeStatus }: { orders: PurchaseOr
       {orders.length === 0 ? (
         <div style={{ textAlign: "center", padding: "40px 20px", color: "#6b7280" }}>
           <p style={{ fontSize: 16, marginBottom: 4 }}>No purchase orders found.</p>
-          <p style={{ fontSize: 14 }}>Click &quot;Generate Purchase Orders&quot; to create one from your at-risk stock.</p>
+          <p style={{ fontSize: 14 }}>Click &quot;Create Purchase Order&quot; to get started.</p>
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>

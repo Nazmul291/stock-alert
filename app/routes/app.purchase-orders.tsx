@@ -6,9 +6,16 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { canUseFeature } from "../lib/plan-limits";
-import { previewPurchaseOrders, generatePurchaseOrder, type SupplierPreview } from "../lib/purchase-order.server";
+import { createSupplier } from "../lib/supplier.server";
+import {
+  previewPurchaseOrders,
+  searchTrackedProducts,
+  createPurchaseOrder,
+  type SupplierPreview,
+  type ProductPickerRow,
+} from "../lib/purchase-order.server";
 import { PurchaseOrderList, type PurchaseOrderRow } from "../components/purchase-orders/PurchaseOrderList";
-import { GeneratePOModal } from "../components/purchase-orders/GeneratePOModal";
+import { CreatePurchaseOrderModal } from "../components/purchase-orders/CreatePurchaseOrderModal";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
 
 const STATUS_FILTERS = ["all", "draft", "ordered", "partially_received", "received", "cancelled"] as const;
@@ -23,23 +30,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const intent = url.searchParams.get("intent");
 
-  // Read-only preview, loaded via fetcher.load — GET, not a mutation.
-  if (intent === "preview_generate") {
+  // Read-only lookups, loaded via fetcher.load — GET, not a mutation.
+  if (intent === "suggested_lines") {
     if (!canManage) return { preview: [] as SupplierPreview[] };
-    const preview = await previewPurchaseOrders(shop);
+    const supplierId = url.searchParams.get("supplierId");
+    const preview = await previewPurchaseOrders(shop, supplierId ? [supplierId] : undefined);
     return { preview };
+  }
+  if (intent === "search_products") {
+    if (!canManage) return { products: [] as ProductPickerRow[] };
+    const search = url.searchParams.get("search") ?? "";
+    const products = await searchTrackedProducts(shop, { search });
+    return { products };
   }
 
   const statusParam = url.searchParams.get("status");
   const status = STATUS_FILTERS.includes(statusParam as (typeof STATUS_FILTERS)[number]) ? statusParam : "all";
 
-  const orders = canManage
-    ? await prisma.purchaseOrder.findMany({
-        where: { shop, ...(status && status !== "all" ? { status: status as PurchaseOrderRow["status"] } : {}) },
-        include: { supplier: { select: { name: true } }, _count: { select: { lineItems: true } } },
-        orderBy: { createdAt: "desc" },
-      })
-    : [];
+  const [orders, suppliers] = canManage
+    ? await Promise.all([
+        prisma.purchaseOrder.findMany({
+          where: { shop, ...(status && status !== "all" ? { status: status as PurchaseOrderRow["status"] } : {}) },
+          include: { supplier: { select: { name: true } }, _count: { select: { lineItems: true } } },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      ])
+    : [[], []];
 
   const rows: PurchaseOrderRow[] = orders.map((po) => ({
     id: po.id,
@@ -51,7 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     createdAt: po.createdAt.toISOString(),
   }));
 
-  return { orders: rows, status: status ?? "all", canManage };
+  return { orders: rows, status: status ?? "all", canManage, suppliers };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -67,17 +84,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = form.get("intent") as string;
 
-  if (intent === "confirm_generate_po") {
+  if (intent === "create_supplier") {
+    const result = await createSupplier(shop, {
+      name: (form.get("name") as string) ?? "",
+      email: (form.get("email") as string) ?? "",
+      phone: (form.get("phone") as string) ?? "",
+      leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
+    });
+    return { ...result, intent };
+  }
+
+  if (intent === "create_po") {
     const supplierId = form.get("supplierId") as string;
-    const quantityOverrides = JSON.parse((form.get("quantityOverrides") as string) ?? "{}") as Record<string, number>;
-    if (!supplierId) return { success: false as const, error: "Missing supplier." };
+    const lines = JSON.parse((form.get("lines") as string) ?? "[]") as { variantId: string; quantityOrdered: number; unitCost?: number | null }[];
+    if (!supplierId) return { success: false as const, error: "Select a supplier first." };
 
     try {
-      const { purchaseOrderId } = await generatePurchaseOrder(shop, supplierId, { quantityOverrides });
+      const { purchaseOrderId } = await createPurchaseOrder(shop, supplierId, lines);
       invalidateShopCache(shop);
       return { success: true as const, intent, purchaseOrderId };
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to generate purchase order.";
+      const message = err instanceof Error ? err.message : "Failed to create purchase order.";
       return { success: false as const, error: message };
     }
   }
@@ -98,28 +125,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function PurchaseOrdersPage() {
   const data = useLoaderData<typeof loader>();
-  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   if (!("canManage" in data) || !data.canManage) {
     return (
-      <s-page heading="Purchase Orders" sub-heading="Generate and track purchase orders from your stockout forecast">
+      <s-page heading="Purchase Orders" sub-heading="Create and track purchase orders for your suppliers">
         <SuppliersUpsellCard />
       </s-page>
     );
   }
 
   return (
-    <s-page heading="Purchase Orders" sub-heading="Generate and track purchase orders from your stockout forecast">
+    <s-page heading="Purchase Orders" sub-heading="Create and track purchase orders for your suppliers">
       {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
-      <s-button slot="primary-action" variant="primary" onClick={() => setShowGenerateModal(true)} suppressHydrationWarning>
-        Generate Purchase Orders
+      <s-button slot="primary-action" variant="primary" onClick={() => setShowCreateModal(true)} suppressHydrationWarning>
+        Create Purchase Order
       </s-button>
 
       <s-section heading="All purchase orders">
         <PurchaseOrderList orders={data.orders} activeStatus={data.status} />
       </s-section>
 
-      {showGenerateModal && <GeneratePOModal onClose={() => setShowGenerateModal(false)} />}
+      {showCreateModal && <CreatePurchaseOrderModal suppliers={data.suppliers} onClose={() => setShowCreateModal(false)} />}
     </s-page>
   );
 }

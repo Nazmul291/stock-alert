@@ -95,7 +95,7 @@ export function ProductsToolbar({ onExportCsv, exporting }: {
               whiteSpace: "nowrap", marginBottom: 1,
             }}
           >
-            Generate Purchase Orders
+            Create Purchase Order
           </Link>
         )}
       </div>

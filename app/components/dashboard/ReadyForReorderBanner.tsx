@@ -20,7 +20,7 @@ export function ReadyForReorderBanner() {
         </div>
       </div>
       <button onClick={() => navigate("/app/purchase-orders")} style={{ fontSize: 13, fontWeight: 600, color: "#3730a3", whiteSpace: "nowrap", border: "1px solid #c7d2fe", borderRadius: 6, padding: "6px 12px", background: "#fff", cursor: "pointer" }}>
-        Generate purchase orders →
+        Create purchase order →
       </button>
     </div>
   );

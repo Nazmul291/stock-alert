@@ -98,35 +98,109 @@ async function nextPoNumber(tx: Prisma.TransactionClient, shop: string): Promise
   return (max._max.poNumber ?? 0) + 1;
 }
 
-// Persists one PurchaseOrder + line items for a single supplier, re-deriving
-// the at-risk set from the DB rather than trusting a client-submitted
-// snapshot (quantityOverrides lets the merchant adjust suggested quantities
-// from the preview screen without the server blindly accepting arbitrary
-// line items). Retries once on a poNumber collision (P2002) — see
-// nextPoNumber; the only realistic collision is a double-click, not real
-// concurrent multi-user PO creation.
-export async function generatePurchaseOrder(
+export type ProductPickerRow = {
+  productId: string;
+  variantId: string;
+  productTitle: string | null;
+  variantTitle: string | null;
+  sku: string | null;
+  currentQuantity: number;
+  stockOutDays: number | null;
+  avgDailySales: number | null;
+  unitCost: number | null;
+  supplierId: string | null;
+  suggestedQuantity: number;
+};
+
+// Any tracked product, independent of supplier assignment or at-risk status —
+// the manual "search & add" side of PO creation. Forecast data is still
+// attached (via suggestReorderQuantity against the shop's default lead time)
+// so a manually-added line still gets a sane default quantity, but nothing
+// here gates which products are searchable.
+export async function searchTrackedProducts(shop: string, opts: { search?: string; limit?: number } = {}): Promise<ProductPickerRow[]> {
+  const search = (opts.search ?? "").trim();
+  const limit = opts.limit ?? 25;
+
+  const [settings, rows] = await Promise.all([
+    prisma.storeSettings.findUnique({ where: { shop } }),
+    prisma.inventoryTracking.findMany({
+      where: {
+        shop,
+        ...(search
+          ? {
+              OR: [
+                { productTitle: { contains: search, mode: "insensitive" } },
+                { sku: { contains: search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      take: limit,
+      orderBy: { productTitle: "asc" },
+    }),
+  ]);
+
+  const defaultLeadTime = settings?.supplierLeadTimeDays ?? 7;
+
+  return rows.map((row) => ({
+    productId: row.productId.toString(),
+    variantId: row.variantId.toString(),
+    productTitle: row.productTitle,
+    variantTitle: row.variantTitle,
+    sku: row.sku,
+    currentQuantity: row.currentQuantity,
+    stockOutDays: row.stockOutDays,
+    avgDailySales: row.avgDailySales,
+    unitCost: row.unitCost,
+    supplierId: row.supplierId,
+    suggestedQuantity: suggestReorderQuantity(row.currentQuantity, row.avgDailySales, defaultLeadTime),
+  }));
+}
+
+export type CreatePurchaseOrderLine = { variantId: string; quantityOrdered: number; unitCost?: number | null };
+
+// Persists a PurchaseOrder from merchant-approved line items — forecast
+// suggestions (previewPurchaseOrders) or manual search (searchTrackedProducts)
+// both just feed this the same shape, so neither is a hard requirement to
+// create a PO. Re-derives product/variant title, SKU, and a unitCost fallback
+// from the DB rather than trusting whatever the client displayed, and keeps
+// the poNumber transaction + P2002 collision retry from the previous
+// forecast-only implementation.
+export async function createPurchaseOrder(
   shop: string,
   supplierId: string,
-  opts?: { quantityOverrides?: Record<string, number> },
+  lines: CreatePurchaseOrderLine[],
 ): Promise<{ purchaseOrderId: string }> {
-  const [preview] = await previewPurchaseOrders(shop, [supplierId]);
-  if (!preview || preview.lines.length === 0) {
-    throw new Error("No at-risk products found for this supplier.");
+  const positiveLines = lines.filter((l) => l.quantityOrdered > 0);
+  if (positiveLines.length === 0) {
+    throw new Error("Add at least one product with a quantity greater than zero.");
   }
 
-  const lineItems = preview.lines
-    .map((line) => {
-      const quantityOrdered = opts?.quantityOverrides?.[line.variantId] ?? line.suggestedQuantity;
-      return quantityOrdered > 0 ? { line, quantityOrdered } : null;
+  const variantIds = positiveLines.map((l) => BigInt(l.variantId));
+  const rows = await prisma.inventoryTracking.findMany({ where: { shop, variantId: { in: variantIds } } });
+  const rowsByVariantId = new Map(rows.map((r) => [r.variantId.toString(), r]));
+
+  const resolvedLines = positiveLines
+    .map((l) => {
+      const row = rowsByVariantId.get(l.variantId);
+      if (!row) return null;
+      return {
+        productId: row.productId,
+        variantId: BigInt(l.variantId),
+        productTitle: row.productTitle,
+        variantTitle: row.variantTitle,
+        sku: row.sku,
+        quantityOrdered: l.quantityOrdered,
+        unitCost: l.unitCost ?? row.unitCost ?? null,
+      };
     })
-    .filter((x): x is { line: PreviewLine; quantityOrdered: number } => x !== null);
+    .filter((l): l is NonNullable<typeof l> => l !== null);
 
-  if (lineItems.length === 0) {
-    throw new Error("No line items with a positive quantity to order.");
+  if (resolvedLines.length === 0) {
+    throw new Error("None of the selected products could be found.");
   }
 
-  const totalCost = lineItems.reduce((sum, { line, quantityOrdered }) => sum + quantityOrdered * (line.unitCost ?? 0), 0);
+  const totalCost = resolvedLines.reduce((sum, l) => sum + l.quantityOrdered * (l.unitCost ?? 0), 0);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -138,18 +212,8 @@ export async function generatePurchaseOrder(
             supplierId,
             poNumber,
             totalCost,
-            generatedFromForecast: true,
-            lineItems: {
-              create: lineItems.map(({ line, quantityOrdered }) => ({
-                productId: BigInt(line.productId),
-                variantId: BigInt(line.variantId),
-                productTitle: line.productTitle,
-                variantTitle: line.variantTitle,
-                sku: line.sku,
-                quantityOrdered,
-                unitCost: line.unitCost,
-              })),
-            },
+            generatedFromForecast: false,
+            lineItems: { create: resolvedLines },
           },
         });
       });
@@ -162,7 +226,7 @@ export async function generatePurchaseOrder(
   }
 
   // Unreachable — the loop above either returns or throws.
-  throw new Error("Failed to generate purchase order.");
+  throw new Error("Failed to create purchase order.");
 }
 
 export function nextStatus(lineItems: { quantityOrdered: number; quantityReceived: number }[]): PurchaseOrderStatus {
