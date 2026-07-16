@@ -11,6 +11,7 @@ import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { refreshShopVelocity } from "../lib/velocity.server";
+import { setInventoryQuantities } from "../lib/shopify-inventory.server";
 import { ProductEditModal } from "../components/products/ProductEditModal";
 import type { ProductRow } from "../components/products/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/products/InventorySection";
@@ -95,9 +96,6 @@ type InventoryItemUpdateResponse = GraphQLResponse<{
 type ProductUpdateResponse = GraphQLResponse<{
   productUpdate: { product: { id: string; status: string } | null; userErrors: GraphQLUserError[] };
 }>;
-type InventorySetQuantitiesResponse = GraphQLResponse<{
-  inventorySetQuantities: { userErrors: GraphQLUserError[] };
-}>;
 type MetafieldsSetResponse = GraphQLResponse<{
   metafieldsSet: { userErrors: GraphQLUserError[] };
 }>;
@@ -154,14 +152,6 @@ const PRODUCT_UPDATE_MUTATION = `
   mutation productUpdate($product: ProductUpdateInput!) {
     productUpdate(product: $product) {
       product { id status }
-      userErrors { field message }
-    }
-  }
-`;
-
-const INVENTORY_SET_MUTATION = `
-  mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
-    inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
       userErrors { field message }
     }
   }
@@ -565,19 +555,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (inventoryUpdates.length > 0) {
       try {
-        const invRes = await admin.graphql(INVENTORY_SET_MUTATION, {
-          variables: {
-            idempotencyKey: crypto.randomUUID(),
-            input: {
-              name: "available",
-              reason: "correction",
-              quantities: inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
-            },
-          },
-        });
-        const invJson: InventorySetQuantitiesResponse = await invRes.json();
-        const invErrs = invJson.data?.inventorySetQuantities?.userErrors ?? [];
-        if (invErrs.length > 0) errors.push(invErrs.map((e) => e.message).join(", "));
+        const { userErrors: invErrs } = await setInventoryQuantities(
+          admin,
+          inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
+          "correction",
+        );
+        if (invErrs.length > 0) errors.push(invErrs.join(", "));
       } catch (err) {
         errors.push(`Quantity update failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -608,9 +591,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const canManageSupplier = canUseFeature(plan, "purchaseOrders");
     const rawSupplierId = ((form.get("supplierId") as string) ?? "").trim();
     const rawUnitCost = ((form.get("unitCost") as string) ?? "").trim();
+    // A supplierId is only ever offered to the client via the dropdown this
+    // same shop's suppliers populate, but the form value itself isn't
+    // trustworthy — verify it before saving rather than persisting a
+    // dangling/foreign id that would silently make this product ineligible
+    // for reorder suggestions with no error ever shown to the merchant.
+    const verifiedSupplierId =
+      canManageSupplier && rawSupplierId
+        ? (await prisma.supplier.findFirst({ where: { id: rawSupplierId, shop }, select: { id: true } }))?.id ?? null
+        : null;
     const supplierFields = canManageSupplier
       ? {
-          supplierId: rawSupplierId || null,
+          supplierId: verifiedSupplierId,
           unitCost: rawUnitCost !== "" && !isNaN(parseFloat(rawUnitCost)) ? parseFloat(rawUnitCost) : null,
         }
       : {};

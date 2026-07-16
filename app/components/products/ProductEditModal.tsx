@@ -238,9 +238,18 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
       expectedRestockDate: editRestockDate || null,
       manualDailySales: editManualSales.trim() !== "" && !isNaN(parseFloat(editManualSales)) ? parseFloat(editManualSales) : null,
       isTracked: editTracked,
-      supplierId: canManageSupplier && editSupplierId ? editSupplierId : null,
-      supplierName: canManageSupplier && editSupplierId ? (suppliers ?? []).find((s) => s.id === editSupplierId)?.name ?? null : null,
-      unitCost: canManageSupplier && editUnitCost.trim() !== "" && !isNaN(parseFloat(editUnitCost)) ? parseFloat(editUnitCost) : null,
+      // When the plan can't manage suppliers, the server silently leaves
+      // these fields untouched (see app.products.tsx's supplierFields) —
+      // the optimistic patch must match that and echo back the product's
+      // existing values, not null them out, or the UI would show "no
+      // supplier" for a row whose DB value never actually changed.
+      supplierId: canManageSupplier ? (editSupplierId || null) : (product.supplierId ?? null),
+      supplierName: canManageSupplier
+        ? (editSupplierId ? (suppliers ?? []).find((s) => s.id === editSupplierId)?.name ?? null : null)
+        : (product.supplierName ?? null),
+      unitCost: canManageSupplier
+        ? (editUnitCost.trim() !== "" && !isNaN(parseFloat(editUnitCost)) ? parseFloat(editUnitCost) : null)
+        : (product.unitCost ?? null),
     };
 
     if (!editTracked || latestVariants.length === 0) return base;

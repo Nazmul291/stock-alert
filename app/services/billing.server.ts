@@ -1,5 +1,5 @@
 import { authenticate, unauthenticated } from "../shopify.server";
-import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE } from "../lib/billing-plans";
+import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE, planKeyForBillingName, pickHighestPriority, type PlanKey } from "../lib/billing-plans";
 import { redis } from "../lib/redis.server";
 
 type AdminClient = Awaited<ReturnType<typeof authenticate.admin>>["admin"];
@@ -148,7 +148,7 @@ export async function getCachedHasActivePaymentOffline(shop: string, isTest: boo
 // Pro cancels the old Basic subscription, which then reports EXPIRED here
 // after the new one is already ACTIVE) — so this always hits Shopify live
 // rather than trusting the event in isolation.
-export async function getActiveSubscriptionPlan(shop: string): Promise<"basic" | "pro" | "enterprise" | null> {
+export async function getActiveSubscriptionPlan(shop: string): Promise<PlanKey | null> {
   try {
     const { admin } = await unauthenticated.admin(shop);
     const res = await admin.graphql(
@@ -157,10 +157,8 @@ export async function getActiveSubscriptionPlan(shop: string): Promise<"basic" |
     );
     const data = await res.json();
     const subs: { name: string }[] = data.data?.currentAppInstallation?.activeSubscriptions ?? [];
-    if (subs.some((s) => s.name === BILLING_PLAN_ENTERPRISE)) return "enterprise";
-    if (subs.some((s) => s.name === BILLING_PLAN_PRO)) return "pro";
-    if (subs.some((s) => s.name === BILLING_PLAN_BASIC)) return "basic";
-    return null;
+    const match = pickHighestPriority(subs);
+    return match ? planKeyForBillingName(match.name) : null;
   } catch {
     return null;
   }

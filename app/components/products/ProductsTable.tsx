@@ -239,7 +239,9 @@ export function ProductsTable({
               {isExpanded && hasVariants && (
                 <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
                   <td />
-                  <td colSpan={showSupplierColumn ? 8 : 7} style={{ padding: "4px 12px 12px 40px" }}>
+                  {/* Spans every column after the leading checkbox td above:
+                      8 label columns (Product…Action), or 9 with Supplier. */}
+                  <td colSpan={showSupplierColumn ? 9 : 8} style={{ padding: "4px 12px 12px 40px" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {(p.variants ?? []).map((v) => {
                         const vs = STATUS_STYLE[v.inventoryStatus] ?? STATUS_STYLE.not_tracked;

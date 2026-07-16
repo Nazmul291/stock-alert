@@ -1,7 +1,6 @@
 import prisma from "../db.server";
 import { invalidateShopCache } from "./shop-cache.server";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { EMAIL_RE } from "./validation";
 
 export type SupplierInput = {
   name: string;

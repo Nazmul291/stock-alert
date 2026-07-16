@@ -16,6 +16,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = session.shop;
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? null;
+  const canManage = canUseFeature(plan, "purchaseOrders");
+
+  // Gated before the query, not just in the rendered UI — a downgraded
+  // shop's supplier PII (email/phone) must not round-trip in the loader
+  // response even though the page itself only shows the upsell card.
+  if (!canManage) {
+    return { suppliers: [] as SupplierRow[], canManage };
+  }
 
   const [suppliers, productCounts] = await Promise.all([
     prisma.supplier.findMany({ where: { shop }, orderBy: { name: "asc" } }),
@@ -38,7 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     productCount: countBySupplier.get(s.id) ?? 0,
   }));
 
-  return { suppliers: rows, plan, canManage: canUseFeature(plan, "purchaseOrders") };
+  return { suppliers: rows, canManage };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

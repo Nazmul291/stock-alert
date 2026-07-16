@@ -393,6 +393,7 @@ export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, bran
     </tr>`;
 
   const rows = data.lines.map(lineRow).join('');
+  const missingCostCount = data.lines.filter((l) => l.unitCost == null).length;
 
   const body = `
     ${header('📋', `Purchase Order #${data.poNumber}`, `From ${data.storeName}`, brand)}
@@ -407,9 +408,10 @@ export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, bran
           </tr>
           ${rows}
         </table>
-        <p style="margin:0 0 24px;text-align:right;font-size:16px;font-weight:700;color:#111827;">
+        <p style="margin:0 0 4px;text-align:right;font-size:16px;font-weight:700;color:#111827;">
           Total: ${data.totalCost != null ? `$${data.totalCost.toFixed(2)}` : '—'}
         </p>
+        ${missingCostCount > 0 ? `<p style="margin:0 0 24px;text-align:right;font-size:12px;color:#92400e;">Excludes ${missingCostCount} item${missingCostCount !== 1 ? 's' : ''} with no unit cost set — this total is incomplete.</p>` : '<div style="margin-bottom:24px;"></div>'}
       </td>
     </tr>`;
 

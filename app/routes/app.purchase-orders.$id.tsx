@@ -6,7 +6,7 @@ import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { canUseFeature } from "../lib/plan-limits";
 import { sendPurchaseOrderEmail } from "../lib/notifications";
-import { receivePurchaseOrderItems } from "../lib/purchase-order.server";
+import { receivePurchaseOrderItems, sanitizeQuantity, sanitizeUnitCost } from "../lib/purchase-order.server";
 import { PurchaseOrderDetail, type PurchaseOrderDetailData } from "../components/purchase-orders/PurchaseOrderDetail";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -71,21 +71,26 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (po.status !== "draft") {
       return { success: false as const, error: "Only a draft purchase order can be edited." };
     }
-    const updates = JSON.parse((form.get("lineItems") as string) ?? "[]") as { id: string; quantityOrdered: number; unitCost: number | null }[];
+    try {
+      const updates = JSON.parse((form.get("lineItems") as string) ?? "[]") as { id: string; quantityOrdered: number; unitCost: number | null }[];
 
-    await prisma.$transaction(
-      updates.map((u) =>
-        prisma.purchaseOrderLineItem.updateMany({
-          where: { id: u.id, purchaseOrderId: id },
-          data: { quantityOrdered: Math.max(0, u.quantityOrdered), unitCost: u.unitCost },
-        }),
-      ),
-    );
-    const refreshed = await prisma.purchaseOrderLineItem.findMany({ where: { purchaseOrderId: id } });
-    const totalCost = refreshed.reduce((sum, li) => sum + li.quantityOrdered * (li.unitCost ?? 0), 0);
-    await prisma.purchaseOrder.update({ where: { id }, data: { totalCost } });
-    invalidateShopCache(shop);
-    return { success: true as const, intent };
+      await prisma.$transaction(
+        updates.map((u) =>
+          prisma.purchaseOrderLineItem.updateMany({
+            where: { id: u.id, purchaseOrderId: id },
+            data: { quantityOrdered: sanitizeQuantity(u.quantityOrdered), unitCost: sanitizeUnitCost(u.unitCost) },
+          }),
+        ),
+      );
+      const refreshed = await prisma.purchaseOrderLineItem.findMany({ where: { purchaseOrderId: id } });
+      const totalCost = refreshed.reduce((sum, li) => sum + li.quantityOrdered * (li.unitCost ?? 0), 0);
+      await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { totalCost } });
+      invalidateShopCache(shop);
+      return { success: true as const, intent };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update line items.";
+      return { success: false as const, error: message };
+    }
   }
 
   if (intent === "mark_ordered") {
@@ -95,7 +100,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (po.lineItems.length === 0) {
       return { success: false as const, error: "Add at least one line item first." };
     }
-    await prisma.purchaseOrder.update({ where: { id }, data: { status: "ordered", orderedAt: new Date() } });
+    await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { status: "ordered", orderedAt: new Date() } });
     invalidateShopCache(shop);
     return { success: true as const, intent };
   }
@@ -110,7 +115,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     sendPurchaseOrderEmail(shop, id)
       .then(async (result) => {
         if (result.success) {
-          await prisma.purchaseOrder.update({ where: { id }, data: { sentToSupplierAt: new Date() } });
+          await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { sentToSupplierAt: new Date() } });
           invalidateShopCache(shop);
         } else {
           console.error(`[PO] Email failed for PO ${id}:`, result.error);
@@ -124,8 +129,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (po.status !== "ordered" && po.status !== "partially_received") {
       return { success: false as const, error: "This purchase order is not awaiting receipt." };
     }
-    const receipts = JSON.parse((form.get("receipts") as string) ?? "[]") as { lineItemId: string; quantityReceived: number }[];
     try {
+      const receipts = JSON.parse((form.get("receipts") as string) ?? "[]") as { lineItemId: string; quantityReceived: number }[];
       await receivePurchaseOrderItems(shop, id, receipts, admin);
       invalidateShopCache(shop);
       return { success: true as const, intent };
@@ -139,7 +144,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (po.status === "received") {
       return { success: false as const, error: "Cannot cancel a fully received purchase order." };
     }
-    await prisma.purchaseOrder.update({ where: { id }, data: { status: "cancelled" } });
+    await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { status: "cancelled" } });
     invalidateShopCache(shop);
     return { success: true as const, intent };
   }

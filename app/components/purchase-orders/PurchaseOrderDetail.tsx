@@ -59,6 +59,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
 
   const s = STATUS_STYLE[po.status];
   const busy = editFetcher.state !== "idle" || actionFetcher.state !== "idle";
+  const missingCostCount = po.lineItems.filter((li) => li.unitCost == null).length;
 
   return (
     <div>
@@ -131,9 +132,15 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
         </table>
       </div>
 
-      <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 20 }}>
+      <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
         Total: {po.totalCost != null ? `$${po.totalCost.toFixed(2)}` : "—"}
       </p>
+      {missingCostCount > 0 && (
+        <p style={{ fontSize: 12, color: "#92400e", marginBottom: 20 }}>
+          Excludes {missingCostCount} item{missingCostCount !== 1 ? "s" : ""} with no unit cost set — the total above is incomplete.
+        </p>
+      )}
+      {missingCostCount === 0 && <div style={{ marginBottom: 20 }} />}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {isDraft && (

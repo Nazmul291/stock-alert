@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getMaxProducts } from "./plan-limits";
+import { getMaxProducts, canUseFeature } from "./plan-limits";
 import { syncState } from "./sync-state.server";
 import { classifyProductStatus, countDistinctProducts, paginatedProductIdsByStatus } from "./inventory-rollup.server";
 import type { RollupStatus } from "./inventory-rollup.server";
@@ -134,14 +134,21 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
 }): Promise<ProductsData> {
   const pageSize = 50;
 
-  const [storeSession, settings, shopSyncState, supplierRows] = await Promise.all([
-    prisma.session.findFirst({ where: { shop, isOnline: false } }),
+  // storeSession fetched first so the supplier query below can be skipped
+  // entirely for plans that can never use it, instead of unconditionally
+  // querying suppliers on every products-page load regardless of plan.
+  const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
+  const plan = storeSession?.plan ?? "basic";
+  const canManageSupplier = canUseFeature(plan, "purchaseOrders");
+
+  const [settings, shopSyncState, supplierRows] = await Promise.all([
     prisma.storeSettings.findUnique({ where: { shop } }),
     syncState.get(shop),
-    prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    canManageSupplier
+      ? prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+      : Promise.resolve([]),
   ]);
 
-  const plan = storeSession?.plan ?? "basic";
   const maxProducts = getMaxProducts(plan);
   const threshold = settings?.lowStockThreshold ?? 5;
   const suppliersById = new Map(supplierRows.map((s) => [s.id, s.name]));

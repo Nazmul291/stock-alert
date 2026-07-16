@@ -1,6 +1,7 @@
 import { Prisma, type PurchaseOrderStatus } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
+import { setInventoryQuantities } from "./shopify-inventory.server";
 
 export type PreviewLine = {
   productId: string;
@@ -30,6 +31,25 @@ export function suggestReorderQuantity(currentQuantity: number, avgDailySales: n
   if (!avgDailySales || avgDailySales <= 0) return 0;
   const target = Math.ceil(leadTimeDays * avgDailySales);
   return Math.max(1, target - currentQuantity);
+}
+
+// Floors a client-submitted quantity to a safe non-negative integer.
+// PurchaseOrderLineItem.quantityOrdered is an Int column — a fractional
+// value (e.g. 2.7, from a hand-crafted request bypassing the UI's number
+// input) would otherwise reach Prisma and throw a raw validation error
+// mid-transaction instead of degrading to a clean, predictable quantity.
+export function sanitizeQuantity(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+// Rejects a client-submitted unit cost that isn't a finite, non-negative
+// number, falling back to null (the caller then falls back further to the
+// product's own catalog cost) rather than persisting a negative/NaN cost
+// that would silently corrupt totalCost and get emailed to the supplier.
+export function sanitizeUnitCost(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value) || value < 0) return null;
+  return value;
 }
 
 // Groups a shop's at-risk InventoryTracking rows by their assigned supplier,
@@ -171,9 +191,23 @@ export async function createPurchaseOrder(
   supplierId: string,
   lines: CreatePurchaseOrderLine[],
 ): Promise<{ purchaseOrderId: string }> {
-  const positiveLines = lines.filter((l) => l.quantityOrdered > 0);
+  const sanitizedLines = lines.map((l) => ({
+    ...l,
+    quantityOrdered: sanitizeQuantity(l.quantityOrdered),
+    unitCost: sanitizeUnitCost(l.unitCost),
+  }));
+  const positiveLines = sanitizedLines.filter((l) => l.quantityOrdered > 0);
   if (positiveLines.length === 0) {
     throw new Error("Add at least one product with a quantity greater than zero.");
+  }
+
+  // Unlike the old forecast-only generatePurchaseOrder (which only ever saw
+  // supplier IDs that previewPurchaseOrders itself had already scoped to
+  // `shop`), supplierId here comes straight from the client — verify it's
+  // actually this shop's supplier before attaching it to a new PO.
+  const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, shop } });
+  if (!supplier) {
+    throw new Error("Supplier not found.");
   }
 
   const variantIds = positiveLines.map((l) => BigInt(l.variantId));
@@ -238,10 +272,10 @@ const VARIANT_INVENTORY_QUERY = `
     productVariant(id: $id) {
       inventoryItem {
         id
-        inventoryLevels(first: 1) {
+        inventoryLevels(first: 50) {
           edges {
             node {
-              location { id }
+              location { id name }
               quantities(names: ["available"]) { quantity }
             }
           }
@@ -251,36 +285,32 @@ const VARIANT_INVENTORY_QUERY = `
   }
 `;
 
-const INVENTORY_SET_MUTATION = `
-  mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
-    inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
-      userErrors { field message }
-    }
-  }
-`;
-
 type VariantInventoryResponse = {
   data?: {
     productVariant?: {
       inventoryItem?: {
         id: string;
-        inventoryLevels: { edges: Array<{ node: { location: { id: string }; quantities: Array<{ quantity: number }> } }> };
+        inventoryLevels: { edges: Array<{ node: { location: { id: string; name: string }; quantities: Array<{ quantity: number }> } }> };
       } | null;
     } | null;
   };
+  extensions?: { cost?: { throttleStatus?: { currentlyAvailable: number; restoreRate: number } } };
   errors?: Array<{ message: string }>;
 };
 
 // Receives quantities against an ordered/partially_received PO. Pushes the
-// new absolute quantity to Shopify's primary location for each variant
-// *before* touching the DB — if that call fails, nothing is recorded as
-// received. Deliberately does not write InventoryTracking.currentQuantity
-// directly: app.products.tsx documents that the inventory webhook is the
-// sole source of truth for quantity/status, so this goes through Shopify
-// the same way every other quantity change does, and lets
-// webhooks.inventory.tsx pick up the resulting inventory_levels/update event.
-// v1 scope: assumes single-location inventory (receives at whichever
-// location Shopify returns first for the variant).
+// new absolute quantity to Shopify's location for each variant *before*
+// touching the DB — if that call fails, nothing is recorded as received.
+// Deliberately does not write InventoryTracking.currentQuantity directly:
+// app.products.tsx documents that the inventory webhook is the sole source
+// of truth for quantity/status, so this goes through Shopify the same way
+// every other quantity change does, and lets webhooks.inventory.tsx pick up
+// the resulting inventory_levels/update event.
+// v1 scope: only single-location variants can be received here — a variant
+// stocked at more than one location has no way to know which location the
+// shipment actually arrived at, so this throws rather than silently
+// guessing (previously picked "whichever location Shopify returns first",
+// which could credit the wrong warehouse on a multi-location shop).
 export async function receivePurchaseOrderItems(
   shop: string,
   purchaseOrderId: string,
@@ -311,8 +341,10 @@ export async function receivePurchaseOrderItems(
     throw new Error("No valid quantities to receive.");
   }
 
-  // Resolve each variant's inventoryItem + primary location + current
-  // available quantity, then push the new absolute quantity to Shopify.
+  // Resolve each variant's inventoryItem + location + current available
+  // quantity, then push the new absolute quantity to Shopify. Sequential
+  // (not parallel) so the throttle check below can back off between calls —
+  // same pattern as velocity.server.ts's calcSalesVelocity.
   const quantities: Array<{ inventoryItemId: string; locationId: string; quantity: number; changeFromQuantity: null }> = [];
   for (const { line, quantityReceived } of validReceipts) {
     const res = await admin.graphql(VARIANT_INVENTORY_QUERY, {
@@ -321,11 +353,23 @@ export async function receivePurchaseOrderItems(
     const json: VariantInventoryResponse = await res.json();
     if (json.errors?.length) throw new Error(`Failed to look up inventory for ${line.productTitle ?? line.sku}: ${json.errors.map((e) => e.message).join("; ")}`);
 
+    const throttle = json.extensions?.cost?.throttleStatus;
+    if (throttle && throttle.currentlyAvailable < throttle.restoreRate * 1.5) {
+      const needed = throttle.restoreRate * 1.5 - throttle.currentlyAvailable;
+      await new Promise((r) => setTimeout(r, Math.ceil((needed / throttle.restoreRate) * 1000)));
+    }
+
     const inventoryItem = json.data?.productVariant?.inventoryItem;
-    const level = inventoryItem?.inventoryLevels.edges[0]?.node;
-    if (!inventoryItem || !level) {
+    const levels = inventoryItem?.inventoryLevels.edges ?? [];
+    if (!inventoryItem || levels.length === 0) {
       throw new Error(`Could not find inventory location for ${line.productTitle ?? line.sku}.`);
     }
+    if (levels.length > 1) {
+      throw new Error(
+        `${line.productTitle ?? line.sku} is stocked at ${levels.length} locations — receiving isn't supported for multi-location products yet. Adjust its inventory directly in Shopify instead.`,
+      );
+    }
+    const level = levels[0].node;
     const currentAvailable = level.quantities[0]?.quantity ?? 0;
     quantities.push({
       inventoryItemId: inventoryItem.id,
@@ -335,15 +379,8 @@ export async function receivePurchaseOrderItems(
     });
   }
 
-  const invRes = await admin.graphql(INVENTORY_SET_MUTATION, {
-    variables: {
-      idempotencyKey: crypto.randomUUID(),
-      input: { name: "available", reason: "received", quantities },
-    },
-  });
-  const invJson: { data?: { inventorySetQuantities?: { userErrors: Array<{ message: string }> } } } = await invRes.json();
-  const invErrs = invJson.data?.inventorySetQuantities?.userErrors ?? [];
-  if (invErrs.length > 0) throw new Error(invErrs.map((e) => e.message).join(", "));
+  const { userErrors: invErrs } = await setInventoryQuantities(admin, quantities, "received");
+  if (invErrs.length > 0) throw new Error(invErrs.join(", "));
 
   const status = await prisma.$transaction(async (tx) => {
     for (const { line, quantityReceived } of validReceipts) {

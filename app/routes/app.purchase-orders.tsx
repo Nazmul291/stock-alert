@@ -96,10 +96,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "create_po") {
     const supplierId = form.get("supplierId") as string;
-    const lines = JSON.parse((form.get("lines") as string) ?? "[]") as { variantId: string; quantityOrdered: number; unitCost?: number | null }[];
     if (!supplierId) return { success: false as const, error: "Select a supplier first." };
 
     try {
+      const lines = JSON.parse((form.get("lines") as string) ?? "[]") as { variantId: string; quantityOrdered: number; unitCost?: number | null }[];
       const { purchaseOrderId } = await createPurchaseOrder(shop, supplierId, lines);
       invalidateShopCache(shop);
       return { success: true as const, intent, purchaseOrderId };
@@ -115,7 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const po = await prisma.purchaseOrder.findFirst({ where: { id, shop } });
     if (!po) return { success: false as const, error: "Purchase order not found." };
     if (po.status === "received") return { success: false as const, error: "Cannot cancel a fully received purchase order." };
-    await prisma.purchaseOrder.update({ where: { id }, data: { status: "cancelled" } });
+    await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { status: "cancelled" } });
     invalidateShopCache(shop);
     return { success: true as const, intent };
   }
