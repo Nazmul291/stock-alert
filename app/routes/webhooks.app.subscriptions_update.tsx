@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { BILLING_PLAN_PRO, BILLING_PLAN_BASIC } from "../shopify.server";
+import { BILLING_PLAN_PRO, BILLING_PLAN_BASIC, BILLING_PLAN_ENTERPRISE } from "../shopify.server";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { invalidateShopCache } from "../lib/shop-cache.server";
 import { getActiveSubscriptionPlan, invalidateBillingCache } from "../services/billing.server";
@@ -16,10 +16,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const status: string = sub.status ?? "";
   const name: string = sub.name ?? "";
 
-  let plan: "basic" | "pro" | null = null;
+  let plan: "basic" | "pro" | "enterprise" | null = null;
 
   if (status === "ACTIVE") {
-    plan = name === BILLING_PLAN_PRO ? "pro" : name === BILLING_PLAN_BASIC ? "basic" : null;
+    plan =
+      name === BILLING_PLAN_ENTERPRISE ? "enterprise" : name === BILLING_PLAN_PRO ? "pro" : name === BILLING_PLAN_BASIC ? "basic" : null;
   }
 
   if (plan) {

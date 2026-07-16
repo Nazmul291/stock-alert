@@ -599,6 +599,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // metafield) since this same submission is about to write it below.
     const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
     const plan = storeSession?.plan ?? "basic";
+
+    // Supplier/unit cost are an Enterprise feature — silently leave any
+    // existing value untouched (rather than erroring the whole save, or
+    // clearing it) when the plan doesn't have access, since a stale form
+    // submission from a since-downgraded plan must still degrade gracefully
+    // (the modal itself hides these fields when gated).
+    const canManageSupplier = canUseFeature(plan, "purchaseOrders");
+    const rawSupplierId = ((form.get("supplierId") as string) ?? "").trim();
+    const rawUnitCost = ((form.get("unitCost") as string) ?? "").trim();
+    const supplierFields = canManageSupplier
+      ? {
+          supplierId: rawSupplierId || null,
+          unitCost: rawUnitCost !== "" && !isNaN(parseFloat(rawUnitCost)) ? parseFloat(rawUnitCost) : null,
+        }
+      : {};
+
     const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
     const parsedCustomThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
     const effectiveThreshold =
@@ -691,6 +707,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               expectedRestockDate,
               ...statusPatch,
               ...(stockOutDays !== undefined ? { stockOutDays } : {}),
+              ...supplierFields,
             },
           });
         } else {
@@ -714,6 +731,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               monitoringEnabled,
               manualDailySales,
               expectedRestockDate,
+              ...supplierFields,
             },
           });
         }
@@ -924,6 +942,7 @@ function ProductsPageContent() {
   const lastSyncCount = useProductsStore((s) => s.data?.lastSyncCount) ?? null;
   const autoHideEnabled = useProductsStore((s) => s.data?.autoHideEnabled) ?? false;
   const autoRepublishEnabled = useProductsStore((s) => s.data?.autoRepublishEnabled) ?? false;
+  const suppliers = useProductsStore((s) => s.data?.suppliers) ?? [];
   const filter = useProductsStore((s) => s.filter);
   const applyOptimisticPatch = useProductsStore((s) => s.applyOptimisticPatch);
 
@@ -1097,6 +1116,7 @@ function ProductsPageContent() {
           threshold={threshold}
           autoHideEnabled={autoHideEnabled}
           autoRepublishEnabled={autoRepublishEnabled}
+          suppliers={suppliers}
           onClose={() => setEditProduct(null)}
           onSaved={(patch) => applyOptimisticPatch(editProduct.productId, patch)}
           onSaveError={(message) => setSaveErrorAfterClose(message)}

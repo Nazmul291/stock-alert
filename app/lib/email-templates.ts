@@ -363,3 +363,58 @@ export function getDigestEmailTemplate(data: DigestEmailData, brand: BrandConfig
     html: shell(`${totalAtRisk} products need attention — ${storeName}`, body, brand),
   };
 }
+
+export interface PurchaseOrderEmailLine {
+  productTitle: string | null;
+  variantTitle: string | null;
+  sku: string | null;
+  quantityOrdered: number;
+  unitCost: number | null;
+}
+
+export interface PurchaseOrderEmailData {
+  poNumber: number;
+  supplierName: string;
+  storeName: string;
+  lines: PurchaseOrderEmailLine[];
+  totalCost: number | null;
+}
+
+export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, brand: BrandConfig = {}): { subject: string; html: string } {
+  const lineRow = (l: PurchaseOrderEmailLine) => `
+    <tr>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
+        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(l.productTitle ?? 'Unknown')}${l.variantTitle ? ` — ${esc(l.variantTitle)}` : ''}</div>
+        ${l.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(l.sku)}</div>` : ''}
+      </td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;color:#111827;">${l.quantityOrdered}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;color:#111827;">${l.unitCost != null ? `$${l.unitCost.toFixed(2)}` : '—'}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;font-weight:600;color:#111827;">${l.unitCost != null ? `$${(l.unitCost * l.quantityOrdered).toFixed(2)}` : '—'}</td>
+    </tr>`;
+
+  const rows = data.lines.map(lineRow).join('');
+
+  const body = `
+    ${header('📋', `Purchase Order #${data.poNumber}`, `From ${data.storeName}`, brand)}
+    <tr>
+      <td style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:20px;">
+          <tr style="background:#f9fafb;">
+            <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Product</th>
+            <th style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Qty</th>
+            <th style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Unit Cost</th>
+            <th style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Line Total</th>
+          </tr>
+          ${rows}
+        </table>
+        <p style="margin:0 0 24px;text-align:right;font-size:16px;font-weight:700;color:#111827;">
+          Total: ${data.totalCost != null ? `$${data.totalCost.toFixed(2)}` : '—'}
+        </p>
+      </td>
+    </tr>`;
+
+  return {
+    subject: `Purchase Order #${data.poNumber} from ${data.storeName}`,
+    html: shell(`Purchase Order #${data.poNumber} from ${data.storeName}`, body, brand),
+  };
+}

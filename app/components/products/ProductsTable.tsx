@@ -4,6 +4,7 @@ import { StockOutBadge } from "./StockOutBadge";
 import { SalesVelocityBadge } from "./SalesVelocityBadge";
 import { ReorderBadge } from "./ReorderBadge";
 import { useProductsStore } from "../../stores/products-store";
+import { canUseFeature } from "../../lib/plan-limits";
 
 export const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   in_stock: { bg: "#d1fae5", color: "#065f46", label: "In Stock" },
@@ -64,6 +65,8 @@ export function ProductsTable({
   const products = useProductsStore((s) => s.data?.products) ?? [];
   const filter = useProductsStore((s) => s.filter);
   const supplierLeadTimeDays = useProductsStore((s) => s.data?.supplierLeadTimeDays) ?? 7;
+  const plan = useProductsStore((s) => s.data?.plan) ?? "basic";
+  const showSupplierColumn = canUseFeature(plan, "purchaseOrders");
 
   if (!loading && products.length === 0) {
     return (
@@ -102,6 +105,7 @@ export function ProductsTable({
               { label: "Sales Velocity" },
               { label: "Days Left" },
               { label: "Reorder By" },
+              ...(showSupplierColumn ? [{ label: "Supplier" }] : []),
               { label: "Monitor Alert" },
               { label: "Action" },
             ].map(({ label, width }) => (
@@ -197,6 +201,11 @@ export function ProductsTable({
                     <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
                   </span>
                 </td>
+                {showSupplierColumn && (
+                  <td style={{ padding: "10px 12px", color: p.supplierName ? "#374151" : "#9ca3af" }}>
+                    <span className={loading ? "skeleton-text" : undefined}>{p.supplierName ?? "—"}</span>
+                  </td>
+                )}
                 <td style={{ padding: "10px 12px" }}>
                   <span className={loading ? "skeleton-text" : undefined} style={{
                     background: p.monitoringEnabled ? "#d1fae5" : p.inventoryStatus === "requires_upgrade" ? "#e0e7ff" : "#f3f4f6",
@@ -230,7 +239,7 @@ export function ProductsTable({
               {isExpanded && hasVariants && (
                 <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
                   <td />
-                  <td colSpan={7} style={{ padding: "4px 12px 12px 40px" }}>
+                  <td colSpan={showSupplierColumn ? 8 : 7} style={{ padding: "4px 12px 12px 40px" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {(p.variants ?? []).map((v) => {
                         const vs = STATUS_STYLE[v.inventoryStatus] ?? STATUS_STYLE.not_tracked;

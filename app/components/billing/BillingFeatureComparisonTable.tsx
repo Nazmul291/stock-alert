@@ -2,9 +2,11 @@ import { PLAN_LIMITS, formatMaxProducts } from "../../lib/plan-limits";
 
 // Restriction-backed rows are generated from PLAN_LIMITS itself (single
 // source of truth shared with every server-side canUseFeature() gate) so
-// this table can't drift from what's actually enforced for Basic/Pro. The
-// 4 Enterprise-exclusive rows are flagged separately below — nothing calls
-// canUseFeature() for those yet, since the features themselves don't exist.
+// this table can't drift from what's actually enforced for Basic/Pro.
+// coreLimitedEditionSections/deadStockAlerts are still flagged comingSoon —
+// those two Enterprise-exclusive capabilities aren't built yet. Suppliers +
+// purchase orders (purchaseOrders) is built and enforced via canUseFeature()
+// in app.suppliers.tsx / app.purchase-orders*.tsx.
 const RESTRICTION_ROWS: { key: keyof typeof PLAN_LIMITS.basic.restrictions; label: string; comingSoon?: boolean }[] = [
   { key: "slackNotifications", label: "One-click Slack Connect" },
   { key: "asanaTaskCreation", label: "Asana task creation" },
@@ -17,8 +19,8 @@ const RESTRICTION_ROWS: { key: keyof typeof PLAN_LIMITS.basic.restrictions; labe
   { key: "prioritySupport", label: "Priority support" },
   { key: "coreLimitedEditionSections", label: "Core vs. Limited-Edition report sections", comingSoon: true },
   { key: "deadStockAlerts", label: "Dead stock alerts", comingSoon: true },
-  { key: "vendorGrouping", label: "Vendor grouping for purchase orders", comingSoon: true },
-  { key: "vendorLeadTimeReorderPoints", label: "Reorder points by vendor lead time", comingSoon: true },
+  { key: "purchaseOrders", label: "Suppliers & purchase order generation" },
+  { key: "vendorLeadTimeReorderPoints", label: "Reorder points by vendor lead time" },
 ];
 
 // Full side-by-side breakdown shown below the plan cards — includes rows
@@ -62,7 +64,7 @@ export function BillingFeatureComparisonTable() {
             <th style={{ textAlign: "center", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", color: "#374151", fontWeight: 700 }}>Basic</th>
             <th style={{ textAlign: "center", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", color: "#059669", fontWeight: 700 }}>Professional</th>
             <th style={{ textAlign: "center", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", color: "#4338ca", fontWeight: 700 }}>
-              Enterprise <span style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af" }}>(Coming Soon)</span>
+              Enterprise
             </th>
           </tr>
         </thead>

@@ -29,6 +29,7 @@ export const PLAN_LIMITS = {
       deadStockAlerts: false,
       vendorGrouping: false,
       vendorLeadTimeReorderPoints: false,
+      purchaseOrders: false,
     },
   },
   basic: {
@@ -62,6 +63,7 @@ export const PLAN_LIMITS = {
       deadStockAlerts: false,
       vendorGrouping: false,
       vendorLeadTimeReorderPoints: false,
+      purchaseOrders: false,
     },
   },
   pro: {
@@ -95,23 +97,24 @@ export const PLAN_LIMITS = {
       deadStockAlerts: false,
       vendorGrouping: false,
       vendorLeadTimeReorderPoints: false,
+      purchaseOrders: false,
     },
   },
-  // Preview tier — not purchasable yet (see status/comment above and
-  // app.billing._index.tsx, which has no billing.request() plan wired up for
-  // it). Its restrictions are accurate relative to Basic/Pro for comparison
-  // purposes, but none of the 4 Enterprise-exclusive capabilities below are
-  // actually built yet — nothing in the app calls canUseFeature() for them.
+  // Purchasable tier — billing.request()/billing.check() wired in
+  // app.billing._index.tsx / app.billing.confirm.tsx, and the Shopify billing
+  // config lives in app/shopify.server.ts. Suppliers + Purchase Orders (the
+  // purchaseOrders restriction below) is the flagship Enterprise-exclusive
+  // feature: see app/lib/purchase-order.server.ts and app/routes/app.suppliers.tsx.
   enterprise: {
     name: 'Enterprise',
     price: '$19.99',
     maxProducts: Infinity,
-    status: 'coming_soon' as PlanStatus,
+    status: 'active' as PlanStatus,
     features: [
       'Everything in Professional, plus:',
       'Core vs. Limited-Edition report sections',
       'Dead stock alerts',
-      'Vendor grouping for purchase orders',
+      'Suppliers & purchase order generation',
       'Reorder points by vendor lead time',
     ],
     restrictions: {
@@ -129,6 +132,7 @@ export const PLAN_LIMITS = {
       deadStockAlerts: true,
       vendorGrouping: true,
       vendorLeadTimeReorderPoints: true,
+      purchaseOrders: true,
     },
   },
 } as const;

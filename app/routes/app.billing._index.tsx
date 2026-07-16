@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useActionData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
+import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE } from "../shopify.server";
 import { getIsTestStore } from "../services/billing.server";
 import { getCachedSession } from "../lib/shop-cache.server";
 import { BillingPlanCards } from "../components/billing/BillingPlanCards";
@@ -12,7 +12,7 @@ import { BillingFeatureComparisonTable } from "../components/billing/BillingFeat
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const dbSession = await getCachedSession(session.shop);
-  return { activePlan: (dbSession?.plan ?? null) as "basic" | "pro" | null };
+  return { activePlan: (dbSession?.plan ?? null) as "basic" | "pro" | "enterprise" | null };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -23,11 +23,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const storeSlug = session.shop.replace(".myshopify.com", "");
   const returnUrl = `https://admin.shopify.com/store/${storeSlug}/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`;
 
-  if (targetPlan !== "basic" && targetPlan !== "pro") {
+  if (targetPlan !== "basic" && targetPlan !== "pro" && targetPlan !== "enterprise") {
     return { error: "Invalid plan selected." };
   }
 
-  const plan = targetPlan === "pro" ? BILLING_PLAN_PRO : BILLING_PLAN_BASIC;
+  const plan =
+    targetPlan === "enterprise" ? BILLING_PLAN_ENTERPRISE : targetPlan === "pro" ? BILLING_PLAN_PRO : BILLING_PLAN_BASIC;
 
   // Any existing subscription is cancelled in app.billing.confirm.tsx, only
   // after the merchant actually approves this new one — not here. Cancelling

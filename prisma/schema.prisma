@@ -35,6 +35,8 @@ model Session {
   alertHistory           AlertHistory[]
   setupProgress          SetupProgress?
   backInStockSubscribers BackInStockSubscriber[]
+  suppliers              Supplier[]
+  purchaseOrders         PurchaseOrder[]
 
   @@index([plan])
 }
@@ -153,10 +155,13 @@ model InventoryTracking {
   stockOutDays         Int?      @map("stock_out_days")
   manualDailySales     Float?    @map("manual_daily_sales")
   expectedRestockDate  DateTime? @map("expected_restock_date") @db.Timestamptz
+  supplierId           String?   @map("supplier_id") @db.Uuid
+  unitCost             Float?    @map("unit_cost")
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
-  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  session  Session   @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   @@unique([shop, variantId])
   @@index([shop])
@@ -166,6 +171,7 @@ model InventoryTracking {
   @@index([lastCheckedAt])
   @@index([shop, lastAlertSentAt])
   @@index([shop, inventoryStatus])
+  @@index([shop, supplierId])
   @@map("inventory_tracking")
 }
 
@@ -190,6 +196,78 @@ model AlertHistory {
   @@index([sentAt(sort: Desc)])
   @@index([shop, sentAt(sort: Desc)])
   @@map("alert_history")
+}
+
+enum PurchaseOrderStatus {
+  draft
+  ordered
+  partially_received
+  received
+  cancelled
+}
+
+model Supplier {
+  id           String   @id @default(uuid()) @db.Uuid
+  shop         String
+  name         String   @db.VarChar(255)
+  email        String?  @db.VarChar(255)
+  phone        String?  @db.VarChar(30)
+  leadTimeDays Int?     @map("lead_time_days")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  session           Session             @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  inventoryTracking InventoryTracking[]
+  purchaseOrders    PurchaseOrder[]
+
+  @@index([shop])
+  @@map("suppliers")
+}
+
+model PurchaseOrder {
+  id                    String              @id @default(uuid()) @db.Uuid
+  shop                  String
+  supplierId            String              @map("supplier_id") @db.Uuid
+  poNumber              Int                 @map("po_number")
+  status                PurchaseOrderStatus @default(draft)
+  totalCost             Float?              @map("total_cost")
+  generatedFromForecast Boolean             @default(true) @map("generated_from_forecast")
+  sentToSupplierAt      DateTime?           @map("sent_to_supplier_at") @db.Timestamptz
+  orderedAt             DateTime?           @map("ordered_at") @db.Timestamptz
+  receivedAt            DateTime?           @map("received_at") @db.Timestamptz
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  session   Session                 @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  supplier  Supplier                @relation(fields: [supplierId], references: [id])
+  lineItems PurchaseOrderLineItem[]
+
+  @@unique([shop, poNumber])
+  @@index([shop])
+  @@index([shop, status])
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLineItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  purchaseOrderId  String   @map("purchase_order_id") @db.Uuid
+  productId        BigInt   @map("product_id")
+  variantId        BigInt   @map("variant_id")
+  productTitle     String?  @map("product_title") @db.VarChar(500)
+  variantTitle     String?  @map("variant_title") @db.VarChar(500)
+  sku              String?  @db.VarChar(255)
+  quantityOrdered  Int      @map("quantity_ordered")
+  quantityReceived Int      @default(0) @map("quantity_received")
+  unitCost         Float?   @map("unit_cost")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseOrderId, variantId])
+  @@index([purchaseOrderId])
+  @@map("purchase_order_line_items")
 }
 
 model SetupProgress {

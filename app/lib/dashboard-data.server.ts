@@ -2,6 +2,8 @@ import prisma from "../db.server";
 import { syncState } from "./sync-state.server";
 import { getCachedSettings, getCachedSession } from "./shop-cache.server";
 import { rollupStatusCounts, atRiskRepresentativeRows, countDistinctProducts } from "./inventory-rollup.server";
+import { canUseFeature } from "./plan-limits";
+import { previewPurchaseOrders } from "./purchase-order.server";
 
 export type DashboardData = {
   plan: string;
@@ -31,6 +33,7 @@ export type DashboardData = {
   spark7: number[];
   stockOutSoonCount: number;
   atRiskProducts: { productId: string; productTitle: string | null; sku: string | null; currentQuantity: number; inventoryStatus: string }[];
+  readyForReorderCount: number;
 };
 
 export async function loadDashboardData(shop: string): Promise<DashboardData> {
@@ -41,7 +44,7 @@ export async function loadDashboardData(shop: string): Promise<DashboardData> {
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
   sevenDaysAgo.setUTCHours(0, 0, 0, 0);
 
-  const [statusCounts, hiddenCount, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows, atRiskRaw, stockOutSoonCount] = await Promise.all([
+  const [statusCounts, hiddenCount, settings, setupProgress, recentAlerts, storeSession, alertsToday, shopSyncState, sparkRows, atRiskRaw, stockOutSoonCount, poPreview] = await Promise.all([
     rollupStatusCounts(shop),
     countDistinctProducts({ shop, isHidden: true }),
     getCachedSettings(shop),
@@ -59,7 +62,13 @@ export async function loadDashboardData(shop: string): Promise<DashboardData> {
     `,
     atRiskRepresentativeRows(shop, 8),
     countDistinctProducts({ shop, stockOutDays: { not: null, lt: 7 }, inventoryStatus: { not: "out_of_stock" } }),
+    previewPurchaseOrders(shop),
   ]);
+
+  const plan = storeSession?.plan ?? "basic";
+  const readyForReorderCount = canUseFeature(plan, "purchaseOrders")
+    ? poPreview.reduce((sum, s) => sum + s.lines.length, 0)
+    : 0;
 
   const stats = {
     totalProducts: (statusCounts.get("in_stock") ?? 0) + (statusCounts.get("low_stock") ?? 0) + (statusCounts.get("out_of_stock") ?? 0),
@@ -90,7 +99,7 @@ export async function loadDashboardData(shop: string): Promise<DashboardData> {
   });
 
   return {
-    plan: storeSession?.plan ?? "basic",
+    plan,
     stats,
     setupProgress: {
       appInstalled: setupProgress?.appInstalled ?? true,
@@ -120,5 +129,6 @@ export async function loadDashboardData(shop: string): Promise<DashboardData> {
       currentQuantity: p.currentQuantity,
       inventoryStatus: p.inventoryStatus as string,
     })),
+    readyForReorderCount,
   };
 }

@@ -13,6 +13,8 @@ import { SSEErrorRetry } from "../components/Skeleton";
 import { SetupChecklist } from "../components/dashboard/SetupChecklist";
 import { InventoryOverviewSection } from "../components/dashboard/InventoryOverviewSection";
 import { StockOutSoonBanner } from "../components/dashboard/StockOutSoonBanner";
+import { ReadyForReorderBanner } from "../components/dashboard/ReadyForReorderBanner";
+import { canUseFeature, getPlanLimits } from "../lib/plan-limits";
 import { ProductsAtRiskSection } from "../components/dashboard/ProductsAtRiskSection";
 import { RecentAlertsSection } from "../components/dashboard/RecentAlertsSection";
 import { DashboardSyncButton } from "../components/dashboard/DashboardSyncButton";
@@ -110,6 +112,9 @@ function DashboardContent() {
   const notificationEmail = data?.notificationEmail ?? null;
   const atRiskProducts = data?.atRiskProducts ?? [];
   const stockOutSoonCount = data?.stockOutSoonCount ?? 0;
+  const readyForReorderCount = data?.readyForReorderCount ?? 0;
+  const canManagePurchaseOrders = canUseFeature(plan, "purchaseOrders");
+  const planLimits = getPlanLimits(plan);
 
   const syncActionError = syncPct === null && syncFetcher.state === "idle" ? (syncFetcher.data?.error ?? null) : null;
   const syncError = syncStreamError ?? syncActionError;
@@ -138,6 +143,8 @@ function DashboardContent() {
           don't reserve space for it by default. */}
       {(!loading && stockOutSoonCount > 0) && <StockOutSoonBanner />}
 
+      {(!loading && canManagePurchaseOrders && readyForReorderCount > 0) && <ReadyForReorderBanner />}
+
       {/* Unlike the two above, this one renders during loading too (showing
           its own internal skeleton — see ProductsAtRiskSection.tsx's
           PLACEHOLDER_ROWS) and only disappears once data confirms there's
@@ -154,9 +161,13 @@ function DashboardContent() {
           <strong>Plan:</strong>{" "}
           <span
             className={loading ? "skeleton-text" : undefined}
-            style={{ background: plan === "pro" ? "#d1fae5" : "#dbeafe", color: plan === "pro" ? "#065f46" : "#1e40af", padding: "1px 8px", borderRadius: 12, fontSize: 12 }}
+            style={{
+              background: plan === "enterprise" ? "#ede9fe" : plan === "pro" ? "#d1fae5" : "#dbeafe",
+              color: plan === "enterprise" ? "#5b21b6" : plan === "pro" ? "#065f46" : "#1e40af",
+              padding: "1px 8px", borderRadius: 12, fontSize: 12,
+            }}
           >
-            {plan === "pro" ? "Professional" : "Basic"}
+            {planLimits.name}
           </span>
         </s-paragraph>
         {(loading || notificationEmail) && (
@@ -193,9 +204,9 @@ function DashboardContent() {
           {/* suppressHydrationWarning on these s-button elements: see the comment above the "Manage Products" button. */}
           {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
           <s-button href="/app/settings" suppressHydrationWarning>Configure Settings</s-button>
-          {plan !== "pro" && (
+          {plan !== "enterprise" && (
             // @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type
-            <s-button href="/app/billing" suppressHydrationWarning>Upgrade to Pro</s-button>
+            <s-button href="/app/billing" suppressHydrationWarning>{plan === "pro" ? "Upgrade to Enterprise" : "Upgrade Plan"}</s-button>
           )}
         </s-stack>
       </s-section>

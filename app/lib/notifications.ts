@@ -7,6 +7,7 @@ import {
   getRestockEmailTemplate,
   getDigestEmailTemplate,
   getBackInStockCustomerTemplate,
+  getPurchaseOrderEmailTemplate,
   type DigestEmailData,
   type BrandConfig,
 } from './email-templates';
@@ -838,5 +839,52 @@ export async function sendDigestEmail(shop: string, recipients: string[], data: 
     } catch (err) {
       console.error(`[Notifications] Digest failed to ${recipient} for ${shop}:`, err);
     }
+  }
+}
+
+// Re-fetches the PO fresh from Prisma rather than taking already-assembled
+// data, since this runs detached from the request that triggered it (see
+// app.purchase-orders.$id.tsx's "send_to_supplier" intent) — the request
+// context that could have assembled the data may be long gone by the time
+// this resolves.
+export async function sendPurchaseOrderEmail(shop: string, purchaseOrderId: string): Promise<{ success: boolean; error?: string }> {
+  const [po, settings] = await Promise.all([
+    prisma.purchaseOrder.findFirst({
+      where: { id: purchaseOrderId, shop },
+      include: { supplier: true, lineItems: true },
+    }),
+    prisma.storeSettings.findUnique({ where: { shop } }),
+  ]);
+  if (!po) return { success: false, error: 'Purchase order not found.' };
+  if (!po.supplier.email) return { success: false, error: 'Supplier has no email on file.' };
+
+  const brand = settings ? toBrand(settings) : {};
+  const { subject, html } = getPurchaseOrderEmailTemplate({
+    poNumber: po.poNumber,
+    supplierName: po.supplier.name,
+    storeName: shop.replace('.myshopify.com', ''),
+    totalCost: po.totalCost,
+    lines: po.lineItems.map((li) => ({
+      productTitle: li.productTitle,
+      variantTitle: li.variantTitle,
+      sku: li.sku,
+      quantityOrdered: li.quantityOrdered,
+      unitCost: li.unitCost,
+    })),
+  }, brand);
+
+  try {
+    await transporter.sendMail({
+      from: settings ? fromAddress(settings) : { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+      to: po.supplier.email,
+      subject,
+      html,
+    });
+    console.log(`[Notifications] PO #${po.poNumber} sent to ${po.supplier.email} for ${shop}`);
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to send email.';
+    console.error(`[Notifications] PO #${po.poNumber} send failed for ${shop}:`, err);
+    return { success: false, error: message };
   }
 }
