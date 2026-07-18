@@ -267,16 +267,23 @@ export function nextStatus(lineItems: { quantityOrdered: number; quantityReceive
   return lineItems.every((li) => li.quantityReceived >= li.quantityOrdered) ? "received" : "partially_received";
 }
 
-const VARIANT_INVENTORY_QUERY = `
-  query getVariantInventory($id: ID!) {
-    productVariant(id: $id) {
-      inventoryItem {
+// Batched lookup — one call for every variant instead of one per line item,
+// using Shopify's nodes(ids:) so the loader can show a location picker up
+// front for multi-location variants, and receivePurchaseOrderItems can
+// resolve+validate every receipt's chosen location in a single round trip.
+const VARIANT_LOCATIONS_QUERY = `
+  query getVariantLocations($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
         id
-        inventoryLevels(first: 50) {
-          edges {
-            node {
-              location { id name }
-              quantities(names: ["available"]) { quantity }
+        inventoryItem {
+          id
+          inventoryLevels(first: 50) {
+            edges {
+              node {
+                location { id name }
+                quantities(names: ["available"]) { quantity }
+              }
             }
           }
         }
@@ -285,18 +292,49 @@ const VARIANT_INVENTORY_QUERY = `
   }
 `;
 
-type VariantInventoryResponse = {
+type VariantLocationsResponse = {
   data?: {
-    productVariant?: {
+    nodes: Array<{
+      id?: string;
       inventoryItem?: {
         id: string;
         inventoryLevels: { edges: Array<{ node: { location: { id: string; name: string }; quantities: Array<{ quantity: number }> } }> };
       } | null;
-    } | null;
+    } | null>;
   };
   extensions?: { cost?: { throttleStatus?: { currentlyAvailable: number; restoreRate: number } } };
   errors?: Array<{ message: string }>;
 };
+
+export type VariantLocationLevel = { inventoryItemId: string; locationId: string; locationName: string; available: number };
+
+// Keyed by variant id (as a plain string, matching InventoryTracking's
+// variantId.toString() convention elsewhere in this file).
+export async function getVariantLocationLevels(
+  admin: AdminApiContext,
+  variantIds: bigint[],
+): Promise<Map<string, VariantLocationLevel[]>> {
+  const map = new Map<string, VariantLocationLevel[]>();
+  if (variantIds.length === 0) return map;
+
+  const ids = variantIds.map((id) => `gid://shopify/ProductVariant/${id.toString()}`);
+  const res = await admin.graphql(VARIANT_LOCATIONS_QUERY, { variables: { ids } });
+  const json: VariantLocationsResponse = await res.json();
+  if (json.errors?.length) throw new Error(`Failed to look up inventory locations: ${json.errors.map((e) => e.message).join("; ")}`);
+
+  for (const node of json.data?.nodes ?? []) {
+    if (!node?.id || !node.inventoryItem) continue;
+    const variantId = node.id.split("/").pop() as string;
+    const levels = node.inventoryItem.inventoryLevels.edges.map((e) => ({
+      inventoryItemId: node.inventoryItem!.id,
+      locationId: e.node.location.id,
+      locationName: e.node.location.name,
+      available: e.node.quantities[0]?.quantity ?? 0,
+    }));
+    map.set(variantId, levels);
+  }
+  return map;
+}
 
 // Receives quantities against an ordered/partially_received PO. Pushes the
 // new absolute quantity to Shopify's location for each variant *before*
@@ -306,15 +344,17 @@ type VariantInventoryResponse = {
 // of truth for quantity/status, so this goes through Shopify the same way
 // every other quantity change does, and lets webhooks.inventory.tsx pick up
 // the resulting inventory_levels/update event.
-// v1 scope: only single-location variants can be received here — a variant
-// stocked at more than one location has no way to know which location the
-// shipment actually arrived at, so this throws rather than silently
-// guessing (previously picked "whichever location Shopify returns first",
-// which could credit the wrong warehouse on a multi-location shop).
+// A variant stocked at more than one location has no way to know which
+// location a shipment actually arrived at, so the caller (PurchaseOrderDetail's
+// location picker, fed by the loader's getVariantLocationLevels call) must
+// supply locationId explicitly for those — this only guesses "the" location
+// when there's exactly one to guess. Previously this threw for any
+// multi-location variant rather than silently picking one (e.g. "whichever
+// location Shopify returns first"), which could credit the wrong warehouse.
 export async function receivePurchaseOrderItems(
   shop: string,
   purchaseOrderId: string,
-  receipts: { lineItemId: string; quantityReceived: number }[],
+  receipts: { lineItemId: string; quantityReceived: number; locationId?: string }[],
   admin: AdminApiContext,
 ): Promise<{ status: PurchaseOrderStatus }> {
   const po = await prisma.purchaseOrder.findFirst({
@@ -333,48 +373,40 @@ export async function receivePurchaseOrderItems(
       if (!line) return null;
       const remaining = line.quantityOrdered - line.quantityReceived;
       const quantityReceived = Math.max(0, Math.min(r.quantityReceived, remaining));
-      return quantityReceived > 0 ? { line, quantityReceived } : null;
+      return quantityReceived > 0 ? { line, quantityReceived, locationId: r.locationId } : null;
     })
-    .filter((x): x is { line: (typeof po.lineItems)[number]; quantityReceived: number } => x !== null);
+    .filter((x): x is { line: (typeof po.lineItems)[number]; quantityReceived: number; locationId: string | undefined } => x !== null);
 
   if (validReceipts.length === 0) {
     throw new Error("No valid quantities to receive.");
   }
 
-  // Resolve each variant's inventoryItem + location + current available
-  // quantity, then push the new absolute quantity to Shopify. Sequential
-  // (not parallel) so the throttle check below can back off between calls —
-  // same pattern as velocity.server.ts's calcSalesVelocity.
+  const levelsByVariant = await getVariantLocationLevels(admin, validReceipts.map((r) => r.line.variantId));
+
   const quantities: Array<{ inventoryItemId: string; locationId: string; quantity: number; changeFromQuantity: null }> = [];
-  for (const { line, quantityReceived } of validReceipts) {
-    const res = await admin.graphql(VARIANT_INVENTORY_QUERY, {
-      variables: { id: `gid://shopify/ProductVariant/${line.variantId.toString()}` },
-    });
-    const json: VariantInventoryResponse = await res.json();
-    if (json.errors?.length) throw new Error(`Failed to look up inventory for ${line.productTitle ?? line.sku}: ${json.errors.map((e) => e.message).join("; ")}`);
-
-    const throttle = json.extensions?.cost?.throttleStatus;
-    if (throttle && throttle.currentlyAvailable < throttle.restoreRate * 1.5) {
-      const needed = throttle.restoreRate * 1.5 - throttle.currentlyAvailable;
-      await new Promise((r) => setTimeout(r, Math.ceil((needed / throttle.restoreRate) * 1000)));
-    }
-
-    const inventoryItem = json.data?.productVariant?.inventoryItem;
-    const levels = inventoryItem?.inventoryLevels.edges ?? [];
-    if (!inventoryItem || levels.length === 0) {
+  for (const { line, quantityReceived, locationId } of validReceipts) {
+    const levels = levelsByVariant.get(line.variantId.toString()) ?? [];
+    if (levels.length === 0) {
       throw new Error(`Could not find inventory location for ${line.productTitle ?? line.sku}.`);
     }
-    if (levels.length > 1) {
-      throw new Error(
-        `${line.productTitle ?? line.sku} is stocked at ${levels.length} locations — receiving isn't supported for multi-location products yet. Adjust its inventory directly in Shopify instead.`,
-      );
+
+    let level: VariantLocationLevel;
+    if (levels.length === 1) {
+      level = levels[0];
+    } else if (!locationId) {
+      throw new Error(`${line.productTitle ?? line.sku} is stocked at ${levels.length} locations — choose which location received this shipment.`);
+    } else {
+      const match = levels.find((l) => l.locationId === locationId);
+      if (!match) {
+        throw new Error(`${line.productTitle ?? line.sku}: the selected location is no longer valid for this variant — refresh and try again.`);
+      }
+      level = match;
     }
-    const level = levels[0].node;
-    const currentAvailable = level.quantities[0]?.quantity ?? 0;
+
     quantities.push({
-      inventoryItemId: inventoryItem.id,
-      locationId: level.location.id,
-      quantity: currentAvailable + quantityReceived,
+      inventoryItemId: level.inventoryItemId,
+      locationId: level.locationId,
+      quantity: level.available + quantityReceived,
       changeFromQuantity: null,
     });
   }

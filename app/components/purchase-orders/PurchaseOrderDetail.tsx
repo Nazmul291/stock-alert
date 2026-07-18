@@ -20,6 +20,11 @@ export type PurchaseOrderDetailData = {
     quantityOrdered: number;
     quantityReceived: number;
     unitCost: number | null;
+    // Only populated when the PO is ordered/partially_received — a variant
+    // stocked at more than one location needs the merchant to pick which one
+    // received the shipment (see receivePurchaseOrderItems in
+    // purchase-order.server.ts for why this can't be guessed).
+    locations: { id: string; name: string; available: number }[];
   }[];
 };
 
@@ -49,6 +54,11 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   const [receiveEdits, setReceiveEdits] = useState<Record<string, string>>(
     () => Object.fromEntries(po.lineItems.map((li) => [li.id, String(Math.max(0, li.quantityOrdered - li.quantityReceived))])),
   );
+  // Pre-selects the sole location when there's only one — the select only
+  // renders (and only needs a merchant choice) when a variant has more than one.
+  const [receiveLocationEdits, setReceiveLocationEdits] = useState<Record<string, string>>(
+    () => Object.fromEntries(po.lineItems.map((li) => [li.id, li.locations.length === 1 ? li.locations[0].id : ""])),
+  );
 
   useEffect(() => {
     if (actionFetcher.state === "idle" && actionFetcher.data?.success) {
@@ -60,6 +70,14 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   const s = STATUS_STYLE[po.status];
   const busy = editFetcher.state !== "idle" || actionFetcher.state !== "idle";
   const missingCostCount = po.lineItems.filter((li) => li.unitCost == null).length;
+  // Blocks submission client-side when a multi-location variant has a
+  // pending receive quantity but no location chosen yet — the server
+  // enforces this too (receivePurchaseOrderItems), this just avoids a
+  // round trip for the common case of forgetting to pick one.
+  const receiveLocationMissing = po.lineItems.some((li) => {
+    const qty = Math.max(0, parseInt(receiveEdits[li.id] ?? "0") || 0);
+    return qty > 0 && li.locations.length > 1 && !receiveLocationEdits[li.id];
+  });
 
   return (
     <div>
@@ -118,12 +136,29 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
                 <td style={{ padding: "8px 12px" }}>{li.quantityReceived} / {li.quantityOrdered}</td>
                 {canReceive && (
                   <td style={{ padding: "8px 12px" }}>
-                    <input
-                      type="number" min={0} max={Math.max(0, li.quantityOrdered - li.quantityReceived)}
-                      value={receiveEdits[li.id] ?? "0"}
-                      onChange={(e) => setReceiveEdits((prev) => ({ ...prev, [li.id]: e.target.value }))}
-                      style={{ width: 70, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13 }}
-                    />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <input
+                        type="number" min={0} max={Math.max(0, li.quantityOrdered - li.quantityReceived)}
+                        value={receiveEdits[li.id] ?? "0"}
+                        onChange={(e) => setReceiveEdits((prev) => ({ ...prev, [li.id]: e.target.value }))}
+                        style={{ width: 70, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13 }}
+                      />
+                      {li.locations.length > 1 && (
+                        <select
+                          value={receiveLocationEdits[li.id] ?? ""}
+                          onChange={(e) => setReceiveLocationEdits((prev) => ({ ...prev, [li.id]: e.target.value }))}
+                          style={{ width: 150, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 6px", fontSize: 12 }}
+                        >
+                          <option value="">Choose location…</option>
+                          {li.locations.map((loc) => (
+                            <option key={loc.id} value={loc.id}>{loc.name} ({loc.available} available)</option>
+                          ))}
+                        </select>
+                      )}
+                      {li.locations.length === 0 && (
+                        <span style={{ fontSize: 11, color: "#991b1b" }}>No location found</span>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>
@@ -179,15 +214,20 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
         )}
         {canReceive && (
           <button
-            type="button" disabled={busy}
+            type="button" disabled={busy || receiveLocationMissing}
             onClick={() => {
               const receipts = po.lineItems
-                .map((li) => ({ lineItemId: li.id, quantityReceived: Math.max(0, parseInt(receiveEdits[li.id] ?? "0") || 0) }))
+                .map((li) => ({
+                  lineItemId: li.id,
+                  quantityReceived: Math.max(0, parseInt(receiveEdits[li.id] ?? "0") || 0),
+                  locationId: receiveLocationEdits[li.id] || undefined,
+                }))
                 .filter((r) => r.quantityReceived > 0);
               if (receipts.length === 0) return;
               actionFetcher.submit({ intent: "receive_items", receipts: JSON.stringify(receipts) }, { method: "post" });
             }}
-            style={btnStyle(busy, "#059669", "#fff")}
+            style={btnStyle(busy || receiveLocationMissing, "#059669", "#fff")}
+            title={receiveLocationMissing ? "Choose a location for every item you're receiving." : undefined}
           >
             Receive Items
           </button>

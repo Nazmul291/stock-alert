@@ -6,11 +6,11 @@ import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { canUseFeature } from "../lib/plan-limits";
 import { sendPurchaseOrderEmail } from "../lib/notifications";
-import { receivePurchaseOrderItems, sanitizeQuantity, sanitizeUnitCost } from "../lib/purchase-order.server";
+import { receivePurchaseOrderItems, getVariantLocationLevels, type VariantLocationLevel, sanitizeQuantity, sanitizeUnitCost } from "../lib/purchase-order.server";
 import { PurchaseOrderDetail, type PurchaseOrderDetailData } from "../components/purchase-orders/PurchaseOrderDetail";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? null;
@@ -24,6 +24,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     include: { supplier: true, lineItems: { orderBy: { createdAt: "asc" } } },
   });
   if (!po) throw new Response("Not Found", { status: 404 });
+
+  // Only fetched once receiving is actually possible — a draft/received/
+  // cancelled PO has no use for location data, so this skips the extra
+  // Shopify call entirely for those.
+  const canReceive = po.status === "ordered" || po.status === "partially_received";
+  const locationsByVariant: Map<string, VariantLocationLevel[]> = canReceive
+    ? await getVariantLocationLevels(admin, po.lineItems.map((li) => li.variantId)).catch(() => new Map())
+    : new Map();
 
   const data: PurchaseOrderDetailData = {
     id: po.id,
@@ -44,6 +52,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       quantityOrdered: li.quantityOrdered,
       quantityReceived: li.quantityReceived,
       unitCost: li.unitCost,
+      locations: (locationsByVariant.get(li.variantId.toString()) ?? []).map((l) => ({
+        id: l.locationId,
+        name: l.locationName,
+        available: l.available,
+      })),
     })),
   };
 
@@ -130,7 +143,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return { success: false as const, error: "This purchase order is not awaiting receipt." };
     }
     try {
-      const receipts = JSON.parse((form.get("receipts") as string) ?? "[]") as { lineItemId: string; quantityReceived: number }[];
+      const receipts = JSON.parse((form.get("receipts") as string) ?? "[]") as { lineItemId: string; quantityReceived: number; locationId?: string }[];
       await receivePurchaseOrderItems(shop, id, receipts, admin);
       invalidateShopCache(shop);
       return { success: true as const, intent };
