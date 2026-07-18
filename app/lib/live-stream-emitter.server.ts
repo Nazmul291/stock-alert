@@ -13,21 +13,37 @@ import { redis } from "./redis.server";
 export const emitter = new EventEmitter();
 emitter.setMaxListeners(0);
 
-let subscriberStarted = false;
+let subscriberReady: Promise<void> | null = null;
 
-export function ensureSubscriber(): void {
-  if (!redis || subscriberStarted) return;
-  subscriberStarted = true;
+// Callers must await this before trusting that a publish will be delivered.
+// Confirmed directly against this app's Redis: a publish that races an
+// un-awaited psubscribe can be silently dropped client-side (never reaches
+// the "pmessage" handler) even though Redis itself reports the subscriber
+// as notified — psubscribe's own promise is the only reliable "ready"
+// signal. Memoized so concurrent callers (multiple tabs/pages opening
+// api.live-stream.ts around the same time, e.g. right after a dev-server
+// hot-reload resets this module) share the one in-flight setup instead of
+// each racing their own.
+export function ensureSubscriber(): Promise<void> {
+  if (!redis) return Promise.resolve();
+  if (subscriberReady) return subscriberReady;
+
   const sub = redis.duplicate();
   sub.on("error", (err) => {
     console.error("[live-stream] subscriber connection error:", err.message);
-  });
-  sub.psubscribe("events:*").catch((err) => {
-    console.error("[live-stream] psubscribe failed:", err.message);
-    subscriberStarted = false;
   });
   sub.on("pmessage", (_pattern: string, channel: string, message: string) => {
     const shop = channel.slice("events:".length);
     emitter.emit(shop, message);
   });
+
+  subscriberReady = sub.psubscribe("events:*").then(
+    () => undefined,
+    (err) => {
+      console.error("[live-stream] psubscribe failed:", err.message);
+      subscriberReady = null;
+      throw err;
+    },
+  );
+  return subscriberReady;
 }
