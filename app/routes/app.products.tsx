@@ -11,6 +11,7 @@ import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { refreshShopVelocity } from "../lib/velocity.server";
+import { publishEvent } from "../lib/broadcast.server";
 import { setInventoryQuantities } from "../lib/shopify-inventory.server";
 import { ProductEditModal } from "../components/products/ProductEditModal";
 import type { ProductRow } from "../components/products/ProductEditModal";
@@ -474,22 +475,6 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       }
     }
 
-    // Velocity calculation — query last 30 days of orders to compute avg daily
-    // sales. avgDailySales/stockOutDays stay product-wide (velocity.server.ts
-    // only resolves orders down to the product level, not variant), so each
-    // variant's stockOutDays is "this variant's own quantity against the
-    // product's blended sales rate" — a reasonable approximation until
-    // per-variant velocity is added. Same shared function the daily velocity
-    // cron uses (see workers/inventory-buffer.worker.ts) — a manual sync just
-    // gets an on-demand refresh instead of waiting for the next cron run.
-    try {
-      await syncState.progress(shop, 99);
-      const { updatedProducts } = await refreshShopVelocity(shop, admin);
-      console.log(`[Sync] Velocity updated for ${updatedProducts} product(s) in ${shop}`);
-    } catch (err) {
-      console.warn(`[Sync] Velocity calc failed for ${shop}:`, err instanceof Error ? err.message : err);
-    }
-
     await prisma.setupProgress.upsert({
       where: { shop },
       update: { firstProductTracked: true, productThresholdsConfigured: true },
@@ -501,9 +486,37 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       console.log(`[Sync] Plan limit enforced for ${shop}: deactivated ${enforcement.deactivatedCount} products (max ${enforcement.maxAllowed})`);
     }
 
+    // Everything the UI actually waits on is done — signal completion now
+    // rather than after velocity too, which used to hold the progress bar at
+    // 99% for however long a 30-day order lookup takes on top of an
+    // already-finished sync. Velocity runs as its own detached background
+    // step below; refreshVelocityInBackground publishes its own live event
+    // when it lands, so the dashboard picks up the refined numbers without
+    // the merchant having to wait on them to see their sync finish.
     await syncState.done(shop, seenProductIds.size);
+
+    refreshVelocityInBackground(shop, admin);
   } catch (err) {
     await syncState.fail(shop, err instanceof Error ? err.message : "Unknown error");
+  }
+}
+
+// Query last 30 days of orders to compute avg daily sales. avgDailySales/
+// stockOutDays stay product-wide (velocity.server.ts only resolves orders
+// down to the product level, not variant), so each variant's stockOutDays is
+// "this variant's own quantity against the product's blended sales rate" — a
+// reasonable approximation until per-variant velocity is added. Same shared
+// function the daily velocity cron uses (see workers/inventory-buffer.worker.ts)
+// — a manual sync just gets an on-demand refresh instead of waiting for the
+// next cron run. Deliberately not awaited by its caller — see the comment
+// above runProductSync's syncState.done() call.
+async function refreshVelocityInBackground(shop: string, admin: AdminClient) {
+  try {
+    const { updatedProducts } = await refreshShopVelocity(shop, admin);
+    console.log(`[Sync] Velocity updated for ${updatedProducts} product(s) in ${shop}`);
+    await publishEvent(shop, ["products", "dashboard", "analytics"]);
+  } catch (err) {
+    console.warn(`[Sync] Velocity calc failed for ${shop}:`, err instanceof Error ? err.message : err);
   }
 }
 
