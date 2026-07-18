@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useActionData, useNavigation, useFetcher } from "react-router";
+import { useLoaderData, useActionData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -144,8 +144,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function Dashboard() {
   const { shop, token, progress: loaderProgress, shopInfo, existingSettings } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  const navigation = useNavigation();
-  const submitting = navigation.state === "submitting";
 
   // Hydrate the shared store from this route's own loader data on every
   // mount/revalidation — app.tsx hydrates the same store from its own copy
@@ -171,7 +169,7 @@ export default function Dashboard() {
   if (!progress.termsAccepted) {
     return (
       <OnboardingCard title="Welcome to Stock Alert!" subtitle="Let's confirm a few things before we get started.">
-        <TermsAcceptanceStep submitting={submitting} onSubmit={() => patchProgress({ termsAccepted: true })} />
+        <TermsAcceptanceStep onSubmit={() => patchProgress({ termsAccepted: true })} />
       </OnboardingCard>
     );
   }
@@ -189,7 +187,6 @@ export default function Dashboard() {
         {onboardingStep === 2 && existingSettings && (
           <OnboardingSettingsStep
             existingSettings={existingSettings}
-            submitting={submitting}
             onSubmit={() => patchProgress({ onboardingDone: true })}
           />
         )}

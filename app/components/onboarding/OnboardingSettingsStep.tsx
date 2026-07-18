@@ -1,16 +1,19 @@
-import { Form } from "react-router";
+import { useFetcher } from "react-router";
 import { OnboardingPrimaryButton } from "./OnboardingPrimaryButton";
 import { OnboardingToggleField } from "./OnboardingToggleField";
 
 const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
 
-export function OnboardingSettingsStep({ existingSettings, submitting, onSubmit }: {
+// Uses a fetcher instead of <Form> — see the comment in TermsAcceptanceStep.tsx.
+export function OnboardingSettingsStep({ existingSettings, onSubmit }: {
   existingSettings: { lowStockThreshold: number; autoHideEnabled: boolean; autoRepublishEnabled: boolean };
-  submitting: boolean;
   onSubmit?: () => void;
 }) {
+  const fetcher = useFetcher();
+  const submitting = fetcher.state !== "idle";
+
   return (
-    <Form method="post" onSubmit={onSubmit}>
+    <fetcher.Form method="post" onSubmit={onSubmit}>
       <input type="hidden" name="intent" value="save_settings" />
 
       <div style={{ marginBottom: 20 }}>
@@ -48,6 +51,6 @@ export function OnboardingSettingsStep({ existingSettings, submitting, onSubmit 
       </div>
 
       <OnboardingPrimaryButton loading={submitting}>Finish setup →</OnboardingPrimaryButton>
-    </Form>
+    </fetcher.Form>
   );
 }

@@ -1,12 +1,18 @@
 import { useState } from "react";
-import { Form } from "react-router";
+import { useFetcher } from "react-router";
 import { OnboardingPrimaryButton } from "./OnboardingPrimaryButton";
 
-export function TermsAcceptanceStep({ submitting, onSubmit }: { submitting: boolean; onSubmit?: () => void }) {
+// Uses a fetcher instead of <Form> so accepting terms is a silent background
+// update — a plain <Form> on this index route would need `?index` appended
+// to the URL to disambiguate its action from the parent layout route's,
+// which briefly (and confusingly) shows up in the address bar.
+export function TermsAcceptanceStep({ onSubmit }: { onSubmit?: () => void }) {
   const [agreed, setAgreed] = useState(false);
+  const fetcher = useFetcher();
+  const submitting = fetcher.state !== "idle";
 
   return (
-    <Form method="post" onSubmit={onSubmit}>
+    <fetcher.Form method="post" onSubmit={onSubmit}>
       <input type="hidden" name="intent" value="accept_terms" />
 
       <p style={{ margin: "0 0 20px", fontSize: 14, color: "#374151", lineHeight: 1.5 }}>
@@ -29,6 +35,6 @@ export function TermsAcceptanceStep({ submitting, onSubmit }: { submitting: bool
       </label>
 
       <OnboardingPrimaryButton loading={submitting} disabled={!agreed}>Accept &amp; continue →</OnboardingPrimaryButton>
-    </Form>
+    </fetcher.Form>
   );
 }
