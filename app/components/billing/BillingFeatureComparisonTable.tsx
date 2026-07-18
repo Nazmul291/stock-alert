@@ -3,10 +3,9 @@ import { PLAN_LIMITS, formatMaxProducts } from "../../lib/plan-limits";
 // Restriction-backed rows are generated from PLAN_LIMITS itself (single
 // source of truth shared with every server-side canUseFeature() gate) so
 // this table can't drift from what's actually enforced for Basic/Pro.
-// coreLimitedEditionSections/deadStockAlerts are still flagged comingSoon —
-// those two Enterprise-exclusive capabilities aren't built yet. Suppliers +
-// purchase orders (purchaseOrders) is built and enforced via canUseFeature()
-// in app.suppliers.tsx / app.purchase-orders*.tsx.
+// Every row here is built and enforced via canUseFeature() — Suppliers +
+// purchase orders (purchaseOrders) in app.suppliers.tsx / app.purchase-orders*.tsx,
+// coreLimitedEditionSections/deadStockAlerts in app.analytics.tsx / app.settings.tsx.
 const RESTRICTION_ROWS: { key: keyof typeof PLAN_LIMITS.basic.restrictions; label: string; comingSoon?: boolean }[] = [
   { key: "slackNotifications", label: "One-click Slack Connect" },
   { key: "asanaTaskCreation", label: "Asana task creation" },
@@ -17,8 +16,8 @@ const RESTRICTION_ROWS: { key: keyof typeof PLAN_LIMITS.basic.restrictions; labe
   { key: "multipleRecipients", label: "Multiple notification recipients" },
   { key: "whiteLabelEmails", label: "White-label branded emails" },
   { key: "prioritySupport", label: "Priority support" },
-  { key: "coreLimitedEditionSections", label: "Core vs. Limited-Edition report sections", comingSoon: true },
-  { key: "deadStockAlerts", label: "Dead stock alerts", comingSoon: true },
+  { key: "coreLimitedEditionSections", label: "Core vs. Limited-Edition report sections" },
+  { key: "deadStockAlerts", label: "Dead stock alerts" },
   { key: "purchaseOrders", label: "Suppliers & purchase order generation" },
   { key: "vendorLeadTimeReorderPoints", label: "Reorder points by vendor lead time" },
 ];

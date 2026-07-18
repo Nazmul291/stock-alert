@@ -81,7 +81,7 @@ type SyncProductVariantEdge = {
 };
 type SyncProductEdge = {
   node: {
-    id: string; title: string; status: string;
+    id: string; title: string; status: string; tags: string[];
     featuredMedia: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
     customThreshold: { value: string } | null;
     variants: { edges: SyncProductVariantEdge[] };
@@ -105,7 +105,7 @@ type MetafieldInput = { ownerId: string; namespace: string; key: string; value: 
 type SyncVariantRow = {
   productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
   sku: string | null; currentQuantity: number; inventoryStatus: "in_stock" | "low_stock" | "out_of_stock";
-  imageUrl: string | null; imageAlt: string | null;
+  imageUrl: string | null; imageAlt: string | null; tags: string | null;
 };
 
 const SYNC_PRODUCTS_GRAPHQL = `
@@ -113,7 +113,7 @@ const SYNC_PRODUCTS_GRAPHQL = `
     products(first: $first, after: $after, query: $query) {
       edges {
         node {
-          id title status
+          id title status tags
           featuredMedia { preview { image { url altText } } }
           customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { value }
           variants(first: 100) {
@@ -390,6 +390,9 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         seenProductIds.add(productId);
         const imageUrl = p.featuredMedia?.preview?.image?.url ?? null;
         const imageAlt = p.featuredMedia?.preview?.image?.altText ?? null;
+        // Comma-joined, consistent with StoreSettings.monitoringTags — used
+        // by the Enterprise "Core vs. Limited-Edition" report split.
+        const tags = p.tags && p.tags.length > 0 ? p.tags.join(",") : null;
 
         // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
         const productThreshold =
@@ -416,6 +419,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
             inventoryStatus: status,
             imageUrl,
             imageAlt,
+            tags,
           });
         }
       }
@@ -443,8 +447,8 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         chunk.map((v) =>
           prisma.inventoryTracking.upsert({
             where: { shop_variantId: { shop, variantId: v.variantId } },
-            update: { productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, lastCheckedAt: now },
-            create: { shop, productId: v.productId, variantId: v.variantId, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, previousQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt },
+            update: { productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags, lastCheckedAt: now },
+            create: { shop, productId: v.productId, variantId: v.variantId, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, previousQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags },
           }),
         ),
       );

@@ -106,7 +106,7 @@ export async function refreshShopVelocity(shop: string, admin: AdminApiContext):
   const velocity = await calcSalesVelocity(admin);
   const rows = await prisma.inventoryTracking.findMany({
     where: { shop },
-    select: { id: true, productId: true, currentQuantity: true },
+    select: { id: true, productId: true, currentQuantity: true, zeroSalesSinceAt: true },
   });
   if (rows.length === 0) return { updatedProducts: 0 };
 
@@ -121,12 +121,18 @@ export async function refreshShopVelocity(shop: string, admin: AdminApiContext):
         // actually reflects that instead of keeping a stale number from the
         // last time it sold.
         const avg = velocity.get(r.productId.toString()) ?? 0;
+        // Dead-stock detection (Enterprise reporting): preserve the original
+        // transition-to-zero timestamp across repeated zero readings rather
+        // than resetting it every sync, so "days since zero sales" actually
+        // measures elapsed time. Cleared the instant velocity recovers.
+        const zeroSalesSinceAt = avg > 0 ? null : (r.zeroSalesSinceAt ?? now);
         return prisma.inventoryTracking.update({
           where: { id: r.id },
           data: {
             avgDailySales: avg,
             velocityUpdatedAt: now,
             stockOutDays: computeStockOutDays(r.currentQuantity, avg),
+            zeroSalesSinceAt,
           },
         });
       }),

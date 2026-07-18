@@ -99,6 +99,8 @@ model StoreSettings {
   asanaUserName          String?   @map("asana_user_name") @db.VarChar(200)
   asanaWorkspaceGid      String?   @map("asana_workspace_gid") @db.VarChar(50)
   asanaWorkspaceName     String?   @map("asana_workspace_name") @db.VarChar(200)
+  limitedEditionTag      String?   @map("limited_edition_tag") @db.VarChar(100)
+  deadStockThresholdDays Int       @default(60) @map("dead_stock_threshold_days")
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -157,6 +159,8 @@ model InventoryTracking {
   expectedRestockDate  DateTime? @map("expected_restock_date") @db.Timestamptz
   supplierId           String?   @map("supplier_id") @db.Uuid
   unitCost             Float?    @map("unit_cost")
+  tags                 String?   @db.VarChar(1000)
+  zeroSalesSinceAt     DateTime? @map("zero_sales_since_at") @db.Timestamptz
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 

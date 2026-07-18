@@ -13,6 +13,8 @@ import { ChannelBreakdown } from "../components/analytics/ChannelBreakdown";
 import { DailyBarChart } from "../components/analytics/DailyBarChart";
 import { TopProductsChart } from "../components/analytics/TopProductsChart";
 import { StockHealthBar } from "../components/analytics/StockHealthBar";
+import { CoreLimitedEditionBreakdown } from "../components/analytics/CoreLimitedEditionBreakdown";
+import { DeadStockSection } from "../components/analytics/DeadStockSection";
 
 // Only the auth check blocks the response — the analytics query runs entirely
 // in the background via api.analytics-stream.ts and is pushed to the client
@@ -102,6 +104,19 @@ function AnalyticsContent() {
       <div style={{ marginTop: 16 }}>
         <s-section heading="Current Stock Health">
           <StockHealthBar />
+        </s-section>
+      </div>
+
+      {/* Enterprise-only — each section renders its own upsell card
+          internally when the shop isn't entitled, so no gating needed here. */}
+      <div style={{ marginTop: 16 }}>
+        <s-section heading="Core vs. Limited-Edition">
+          <CoreLimitedEditionBreakdown />
+        </s-section>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <s-section heading="Dead Stock">
+          <DeadStockSection />
         </s-section>
       </div>
 

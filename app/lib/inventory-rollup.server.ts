@@ -53,6 +53,40 @@ export async function rollupStatusCounts(shop: string): Promise<Map<RollupStatus
   return new Map(rows.map((r) => [r.status, Number(r.count)]));
 }
 
+// Same product-level worst-case classification as rollupStatusCounts, split
+// into two groups by whether the product carries the merchant-configured
+// "Limited-Edition" tag (Enterprise's Core vs. Limited-Edition report). Tag
+// match is case-insensitive and comma-token exact (not substring), so a tag
+// like "limited" can't accidentally match "non-limited-edition".
+export async function rollupStatusCountsByTagGroup(
+  shop: string,
+  tag: string,
+): Promise<{ core: Map<RollupStatus, number>; limitedEdition: Map<RollupStatus, number> }> {
+  const normalizedTag = tag.trim().toLowerCase();
+  const rows = await prisma.$queryRaw<{ grp: "core" | "limited_edition"; status: RollupStatus; count: number }[]>`
+    SELECT grp, status, COUNT(*)::int AS count FROM (
+      SELECT product_id,
+        CASE WHEN bool_or(',' || LOWER(COALESCE(tags, '')) || ',' LIKE '%,' || ${normalizedTag} || ',%')
+             THEN 'limited_edition' ELSE 'core' END AS grp,
+        CASE
+          WHEN bool_and(inventory_status = 'deactivated') THEN 'deactivated'
+          WHEN bool_and(inventory_status = 'requires_upgrade') THEN 'requires_upgrade'
+          WHEN bool_and(inventory_status IN ('out_of_stock', 'deactivated', 'requires_upgrade')) THEN 'out_of_stock'
+          WHEN bool_or(inventory_status IN ('out_of_stock', 'low_stock')) THEN 'low_stock'
+          ELSE 'in_stock'
+        END AS status
+      FROM inventory_tracking
+      WHERE shop = ${shop}
+      GROUP BY product_id
+    ) t
+    GROUP BY grp, status
+  `;
+  const core = new Map<RollupStatus, number>();
+  const limitedEdition = new Map<RollupStatus, number>();
+  for (const r of rows) (r.grp === "core" ? core : limitedEdition).set(r.status, Number(r.count));
+  return { core, limitedEdition };
+}
+
 // One representative row per at-risk product (its single worst variant) —
 // used by the dashboard's "Products at Risk" widget and the digest email's
 // at-risk list, so a product with several bad variants doesn't appear

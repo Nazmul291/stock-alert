@@ -23,6 +23,8 @@ export function PlanCard() {
     { label: "Outbound webhook / Zapier",       active: canUseFeature(plan, "outboundWebhook") },
     { label: "Email branding",                  active: canUseFeature(plan, "whiteLabelEmails") },
     { label: "Suppliers & purchase orders",     active: canUseFeature(plan, "purchaseOrders") },
+    { label: "Core vs. Limited-Edition reports", active: canUseFeature(plan, "coreLimitedEditionSections") },
+    { label: "Dead stock alerts",                active: canUseFeature(plan, "deadStockAlerts") },
   ];
 
   return (
