@@ -45,5 +45,25 @@ export function ensureSubscriber(): Promise<void> {
       throw err;
     },
   );
+
+  // Dev only: Vite SSR hot-reloads this module on nearly every edit anywhere
+  // in its dependency graph, re-running the code above and creating a brand
+  // new `sub` connection — but without this, the *old* one is never closed.
+  // Confirmed live: after a handful of edits, `redis-cli CLIENT LIST` showed
+  // multiple simultaneous psubscribe connections, each wired to a different
+  // now-orphaned `emitter` instance from a previous module instantiation.
+  // Redis fans a publish out to all of them, but only whichever one matches
+  // the *currently open* SSE connection's `emitter.on(shop, ...)` listener
+  // actually reaches the browser — which one that is depends on load order,
+  // so live updates worked or silently vanished at random. Disposing the old
+  // subscriber (and resetting subscriberReady) when Vite invalidates this
+  // module keeps it down to exactly one connection at all times.
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      subscriberReady = null;
+      sub.disconnect();
+    });
+  }
+
   return subscriberReady;
 }
