@@ -271,15 +271,17 @@ model PurchaseOrderLineItem {
 }
 
 model SetupProgress {
-  id                          String   @id @default(uuid()) @db.Uuid
-  shop                        String   @unique
-  appInstalled                Boolean  @default(true) @map("app_installed")
-  globalSettingsConfigured    Boolean  @default(false) @map("global_settings_configured")
-  notificationsConfigured     Boolean  @default(false) @map("notifications_configured")
-  productThresholdsConfigured Boolean  @default(false) @map("product_thresholds_configured")
-  firstProductTracked         Boolean  @default(false) @map("first_product_tracked")
-  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                          String    @id @default(uuid()) @db.Uuid
+  shop                        String    @unique
+  termsAccepted               Boolean   @default(false) @map("terms_accepted")
+  termsAcceptedAt             DateTime? @map("terms_accepted_at") @db.Timestamptz
+  appInstalled                Boolean   @default(true) @map("app_installed")
+  globalSettingsConfigured    Boolean   @default(false) @map("global_settings_configured")
+  notificationsConfigured     Boolean   @default(false) @map("notifications_configured")
+  productThresholdsConfigured Boolean   @default(false) @map("product_thresholds_configured")
+  firstProductTracked         Boolean   @default(false) @map("first_product_tracked")
+  createdAt                   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
 

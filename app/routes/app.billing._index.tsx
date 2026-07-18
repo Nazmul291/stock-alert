@@ -2,9 +2,9 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "re
 import { useLoaderData, useActionData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getIsTestStore } from "../services/billing.server";
 import { getCachedSession } from "../lib/shop-cache.server";
-import { isPlanKey, billingNameForPlanKey, type PlanKey } from "../lib/billing-plans";
+import { requestPlanSubscription } from "../lib/billing-request.server";
+import type { PlanKey } from "../lib/billing-plans";
 import { BillingPlanCards } from "../components/billing/BillingPlanCards";
 import { BillingFeatureComparisonTable } from "../components/billing/BillingFeatureComparisonTable";
 
@@ -16,38 +16,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { activePlan: (dbSession?.plan ?? null) as PlanKey | null };
 };
 
+// Any existing subscription is cancelled in app.billing.confirm.tsx, only
+// after the merchant actually approves this new one — not here. Cancelling
+// eagerly, before Shopify's approval screen even loads, left a window where
+// a merchant who backed out (or just hadn't finished yet) had zero active
+// subscription and all their products got deactivated for nothing.
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing, admin, session } = await authenticate.admin(request);
-  const isTest = await getIsTestStore(admin, session.shop);
+  const auth = await authenticate.admin(request);
   const form = await request.formData();
-  const targetPlan = form.get("plan") as string;
-  const storeSlug = session.shop.replace(".myshopify.com", "");
-  const returnUrl = `https://admin.shopify.com/store/${storeSlug}/apps/${process.env.SHOPIFY_API_KEY}/app/billing/confirm`;
-
-  if (!isPlanKey(targetPlan)) {
-    return { error: "Invalid plan selected." };
-  }
-
-  const plan = billingNameForPlanKey(targetPlan);
-
-  // Any existing subscription is cancelled in app.billing.confirm.tsx, only
-  // after the merchant actually approves this new one — not here. Cancelling
-  // eagerly, before Shopify's approval screen even loads, left a window where
-  // a merchant who backed out (or just hadn't finished yet) had zero active
-  // subscription and all their products got deactivated for nothing.
-  const returnUrlWithIntent = `${returnUrl}?intendedPlan=${targetPlan}`;
-
-  try {
-    await billing.request({ plan, isTest, returnUrl: returnUrlWithIntent });
-  } catch (err) {
-    // billing.request throws a Response redirect on success — let it through
-    if (err instanceof Response) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[Billing] billing.request failed:", message);
-    return { error: `Could not connect to Shopify billing. Please check your internet connection and try again.\n\nDetails: ${message}` };
-  }
-
-  return { error: "Billing redirect did not occur." };
+  return requestPlanSubscription(auth, form.get("plan") as string);
 };
 
 export default function BillingPage() {

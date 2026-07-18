@@ -6,27 +6,36 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
-import { mintSseToken } from "../lib/sse-token.server";
+import prisma from "../db.server";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
-import { useSSEData } from "../hooks/use-sse-data";
 import { useLiveEvents } from "../hooks/use-live-events";
-import { useAppGateStore, type GateData } from "../stores/app-gate-store";
+import { getWizardProgress } from "../lib/wizard-progress.server";
+import { useWizardProgressStore } from "../stores/wizard-progress-store";
 
-// Only auth blocks the response now — the billing/onboarding gate check and the
-// alertsToday count used to be awaited here too (~400-1000ms on a cache miss,
-// in front of every single /app/* page). They now run in the background via
-// api.app-gate-stream.ts, identified by a short-lived token instead of a
-// re-authenticated request (EventSource can't carry the session-token header).
+const todayUTC = () => {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
+// Wizard progress and the alerts count are both plain, cached DB reads (see
+// wizard-progress.server.ts) — no Shopify Admin API calls — unlike the old
+// billing/onboarding gate this replaced, which needed a background SSE
+// stream (api.app-gate-stream.ts) specifically to keep a slow
+// billing.check() call off the critical path of every /app/* page load.
+// Computed synchronously here instead so the nav menu's hidden/shown state
+// (see hideNav below) is correct on first paint, on every page, rather than
+// flashing in after a client-side redirect.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  const url = new URL(request.url);
-  const pathname = url.pathname;
 
-  const isPublicRoute = pathname.startsWith("/app/billing") || pathname.startsWith("/app/onboarding");
-  const token = await mintSseToken(shop);
+  const [progress, alertsToday] = await Promise.all([
+    getWizardProgress(shop),
+    prisma.alertHistory.count({ where: { shop, sentAt: { gte: todayUTC() } } }),
+  ]);
 
-  return { shop, token, isPublicRoute };
+  return { shop, progress, alertsToday };
 };
 
 
@@ -91,7 +100,7 @@ function NavigationLoadingOverlay() {
 }
 
 export default function App() {
-  const { shop, token, isPublicRoute } = useLoaderData<typeof loader>();
+  const { shop, progress: loaderProgress, alertsToday } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const isNavigating = navigation.state === "loading";
@@ -109,57 +118,47 @@ export default function App() {
     return () => document.removeEventListener("shopify:navigate", handleNavigate);
   }, [navigate]);
 
-  // Background gate check + alerts count — nav and <Outlet/> render immediately;
-  // this resolves shortly after and bounces to onboarding/billing if needed.
-  const { data: gate, error: gateError } = useSSEData<GateData>(
-    `/api/app-gate-stream?token=${encodeURIComponent(token)}&isPublicRoute=${isPublicRoute ? "1" : "0"}`,
-  );
-  const alertsToday = gate?.alertsToday ?? 0;
-
   // One persistent push connection for the whole session — not per page —
   // since this component doesn't remount between /app/* pages (see
   // shouldRevalidate below). Feeds live-events-store, which every page's
   // useCachedSSEData call reads to decide whether its cached data is stale.
-  useLiveEvents(!isPublicRoute);
+  useLiveEvents(true);
 
-  const setGateState = useAppGateStore((s) => s.setGateState);
-  const setAppStatus = useAppGateStore((s) => s.setAppStatus);
-  useEffect(() => { setGateState({ gate, gateError }); }, [gate, gateError, setGateState]);
+  // Hydrate the shared store from this route's own loader data (dashboard-store's
+  // pattern). app._index.tsx hydrates the same store from its own copy of this
+  // same DB-only progress check, so a step completed on one route (e.g. accepting
+  // terms) is reflected in the other's render (here, hideNav) as soon as that
+  // route's own action revalidates — no separate round trip needed.
+  const setProgress = useWizardProgressStore((s) => s.setProgress);
+  useEffect(() => { setProgress(loaderProgress); }, [loaderProgress, setProgress]);
+  const storeProgress = useWizardProgressStore((s) => s.progress);
+  const progress = storeProgress ?? loaderProgress;
 
-  useEffect(() => {
-    if (gate?.redirectTo) {
-      setAppStatus("redirect");
-      navigate(gate.redirectTo, { replace: true });
-    } else if (gate || gateError) {
-      setAppStatus("ready");
-    }
-  }, [gate, gateError, navigate, setAppStatus]);
-
-  const appStatus = useAppGateStore((s) => s.appStatus);
+  // Nav stays hidden on every /app/* page — not just the index route — until
+  // the merchant has accepted terms, finished onboarding, and picked a plan.
+  // app._index.tsx is the only place that flow is actually shown.
+  const hideNav = !progress.termsAccepted || !progress.onboardingDone || !progress.hasPlan;
 
   return (
     <AppProvider embedded={false}>
       <GlobalStyles />
-      {(isNavigating || appStatus === "loading" || appStatus === "redirect") && <NavigationLoadingOverlay />}
-      <s-app-nav>
-        <s-link href="/app">Dashboard</s-link>
-        <s-link href="/app/products">Products</s-link>
-        <s-link href="/app/alert-history">
-          {alertsToday > 0 ? `Alert History (${alertsToday})` : "Alert History"}
-        </s-link>
-        <s-link href="/app/back-in-stock">Back in Stock</s-link>
-        <s-link href="/app/suppliers">Suppliers</s-link>
-        <s-link href="/app/purchase-orders">Purchase Orders</s-link>
-        <s-link href="/app/analytics">Analytics</s-link>
-        <s-link href="/app/integrations">Integrations</s-link>
-        <s-link href="/app/settings">Settings</s-link>
-        <s-link href="/app/billing">Billing</s-link>
-      </s-app-nav>
-      {/* Child routes (e.g. app._index.tsx's dashboard) read appStatus straight
-          from useAppGateStore to hold their own skeleton while it's "loading"
-          or "redirect", and only render real content once it's "ready" —
-          instead of flashing full content right before a bounce to
-          onboarding/billing. */}
+      {isNavigating && <NavigationLoadingOverlay />}
+      {!hideNav && (
+        <s-app-nav>
+          <s-link href="/app">Dashboard</s-link>
+          <s-link href="/app/products">Products</s-link>
+          <s-link href="/app/alert-history">
+            {alertsToday > 0 ? `Alert History (${alertsToday})` : "Alert History"}
+          </s-link>
+          <s-link href="/app/back-in-stock">Back in Stock</s-link>
+          <s-link href="/app/suppliers">Suppliers</s-link>
+          <s-link href="/app/purchase-orders">Purchase Orders</s-link>
+          <s-link href="/app/analytics">Analytics</s-link>
+          <s-link href="/app/integrations">Integrations</s-link>
+          <s-link href="/app/settings">Settings</s-link>
+          <s-link href="/app/billing">Billing</s-link>
+        </s-app-nav>
+      )}
       <Outlet />
       <ChatWidget shop={shop} />
       <div style={{ marginTop: 48, paddingTop: 16, borderTop: "1px solid #f3f4f6", textAlign: "center" }}>

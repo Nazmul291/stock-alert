@@ -82,6 +82,7 @@ export function BillingPlanCards({ activePlan }: { activePlan: "basic" | "pro" |
               </button>
             ) : !isCurrent ? (
               <Form method="post">
+                <input type="hidden" name="intent" value="select_plan" />
                 <input type="hidden" name="plan" value={key} />
                 <button
                   type="submit"

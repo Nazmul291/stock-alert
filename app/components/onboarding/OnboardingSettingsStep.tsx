@@ -4,12 +4,13 @@ import { OnboardingToggleField } from "./OnboardingToggleField";
 
 const THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 20, 25, 50];
 
-export function OnboardingSettingsStep({ existingSettings, submitting }: {
+export function OnboardingSettingsStep({ existingSettings, submitting, onSubmit }: {
   existingSettings: { lowStockThreshold: number; autoHideEnabled: boolean; autoRepublishEnabled: boolean };
   submitting: boolean;
+  onSubmit?: () => void;
 }) {
   return (
-    <Form method="post">
+    <Form method="post" onSubmit={onSubmit}>
       <input type="hidden" name="intent" value="save_settings" />
 
       <div style={{ marginBottom: 20 }}>
