@@ -106,7 +106,6 @@ export function ProductsTable({
               { label: "Days Left" },
               { label: "Reorder By" },
               ...(showSupplierColumn ? [{ label: "Supplier" }] : []),
-              { label: "Monitor Alert" },
               { label: "Action" },
             ].map(({ label, width }) => (
               <th key={label} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap", ...(width ? { width, minWidth: width } : {}) }}>
@@ -207,15 +206,6 @@ export function ProductsTable({
                   </td>
                 )}
                 <td style={{ padding: "10px 12px" }}>
-                  <span className={loading ? "skeleton-text" : undefined} style={{
-                    background: p.monitoringEnabled ? "#d1fae5" : p.inventoryStatus === "requires_upgrade" ? "#e0e7ff" : "#f3f4f6",
-                    color: p.monitoringEnabled ? "#065f46" : p.inventoryStatus === "requires_upgrade" ? "#4338ca" : "#6b7280",
-                    padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500,
-                  }}>
-                    {p.monitoringEnabled ? "Active" : p.inventoryStatus === "requires_upgrade" ? "Requires Pro" : "Disabled"}
-                  </span>
-                </td>
-                <td style={{ padding: "10px 12px" }}>
                   <button
                     onClick={() => onEditProduct(p)}
                     disabled={loading || p.inventoryStatus === "requires_upgrade"}
@@ -240,8 +230,8 @@ export function ProductsTable({
                 <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fafafa" }}>
                   <td />
                   {/* Spans every column after the leading checkbox td above:
-                      8 label columns (Product…Action), or 9 with Supplier. */}
-                  <td colSpan={showSupplierColumn ? 9 : 8} style={{ padding: "4px 12px 12px 40px" }}>
+                      7 label columns (Product…Action), or 8 with Supplier. */}
+                  <td colSpan={showSupplierColumn ? 8 : 7} style={{ padding: "4px 12px 12px 40px" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {(p.variants ?? []).map((v) => {
                         const vs = STATUS_STYLE[v.inventoryStatus] ?? STATUS_STYLE.not_tracked;
