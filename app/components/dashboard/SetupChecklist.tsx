@@ -36,12 +36,6 @@ export function SetupChecklist({
       action: null,
       syncAction: true,
     },
-    {
-      done: progress.firstProductTracked,
-      title: "Monitoring is live",
-      description: "Your products are tracked. You'll receive alerts when stock hits your threshold.",
-      action: { label: "View Products →", href: "/app/products" },
-    },
   ];
 
   const syncBusy = syncSubmitting || syncPct !== null;
