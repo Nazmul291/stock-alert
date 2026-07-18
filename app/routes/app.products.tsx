@@ -6,7 +6,7 @@ import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getMaxProducts, canUseFeature, formatMaxProducts, PLAN_LIMITS } from "../lib/plan-limits";
+import { getMaxProducts, canUseFeature, formatMaxProducts, getPlanLimits } from "../lib/plan-limits";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
@@ -925,7 +925,12 @@ function ProductsPageContent() {
   const loading = useProductsStore((s) => s.data === null);
   const shop = useProductsStore((s) => s.data?.shop) ?? "";
   const plan = useProductsStore((s) => s.data?.plan) ?? "basic";
-  const maxProducts = useProductsStore((s) => s.data?.maxProducts) ?? 0;
+  // null (not 0) is "not capped" — a loaded Enterprise store has
+  // data.maxProducts === null (unlimited), which must stay distinguishable
+  // from a real cap of 0. Only the "still loading" case falls back, via the
+  // outer `?? null` below, to the same null value, which is fine since the
+  // banner below is gated on `!loading` anyway.
+  const maxProducts = useProductsStore((s) => s.data?.maxProducts) ?? null;
   const trackedCount = useProductsStore((s) => s.data?.trackedCount) ?? 0;
   const threshold = useProductsStore((s) => s.data?.threshold) ?? 5;
   const products = useProductsStore((s) => s.data?.products) ?? [];
@@ -1051,10 +1056,15 @@ function ProductsPageContent() {
       )}
 
       {/* Held back until data confirms it's actually needed, rather than
-          reserving space on every load. */}
-      {(!loading && Number.isFinite(maxProducts) && plan !== "pro") && (
+          reserving space on every load. Only basic/none are capped tiers
+          with something to upsell here — pro and enterprise are excluded by
+          name rather than by `maxProducts !== null`, since relying on the
+          cap alone previously broke for Enterprise (maxProducts is null —
+          unlimited — for both "still loading" and "genuinely uncapped",
+          which is why this checks the plan directly instead). */}
+      {(!loading && (plan === "basic" || plan === "none")) && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
-          {PLAN_LIMITS[plan === "basic" ? "basic" : "none"].name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
+          {getPlanLimits(plan).name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
           <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}

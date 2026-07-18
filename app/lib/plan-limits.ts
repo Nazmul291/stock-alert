@@ -154,8 +154,8 @@ export function getMaxProducts(plan?: string | null): number {
 // comparisons (>, >=, -) all behave correctly against Infinity on their own,
 // but display and anything that needs a concrete integer (e.g. Prisma's
 // `take`) must special-case it explicitly.
-export function formatMaxProducts(maxProducts: number): string {
-  return Number.isFinite(maxProducts) ? maxProducts.toLocaleString() : 'Unlimited';
+export function formatMaxProducts(maxProducts: number | null): string {
+  return maxProducts !== null && Number.isFinite(maxProducts) ? maxProducts.toLocaleString() : 'Unlimited';
 }
 
 export function canUseFeature(

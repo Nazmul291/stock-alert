@@ -56,7 +56,11 @@ const STATUS_FILTERS = new Set(["out_of_stock", "low_stock", "in_stock"]);
 export type ProductsData = {
   shop: string;
   plan: string;
-  maxProducts: number;
+  // null means unlimited (Enterprise). Infinity itself can't cross the SSE
+  // wire — JSON.stringify(Infinity) silently serializes to `null` already,
+  // so this makes that the explicit, intentional representation instead of
+  // an accident the client has to guess about.
+  maxProducts: number | null;
   trackedCount: number;
   threshold: number;
   products: ProductRow[];
@@ -149,7 +153,8 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
       : Promise.resolve([]),
   ]);
 
-  const maxProducts = getMaxProducts(plan);
+  const maxProductsRaw = getMaxProducts(plan);
+  const maxProducts = Number.isFinite(maxProductsRaw) ? maxProductsRaw : null;
   const threshold = settings?.lowStockThreshold ?? 5;
   const suppliersById = new Map(supplierRows.map((s) => [s.id, s.name]));
 
