@@ -91,10 +91,146 @@
   color: #4f46e5;
 }
 
+/* ── Shared buttons & section heading ────────────────────────────────────
+   Used by the homepage (hero/final CTA) and any other public page that
+   reuses LandingPricing or the same button styling (e.g. /pricing). ──── */
+
+.sa-primaryButton {
+  display: inline-block;
+  background: #4f46e5;
+  color: #fff;
+  padding: 13px 26px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sa-primaryButton:hover {
+  background: #4338ca;
+}
+
+.sa-secondaryButton {
+  display: inline-block;
+  background: #fff;
+  color: #111827;
+  padding: 13px 26px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid #d1d5db;
+  white-space: nowrap;
+}
+
+.sa-secondaryButton:hover {
+  border-color: #9ca3af;
+}
+
+.sa-sectionHeading {
+  font-size: 30px;
+  font-weight: 800;
+  text-align: center;
+  margin: 0 0 12px;
+  color: #111827;
+  letter-spacing: -0.01em;
+}
+
+.sa-sectionSub {
+  text-align: center;
+  color: #6b7280;
+  font-size: 15px;
+  margin: 0 0 40px;
+}
+
+/* ── Pricing ──────────────────────────────────────────────────────────── */
+
+.sa-pricing {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 64px 24px;
+}
+
+.sa-pricingGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.sa-pricingCard {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sa-pricingCardHighlight {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 1px #4f46e5;
+}
+
+.sa-pricingCard h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  color: #111827;
+}
+
+.sa-price {
+  font-size: 26px;
+  font-weight: 800;
+  color: #111827;
+  margin: 0 0 20px;
+}
+
+.sa-pricingCard ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 28px;
+  flex: 1;
+}
+
+.sa-pricingCard li {
+  font-size: 14px;
+  color: #374151;
+  padding: 6px 0;
+  border-top: 1px solid #f3f4f6;
+}
+
+.sa-pricingCard li:first-child {
+  border-top: none;
+}
+
+.sa-pricingCard a {
+  text-align: center;
+}
+
+.sa-compare {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 24px 64px;
+}
+
+.sa-trialNote {
+  max-width: 640px;
+  margin: 0 auto 64px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
 /* ── Responsive ───────────────────────────────────────────────────────── */
 
 @media only screen and (max-width: 760px) {
   .sa-nav {
     display: none;
+  }
+
+  .sa-pricingGrid {
+    grid-template-columns: 1fr;
   }
 }

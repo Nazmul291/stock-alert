@@ -66,57 +66,6 @@
   color: #6b7280;
 }
 
-.sa-primaryButton {
-  display: inline-block;
-  background: #4f46e5;
-  color: #fff;
-  padding: 13px 26px;
-  border-radius: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.sa-primaryButton:hover {
-  background: #4338ca;
-}
-
-.sa-secondaryButton {
-  display: inline-block;
-  background: #fff;
-  color: #111827;
-  padding: 13px 26px;
-  border-radius: 8px;
-  font-size: 15px;
-  font-weight: 700;
-  text-decoration: none;
-  border: 1px solid #d1d5db;
-  white-space: nowrap;
-}
-
-.sa-secondaryButton:hover {
-  border-color: #9ca3af;
-}
-
-/* ── Shared section heading ──────────────────────────────────────────── */
-
-.sa-sectionHeading {
-  font-size: 30px;
-  font-weight: 800;
-  text-align: center;
-  margin: 0 0 12px;
-  color: #111827;
-  letter-spacing: -0.01em;
-}
-
-.sa-sectionSub {
-  text-align: center;
-  color: #6b7280;
-  font-size: 15px;
-  margin: 0 0 40px;
-}
-
 /* ── Features ─────────────────────────────────────────────────────────── */
 
 .sa-features {
@@ -139,6 +88,18 @@
   padding: 24px;
 }
 
+.sa-featureIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #eef2ff;
+  color: #4f46e5;
+  margin-bottom: 16px;
+}
+
 .sa-featureCard h3 {
   font-size: 16px;
   font-weight: 700;
@@ -151,70 +112,6 @@
   line-height: 1.6;
   color: #6b7280;
   margin: 0;
-}
-
-/* ── Pricing ──────────────────────────────────────────────────────────── */
-
-.sa-pricing {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 64px 24px;
-}
-
-.sa-pricingGrid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 24px;
-  margin-top: 16px;
-}
-
-.sa-pricingCard {
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 32px;
-  display: flex;
-  flex-direction: column;
-}
-
-.sa-pricingCardHighlight {
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 1px #4f46e5;
-}
-
-.sa-pricingCard h3 {
-  font-size: 18px;
-  font-weight: 700;
-  margin: 0 0 4px;
-  color: #111827;
-}
-
-.sa-price {
-  font-size: 26px;
-  font-weight: 800;
-  color: #111827;
-  margin: 0 0 20px;
-}
-
-.sa-pricingCard ul {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 28px;
-  flex: 1;
-}
-
-.sa-pricingCard li {
-  font-size: 14px;
-  color: #374151;
-  padding: 6px 0;
-  border-top: 1px solid #f3f4f6;
-}
-
-.sa-pricingCard li:first-child {
-  border-top: none;
-}
-
-.sa-pricingCard a {
-  text-align: center;
 }
 
 /* ── Final CTA ────────────────────────────────────────────────────────── */
@@ -249,10 +146,6 @@
   }
 
   .sa-featureGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .sa-pricingGrid {
     grid-template-columns: 1fr;
   }
 }

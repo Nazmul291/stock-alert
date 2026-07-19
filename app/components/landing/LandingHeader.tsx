@@ -9,9 +9,11 @@ export function LandingHeader({ appName, appStoreUrl }: { appName: string; appSt
           <span>{appName}</span>
         </a>
         <nav className="sa-nav">
-          <a href="/#features">Features</a>
-          <a href="/#pricing">Pricing</a>
+          <a href="/pricing">Pricing</a>
           <a href="/blog">Blogs</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/docs">Docs</a>
         </nav>
         <a
           className="sa-headerCta"

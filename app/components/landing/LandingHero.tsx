@@ -1,7 +1,7 @@
 export function LandingHero({ description, appStoreUrl }: { description: string; appStoreUrl: string }) {
   return (
     <section className="sa-hero">
-      <h1 className="sa-heroHeading">Never Lose a Sale to a Stockout</h1>
+      <h1 className="sa-heroHeading">Know Before You're Out of Stock</h1>
       <p className="sa-heroText">{description}</p>
       <div className="sa-heroActions">
         <a

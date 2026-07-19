@@ -6,7 +6,7 @@ export function LandingPricing({ appStoreUrl }: { appStoreUrl: string }) {
       <h2 className="sa-sectionHeading">Simple, transparent pricing</h2>
       <p className="sa-sectionSub">Every plan includes a 30-day free trial.</p>
       <div className="sa-pricingGrid">
-        {(["basic", "pro"] as const).map((key) => {
+        {(["basic", "pro", "enterprise"] as const).map((key) => {
           const plan = PLAN_LIMITS[key];
           return (
             <div
