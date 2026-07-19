@@ -6,7 +6,6 @@ import { useSSEData } from "../../hooks/use-sse-data";
 import { LandingHeader } from "../../components/landing/LandingHeader";
 import { LandingHero } from "../../components/landing/LandingHero";
 import { LandingFeatures } from "../../components/landing/LandingFeatures";
-import { LandingPricing } from "../../components/landing/LandingPricing";
 import { LandingFinalCta } from "../../components/landing/LandingFinalCta";
 import { LandingFooter } from "../../components/landing/LandingFooter";
 // Inlined as a <style> tag below instead of a <link rel="stylesheet"> so this
@@ -21,7 +20,7 @@ const APP_NAME = "Stock Alert";
 const APP_STORE_URL = "https://apps.shopify.com/stock-alert-4";
 const TITLE = "Stock Alert — Low Stock & Back in Stock Alerts for Shopify";
 const DESCRIPTION =
-  "Stock Alert monitors your Shopify inventory in real time and sends instant email and Slack alerts the moment a product runs low or sells out — plus automatic back-in-stock notifications for your customers.";
+  "Stock Alert watches your Shopify inventory around the clock and alerts you the moment a product runs low — by email, WhatsApp, or Slack — plus automatic back-in-stock notifications for your customers.";
 
 // The landing page is fully static — appUrl comes from an env var that never
 // changes at runtime. Cache aggressively so repeat visitors and CDNs never
@@ -116,9 +115,9 @@ export default function LandingPage() {
     offers: {
       "@type": "AggregateOffer",
       lowPrice: "3.99",
-      highPrice: "9.99",
+      highPrice: "19.99",
       priceCurrency: "USD",
-      offerCount: "2",
+      offerCount: "3",
     },
   };
 
@@ -137,7 +136,6 @@ export default function LandingPage() {
       <main>
         <LandingHero description={DESCRIPTION} appStoreUrl={APP_STORE_URL} />
         <LandingFeatures />
-        <LandingPricing appStoreUrl={APP_STORE_URL} />
         <LandingFinalCta appStoreUrl={APP_STORE_URL} />
       </main>
 
