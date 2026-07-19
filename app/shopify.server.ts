@@ -10,8 +10,8 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 
-import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "./lib/billing-plans";
-export { BILLING_PLAN_BASIC, BILLING_PLAN_PRO };
+import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE } from "./lib/billing-plans";
+export { BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE };
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -43,6 +43,16 @@ const shopify = shopifyApp({
       lineItems: [
         {
           amount: 9.99,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
+    },
+    [BILLING_PLAN_ENTERPRISE]: {
+      trialDays: 30,
+      lineItems: [
+        {
+          amount: 19.99,
           currencyCode: "USD",
           interval: BillingInterval.Every30Days,
         },

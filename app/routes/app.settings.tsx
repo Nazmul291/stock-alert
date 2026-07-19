@@ -17,6 +17,7 @@ import { InventorySettingsSection } from "../components/settings/InventorySettin
 import { DigestEmailsSection } from "../components/settings/DigestEmailsSection";
 import { EmailBrandingSection } from "../components/settings/EmailBrandingSection";
 import { MonitoringScopeSection } from "../components/settings/MonitoringScopeSection";
+import { EnterpriseReportingSection } from "../components/settings/EnterpriseReportingSection";
 import { ThemeAppEmbedSection } from "../components/settings/ThemeAppEmbedSection";
 import { DangerZoneSection } from "../components/settings/DangerZoneSection";
 import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
@@ -68,6 +69,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
   const rawMonitoringFilter = form.get("monitoringFilter");
+  const rawDeadStockThresholdDays = parseInt((form.get("deadStockThresholdDays") as string) ?? "60");
   const data = {
     autoHideEnabled: bool("autoHideEnabled"),
     autoRepublishEnabled: bool("autoRepublishEnabled"),
@@ -85,6 +87,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
       brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
       brandSenderName: ((form.get("brandSenderName") as string) ?? "").trim() || null,
+    } : {}),
+    ...(canUseFeature(plan, "coreLimitedEditionSections") ? {
+      limitedEditionTag: ((form.get("limitedEditionTag") as string) ?? "").trim() || "limited-edition",
+    } : {}),
+    ...(canUseFeature(plan, "deadStockAlerts") ? {
+      deadStockThresholdDays: [30, 60, 90].includes(rawDeadStockThresholdDays) ? rawDeadStockThresholdDays : 60,
     } : {}),
   };
 
@@ -176,6 +184,8 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   monitoringFilter: "all",
   monitoringCollectionId: "",
   monitoringTags: "",
+  limitedEditionTag: "limited-edition",
+  deadStockThresholdDays: 60,
 };
 
 // Always renders the real layout — read-only display values (PlanCard) read
@@ -200,6 +210,8 @@ function SettingsContent() {
   const [monitoringFilter, setMonitoringFilter] = useState(settings.monitoringFilter);
   const [monitoringCollectionId, setMonitoringCollectionId] = useState(settings.monitoringCollectionId);
   const [monitoringTags, setMonitoringTags] = useState(settings.monitoringTags);
+  const [limitedEditionTag, setLimitedEditionTag] = useState(settings.limitedEditionTag);
+  const [deadStockThresholdDays, setDeadStockThresholdDays] = useState(settings.deadStockThresholdDays);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -220,6 +232,8 @@ function SettingsContent() {
     setMonitoringFilter(settings.monitoringFilter);
     setMonitoringCollectionId(settings.monitoringCollectionId);
     setMonitoringTags(settings.monitoringTags);
+    setLimitedEditionTag(settings.limitedEditionTag);
+    setDeadStockThresholdDays(settings.deadStockThresholdDays);
     // Only re-seed on the loading -> loaded transition, not on every
     // settings identity change (e.g. an in-place SSE re-push), so it
     // doesn't clobber in-progress edits.
@@ -237,6 +251,8 @@ function SettingsContent() {
     setMonitoringFilter(settings.monitoringFilter);
     setMonitoringCollectionId(settings.monitoringCollectionId);
     setMonitoringTags(settings.monitoringTags);
+    setLimitedEditionTag(settings.limitedEditionTag);
+    setDeadStockThresholdDays(settings.deadStockThresholdDays);
     formRef.current?.reset();
     setIsDirty(false);
   }
@@ -275,12 +291,16 @@ function SettingsContent() {
     fd.set("brandLogoUrl", brandLogoUrl);
     fd.set("brandColor", brandColor || "#4f46e5");
     fd.set("brandSenderName", brandSenderName);
+    fd.set("limitedEditionTag", limitedEditionTag);
+    fd.set("deadStockThresholdDays", String(deadStockThresholdDays));
     saveFetcher.submit(fd, { method: "post" });
   }
 
   const canAutoRepublish = canUseFeature(plan, "autoRepublish");
   const canDailyDigest = canUseFeature(plan, "dailyDigest");
   const canWhiteLabelEmails = canUseFeature(plan, "whiteLabelEmails");
+  const canCoreLimitedEdition = canUseFeature(plan, "coreLimitedEditionSections");
+  const canDeadStockAlerts = canUseFeature(plan, "deadStockAlerts");
 
   function markDirty() {
     setIsDirty(true);
@@ -346,6 +366,15 @@ function SettingsContent() {
           onMonitoringFilterChange={(v) => { setMonitoringFilter(v); markDirty(); }}
           onMonitoringCollectionIdChange={(v) => { setMonitoringCollectionId(v); markDirty(); }}
           onMonitoringTagsChange={(v) => { setMonitoringTags(v); markDirty(); }}
+        />
+
+        <EnterpriseReportingSection
+          limitedEditionTag={limitedEditionTag}
+          deadStockThresholdDays={deadStockThresholdDays}
+          canCoreLimitedEdition={canCoreLimitedEdition}
+          canDeadStockAlerts={canDeadStockAlerts}
+          onLimitedEditionTagChange={(v) => { setLimitedEditionTag(v); markDirty(); }}
+          onDeadStockThresholdDaysChange={(v) => { setDeadStockThresholdDays(v); markDirty(); }}
         />
       </Form>
 

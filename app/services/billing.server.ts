@@ -1,5 +1,5 @@
 import { authenticate, unauthenticated } from "../shopify.server";
-import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../lib/billing-plans";
+import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE, planKeyForBillingName, pickHighestPriority, type PlanKey } from "../lib/billing-plans";
 import { redis } from "../lib/redis.server";
 
 type AdminClient = Awaited<ReturnType<typeof authenticate.admin>>["admin"];
@@ -94,7 +94,7 @@ export async function getCachedHasActivePayment(
   if (cached !== undefined) return cached === "1";
 
   const { hasActivePayment } = await billing.check({
-    plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
+    plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE],
     isTest,
   });
 
@@ -127,7 +127,7 @@ export async function getCachedHasActivePaymentOffline(shop: string, isTest: boo
   );
   const data = await res.json();
   const installation = data.data?.currentAppInstallation;
-  const plans = [BILLING_PLAN_BASIC, BILLING_PLAN_PRO];
+  const plans = [BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE];
 
   const hasActivePayment =
     (installation?.activeSubscriptions ?? []).some(
@@ -148,7 +148,7 @@ export async function getCachedHasActivePaymentOffline(shop: string, isTest: boo
 // Pro cancels the old Basic subscription, which then reports EXPIRED here
 // after the new one is already ACTIVE) — so this always hits Shopify live
 // rather than trusting the event in isolation.
-export async function getActiveSubscriptionPlan(shop: string): Promise<"basic" | "pro" | null> {
+export async function getActiveSubscriptionPlan(shop: string): Promise<PlanKey | null> {
   try {
     const { admin } = await unauthenticated.admin(shop);
     const res = await admin.graphql(
@@ -157,9 +157,8 @@ export async function getActiveSubscriptionPlan(shop: string): Promise<"basic" |
     );
     const data = await res.json();
     const subs: { name: string }[] = data.data?.currentAppInstallation?.activeSubscriptions ?? [];
-    if (subs.some((s) => s.name === BILLING_PLAN_PRO)) return "pro";
-    if (subs.some((s) => s.name === BILLING_PLAN_BASIC)) return "basic";
-    return null;
+    const match = pickHighestPriority(subs);
+    return match ? planKeyForBillingName(match.name) : null;
   } catch {
     return null;
   }

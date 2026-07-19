@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLiveEventsStore } from "../stores/live-events-store";
 
 export function useSyncStream(shop: string, syncRunning: boolean) {
+  const bump = useLiveEventsStore((s) => s.bump);
   const [syncPct, setSyncPct] = useState<number | null>(null);
   const [syncStreamError, setSyncStreamError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -17,9 +19,12 @@ export function useSyncStream(shop: string, syncRunning: boolean) {
         setSyncPct(100);
         es.close();
         esRef.current = null;
-        // sync-state.server.ts's done() publishes a "products"/"dashboard"
-        // live event — the dashboard/products pages refresh themselves via
-        // useCachedSSEData instead of this hook forcing a full loader rerun.
+        // sync-state.server.ts's done() also publishes a "products"/"dashboard"
+        // live event over Redis, for other open tabs — but this page already
+        // knows sync just finished without waiting on that round trip (SSE
+        // subscriber setup, pub/sub delivery, EventSource dispatch), so bump
+        // directly here too. useCachedSSEData treats either source the same.
+        bump(["products", "dashboard", "analytics"]);
         setTimeout(() => setSyncPct(null), 1000);
       }
       if (data.type === "idle") {
@@ -40,7 +45,7 @@ export function useSyncStream(shop: string, syncRunning: boolean) {
       esRef.current = null;
       setSyncPct(null);
     };
-  }, [shop]);
+  }, [shop, bump]);
 
   useEffect(() => {
     if (syncRunning && !esRef.current) openStream();

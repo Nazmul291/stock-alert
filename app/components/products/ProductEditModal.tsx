@@ -31,6 +31,9 @@ export type ProductRow = {
   avgDailySales?: number | null;
   manualDailySales?: number | null;
   expectedRestockDate?: string | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  unitCost?: number | null;
   variants?: VariantStatusRow[];
   variantCount?: number;
   variantsAtRiskCount?: number;
@@ -53,6 +56,9 @@ export type OptimisticPatch = {
   expectedRestockDate: string | null;
   manualDailySales: number | null;
   isTracked: boolean;
+  supplierId: string | null;
+  supplierName: string | null;
+  unitCost: number | null;
   // Present only when tracked and inventory data was loaded — per-variant
   // quantity/status keyed by variantId, computed from the same threshold
   // logic the server uses (see webhooks.inventory.tsx's status calc).
@@ -88,6 +94,7 @@ type Props = {
   threshold: number;
   autoHideEnabled: boolean;
   autoRepublishEnabled: boolean;
+  suppliers?: { id: string; name: string }[];
   onClose: () => void;
   onSaved?: (patch: OptimisticPatch) => void;
   // Called if the real response turns out to be an error and arrives after
@@ -122,8 +129,9 @@ function getCachedSettings(productId: string): ProductSettings | null {
   return entry.settings;
 }
 
-export function ProductEditModal({ product, plan, threshold, autoHideEnabled, autoRepublishEnabled, onClose, onSaved, onSaveError }: Props) {
+export function ProductEditModal({ product, plan, threshold, autoHideEnabled, autoRepublishEnabled, suppliers, onClose, onSaved, onSaveError }: Props) {
   const canPerProductThreshold = canUseFeature(plan, "perProductThresholds");
+  const canManageSupplier = canUseFeature(plan, "purchaseOrders");
   const saveFetcher = useFetcher<SaveActionResult>();
   const inventoryFetcher = useFetcher<{ inventoryData?: { variants: VariantInventory[] } | null; inventoryError?: string }>();
   const enableTrackingFetcher = useFetcher<{ enabledInventory?: { variants: VariantInventory[] }; error?: string }>();
@@ -142,6 +150,8 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
   const [customThresholdMetafieldId, setCustomThresholdMetafieldId] = useState<string | null>(null);
   const [editRestockDate, setEditRestockDate] = useState(product.expectedRestockDate ?? "");
   const [editManualSales, setEditManualSales] = useState(product.manualDailySales != null ? String(product.manualDailySales) : "");
+  const [editSupplierId, setEditSupplierId] = useState(product.supplierId ?? "");
+  const [editUnitCost, setEditUnitCost] = useState(product.unitCost != null ? String(product.unitCost) : "");
 
   // Load inventory and settings on mount — skip either round-trip entirely
   // on a fresh cache hit (see inventoryCache/settingsCache above).
@@ -228,6 +238,18 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
       expectedRestockDate: editRestockDate || null,
       manualDailySales: editManualSales.trim() !== "" && !isNaN(parseFloat(editManualSales)) ? parseFloat(editManualSales) : null,
       isTracked: editTracked,
+      // When the plan can't manage suppliers, the server silently leaves
+      // these fields untouched (see app.products.tsx's supplierFields) —
+      // the optimistic patch must match that and echo back the product's
+      // existing values, not null them out, or the UI would show "no
+      // supplier" for a row whose DB value never actually changed.
+      supplierId: canManageSupplier ? (editSupplierId || null) : (product.supplierId ?? null),
+      supplierName: canManageSupplier
+        ? (editSupplierId ? (suppliers ?? []).find((s) => s.id === editSupplierId)?.name ?? null : null)
+        : (product.supplierName ?? null),
+      unitCost: canManageSupplier
+        ? (editUnitCost.trim() !== "" && !isNaN(parseFloat(editUnitCost)) ? parseFloat(editUnitCost) : null)
+        : (product.unitCost ?? null),
     };
 
     if (!editTracked || latestVariants.length === 0) return base;
@@ -590,6 +612,42 @@ export function ProductEditModal({ product, plan, threshold, autoHideEnabled, au
                 Override the auto-calculated rate for new products with no order history. Leave blank to use 30-day average.
               </p>
             </div>
+
+            {canManageSupplier && (
+              <div style={{ marginBottom: 20, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                <label style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
+                  Supplier
+                </label>
+                <select
+                  name="supplierId"
+                  value={editSupplierId}
+                  onChange={(e) => setEditSupplierId(e.target.value)}
+                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13, marginBottom: 10 }}
+                >
+                  <option value="">No supplier assigned</option>
+                  {(suppliers ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Unit cost</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, color: "#374151" }}>$</span>
+                  <input
+                    type="number"
+                    name="unitCost"
+                    value={editUnitCost}
+                    onChange={(e) => setEditUnitCost(e.target.value)}
+                    min={0}
+                    step={0.01}
+                    placeholder="0.00"
+                    style={{ width: 100, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
+                  />
+                </div>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
+                  Used to calculate purchase order totals when this product is reordered.
+                </p>
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" onClick={onClose} disabled={saving}

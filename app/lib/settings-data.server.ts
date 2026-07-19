@@ -13,6 +13,8 @@ type SettingsValues = {
   monitoringFilter: string;
   monitoringCollectionId: string;
   monitoringTags: string;
+  limitedEditionTag: string;
+  deadStockThresholdDays: number;
 };
 
 export type SettingsData = {
@@ -44,6 +46,8 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           monitoringFilter: settings.monitoringFilter ?? "all",
           monitoringCollectionId: settings.monitoringCollectionId ?? "",
           monitoringTags: settings.monitoringTags ?? "",
+          limitedEditionTag: settings.limitedEditionTag ?? "limited-edition",
+          deadStockThresholdDays: settings.deadStockThresholdDays ?? 60,
         }
       : {
           autoHideEnabled: false,
@@ -58,6 +62,8 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           monitoringFilter: "all",
           monitoringCollectionId: "",
           monitoringTags: "",
+          limitedEditionTag: "limited-edition",
+          deadStockThresholdDays: 60,
         },
   };
 }

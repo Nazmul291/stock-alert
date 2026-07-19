@@ -1,5 +1,6 @@
 import { Form, Link } from "react-router";
 import { useProductsStore, buildProductsUrl } from "../../stores/products-store";
+import { canUseFeature } from "../../lib/plan-limits";
 
 const FILTER_TABS = [
   { key: "all",           label: "All Products" },
@@ -16,6 +17,8 @@ export function ProductsToolbar({ onExportCsv, exporting }: {
   const search = useProductsStore((s) => s.search);
   const filter = useProductsStore((s) => s.filter);
   const prev = useProductsStore((s) => s.prev);
+  const plan = useProductsStore((s) => s.data?.plan) ?? "basic";
+  const canManagePurchaseOrders = canUseFeature(plan, "purchaseOrders");
   const buildUrl = (params: Record<string, string | null>) => buildProductsUrl({ search, filter, prev }, params);
 
   return (
@@ -82,6 +85,19 @@ export function ProductsToolbar({ onExportCsv, exporting }: {
           )}
           {exporting ? "Exporting…" : "Export CSV"}
         </button>
+        {canManagePurchaseOrders && (
+          <Link
+            to="/app/purchase-orders"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "5px 12px", borderRadius: 6, border: "1px solid #d1d5db",
+              background: "#fff", color: "#374151", fontSize: 13, textDecoration: "none",
+              whiteSpace: "nowrap", marginBottom: 1,
+            }}
+          >
+            Create Purchase Order
+          </Link>
+        )}
       </div>
     </>
   );

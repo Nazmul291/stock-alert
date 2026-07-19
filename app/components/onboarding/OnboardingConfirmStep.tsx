@@ -1,13 +1,12 @@
-import { Form } from "react-router";
-import { OnboardingPrimaryButton } from "./OnboardingPrimaryButton";
-
-export function OnboardingConfirmStep({ shopInfo, submitting }: {
+// Purely a UI pacing step — nothing here needs its own DB write, since
+// accepting terms (the step before this) already marks the install
+// confirmed. onContinue just advances app._index.tsx's local sub-step state.
+export function OnboardingConfirmStep({ shopInfo, onContinue }: {
   shopInfo: { name: string; domain: string; email: string };
-  submitting: boolean;
+  onContinue: () => void;
 }) {
   return (
-    <Form method="post">
-      <input type="hidden" name="intent" value="confirm_install" />
+    <div>
       <div style={{ marginBottom: 20 }}>
         {[
           { label: "Store name", value: shopInfo.name },
@@ -31,7 +30,16 @@ export function OnboardingConfirmStep({ shopInfo, submitting }: {
         </p>
       </div>
 
-      <OnboardingPrimaryButton loading={submitting}>Looks good — continue →</OnboardingPrimaryButton>
-    </Form>
+      <button
+        type="button"
+        onClick={onContinue}
+        style={{
+          width: "100%", padding: "12px 20px", borderRadius: 8, border: "none",
+          background: "#008060", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer",
+        }}
+      >
+        Looks good — continue →
+      </button>
+    </div>
   );
 }

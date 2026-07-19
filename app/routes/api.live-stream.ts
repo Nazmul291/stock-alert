@@ -17,7 +17,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return new Response("Session expired", { status: 401 });
   }
 
-  ensureSubscriber();
+  // Must be awaited, not fire-and-forget — a publish that races an
+  // un-awaited psubscribe can be silently dropped (see the comment in
+  // live-stream-emitter.server.ts). Caught rather than propagated: a failed
+  // subscriber setup shouldn't prevent the page from loading, just mean live
+  // updates don't arrive on this connection until a later one succeeds.
+  await ensureSubscriber().catch(() => {});
 
   const encoder = new TextEncoder();
 

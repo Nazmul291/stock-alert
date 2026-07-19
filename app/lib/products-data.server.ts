@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getMaxProducts } from "./plan-limits";
+import { getMaxProducts, canUseFeature } from "./plan-limits";
 import { syncState } from "./sync-state.server";
 import { classifyProductStatus, countDistinctProducts, paginatedProductIdsByStatus } from "./inventory-rollup.server";
 import type { RollupStatus } from "./inventory-rollup.server";
@@ -56,7 +56,11 @@ const STATUS_FILTERS = new Set(["out_of_stock", "low_stock", "in_stock"]);
 export type ProductsData = {
   shop: string;
   plan: string;
-  maxProducts: number;
+  // null means unlimited (Enterprise). Infinity itself can't cross the SSE
+  // wire — JSON.stringify(Infinity) silently serializes to `null` already,
+  // so this makes that the explicit, intentional representation instead of
+  // an accident the client has to guess about.
+  maxProducts: number | null;
   trackedCount: number;
   threshold: number;
   products: ProductRow[];
@@ -70,6 +74,7 @@ export type ProductsData = {
   monitoringFilter: string;
   monitoringCollectionId: string | null;
   monitoringTags: string | null;
+  suppliers: { id: string; name: string }[];
 };
 
 // Assembles a product-level row from its sibling variant tracking rows —
@@ -82,6 +87,7 @@ function buildTrackedProductRow(
   productId: string,
   rows: InventoryTracking[],
   overrides?: { imageUrl?: string | null; imageAlt?: string | null; shopifyStatus?: string },
+  suppliersById?: Map<string, string>,
 ): ProductRow {
   const first = rows[0];
   const statuses = rows.map((r) => r.inventoryStatus as string);
@@ -118,6 +124,9 @@ function buildTrackedProductRow(
     avgDailySales: salesVelocityValues.length > 0 ? salesVelocityValues.reduce((sum, v) => sum + v, 0) : null,
     manualDailySales: first.manualDailySales ?? null,
     expectedRestockDate: first.expectedRestockDate?.toISOString().slice(0, 10) ?? null,
+    supplierId: first.supplierId,
+    supplierName: first.supplierId ? suppliersById?.get(first.supplierId) ?? null : null,
+    unitCost: first.unitCost ?? null,
     variants,
     variantCount: rows.length,
     variantsAtRiskCount: statuses.filter((s) => s === "low_stock" || s === "out_of_stock").length,
@@ -129,15 +138,25 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
 }): Promise<ProductsData> {
   const pageSize = 50;
 
-  const [storeSession, settings, shopSyncState] = await Promise.all([
-    prisma.session.findFirst({ where: { shop, isOnline: false } }),
+  // storeSession fetched first so the supplier query below can be skipped
+  // entirely for plans that can never use it, instead of unconditionally
+  // querying suppliers on every products-page load regardless of plan.
+  const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
+  const plan = storeSession?.plan ?? "basic";
+  const canManageSupplier = canUseFeature(plan, "purchaseOrders");
+
+  const [settings, shopSyncState, supplierRows] = await Promise.all([
     prisma.storeSettings.findUnique({ where: { shop } }),
     syncState.get(shop),
+    canManageSupplier
+      ? prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+      : Promise.resolve([]),
   ]);
 
-  const plan = storeSession?.plan ?? "basic";
-  const maxProducts = getMaxProducts(plan);
+  const maxProductsRaw = getMaxProducts(plan);
+  const maxProducts = Number.isFinite(maxProductsRaw) ? maxProductsRaw : null;
   const threshold = settings?.lowStockThreshold ?? 5;
+  const suppliersById = new Map(supplierRows.map((s) => [s.id, s.name]));
 
   // Status/tracked filters are answered straight from the DB — it holds the
   // status (and now the cached image) for every tracked product regardless of
@@ -175,7 +194,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     const products: ProductRow[] = productIds
       .map((pid) => rowsByProduct.get(pid.toString()))
       .filter((rowsForProduct): rowsForProduct is InventoryTracking[] => !!rowsForProduct && rowsForProduct.length > 0)
-      .map((rowsForProduct) => buildTrackedProductRow(rowsForProduct[0].productId.toString(), rowsForProduct));
+      .map((rowsForProduct) => buildTrackedProductRow(rowsForProduct[0].productId.toString(), rowsForProduct, undefined, suppliersById));
 
     const nextSkip = skip + productIds.length;
     return {
@@ -190,6 +209,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
       monitoringFilter: settings?.monitoringFilter ?? "all",
       monitoringCollectionId: settings?.monitoringCollectionId ?? null,
       monitoringTags: settings?.monitoringTags ?? null,
+      suppliers: supplierRows,
     };
   }
 
@@ -265,7 +285,7 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     }
 
     if (trackingRows.length > 0) {
-      return buildTrackedProductRow(productId, trackingRows, { imageUrl, imageAlt, shopifyStatus });
+      return buildTrackedProductRow(productId, trackingRows, { imageUrl, imageAlt, shopifyStatus }, suppliersById);
     }
 
     return {
@@ -301,5 +321,6 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     monitoringFilter: settings?.monitoringFilter ?? "all",
     monitoringCollectionId: settings?.monitoringCollectionId ?? null,
     monitoringTags: settings?.monitoringTags ?? null,
+    suppliers: supplierRows,
   };
 }

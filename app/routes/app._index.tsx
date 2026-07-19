@@ -1,21 +1,34 @@
-import { useEffect } from "react";
-import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
+import { useEffect, useState } from "react";
+import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
+import { useLoaderData, useActionData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 import { mintSseToken } from "../lib/sse-token.server";
+import { getCachedSettings, getCachedShopEmail } from "../lib/shop-cache.server";
+import { getWizardProgress } from "../lib/wizard-progress.server";
+import { requestPlanSubscription } from "../lib/billing-request.server";
+import type { PlanKey } from "../lib/billing-plans";
 import type { DashboardData } from "../lib/dashboard-data.server";
-import { useAppGateStore } from "../stores/app-gate-store";
 import { useDashboardStore } from "../stores/dashboard-store";
+import { useWizardProgressStore } from "../stores/wizard-progress-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { SetupChecklist } from "../components/dashboard/SetupChecklist";
 import { InventoryOverviewSection } from "../components/dashboard/InventoryOverviewSection";
 import { StockOutSoonBanner } from "../components/dashboard/StockOutSoonBanner";
+import { ReadyForReorderBanner } from "../components/dashboard/ReadyForReorderBanner";
+import { canUseFeature, getPlanLimits } from "../lib/plan-limits";
 import { ProductsAtRiskSection } from "../components/dashboard/ProductsAtRiskSection";
 import { RecentAlertsSection } from "../components/dashboard/RecentAlertsSection";
 import { DashboardSyncButton } from "../components/dashboard/DashboardSyncButton";
+import { OnboardingCard } from "../components/onboarding/OnboardingCard";
+import { TermsAcceptanceStep } from "../components/onboarding/TermsAcceptanceStep";
+import { OnboardingConfirmStep } from "../components/onboarding/OnboardingConfirmStep";
+import { OnboardingSettingsStep } from "../components/onboarding/OnboardingSettingsStep";
+import { OnboardingStepIndicator } from "../components/onboarding/OnboardingStepIndicator";
+import { PlanSelectionStep } from "../components/billing/PlanSelectionStep";
 
 // Only the auth check blocks the response — dashboard data is fetched entirely
 // in the background by api.dashboard-stream.ts, identified by a short-lived
@@ -25,16 +38,180 @@ import { DashboardSyncButton } from "../components/dashboard/DashboardSyncButton
 // server-only code from `loader`/`action`/`headers`/`middleware`, so any other
 // export from a route file (like a plain helper function) gets pulled into the
 // client bundle too, dragging in server-only modules like db.server with it.
+//
+// This is also where the terms/onboarding/plan wizard lives — see the
+// component below. wizard-progress.server.ts (shared with app.tsx, which
+// uses it to decide whether to hide the nav menu) is DB-only, so computing
+// it here on every load costs nothing worth avoiding.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  const token = await mintSseToken(shop);
-  return { shop, token };
+
+  const progress = await getWizardProgress(shop);
+
+  // shopInfo/existingSettings only feed the onboarding sub-steps below —
+  // skip the extra cached lookups once onboarding is actually done, since
+  // that's the steady-state case (every dashboard load after setup).
+  const needsOnboardingData = !progress.onboardingDone;
+
+  const [token, settings, ownerEmail] = await Promise.all([
+    mintSseToken(shop),
+    needsOnboardingData ? getCachedSettings(shop) : Promise.resolve(null),
+    needsOnboardingData ? getCachedShopEmail(shop) : Promise.resolve(null),
+  ]);
+
+  const shopInfo = needsOnboardingData
+    ? {
+        name: shop.replace(".myshopify.com", "").split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+        email: ownerEmail ?? "",
+        domain: shop,
+      }
+    : null;
+  const existingSettings = needsOnboardingData
+    ? {
+        lowStockThreshold: settings?.lowStockThreshold ?? 5,
+        autoHideEnabled: settings?.autoHideEnabled ?? false,
+        autoRepublishEnabled: settings?.autoRepublishEnabled ?? false,
+      }
+    : null;
+
+  return { shop, token, progress, shopInfo, existingSettings };
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const auth = await authenticate.admin(request);
+  const { session } = auth;
+  const shop = session.shop;
+  const form = await request.formData();
+  const intent = form.get("intent") as string;
+
+  if (intent === "accept_terms") {
+    await prisma.setupProgress.upsert({
+      where: { shop },
+      update: { termsAccepted: true, termsAcceptedAt: new Date() },
+      create: {
+        shop,
+        termsAccepted: true,
+        termsAcceptedAt: new Date(),
+        appInstalled: true,
+        globalSettingsConfigured: false,
+        notificationsConfigured: false,
+        productThresholdsConfigured: false,
+        firstProductTracked: false,
+      },
+    });
+    return null;
+  }
+
+  if (intent === "save_settings") {
+    const data = {
+      lowStockThreshold: parseInt(form.get("lowStockThreshold") as string) || 5,
+      autoHideEnabled: form.get("autoHideEnabled") === "true",
+      autoRepublishEnabled: form.get("autoRepublishEnabled") === "true",
+    };
+
+    // Auto-set notification email from the shop's owner email
+    const notificationEmail = await getCachedShopEmail(shop);
+
+    await prisma.storeSettings.upsert({
+      where: { shop },
+      update: { ...data, emailNotifications: true, notificationEmail },
+      create: { shop, ...data, emailNotifications: true, notificationEmail },
+    });
+    await prisma.setupProgress.upsert({
+      where: { shop },
+      update: { globalSettingsConfigured: true, notificationsConfigured: true },
+      create: {
+        shop,
+        termsAccepted: true,
+        appInstalled: true,
+        globalSettingsConfigured: true,
+        notificationsConfigured: true,
+        productThresholdsConfigured: false,
+        firstProductTracked: false,
+      },
+    });
+    return null;
+  }
+
+  if (intent === "select_plan") {
+    return requestPlanSubscription(auth, form.get("plan") as string);
+  }
+
+  return null;
 };
 
 export default function Dashboard() {
-  const { shop, token } = useLoaderData<typeof loader>();
+  const { shop, token, progress: loaderProgress, shopInfo, existingSettings } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
 
+  // Hydrate the shared store from this route's own loader data on every
+  // mount/revalidation — app.tsx hydrates the same store from its own copy
+  // of this same DB-only check, so a step completed here shows up in its
+  // nav-hide decision immediately (see below), not just after its own next
+  // revalidation. patchProgress calls below (on submit, before the server
+  // round trip resolves) are what make that "immediately" real — without
+  // them this would show last-render's data for one frame after each step,
+  // since the store doesn't otherwise know a step completed until this
+  // effect re-runs with fresh loader data.
+  const setProgress = useWizardProgressStore((s) => s.setProgress);
+  useEffect(() => { setProgress(loaderProgress); }, [loaderProgress, setProgress]);
+  const patchProgress = useWizardProgressStore((s) => s.patchProgress);
+  const storeProgress = useWizardProgressStore((s) => s.progress);
+  const progress = storeProgress ?? loaderProgress;
+
+  // Which of the two onboarding sub-steps (confirm info / settings) is
+  // showing. Purely local — neither sub-step needs a DB flag of its own,
+  // since accepting terms already marks the install confirmed and only the
+  // settings sub-step actually persists anything (globalSettingsConfigured).
+  const [onboardingStep, setOnboardingStep] = useState<1 | 2>(1);
+
+  if (!progress.termsAccepted) {
+    return (
+      <OnboardingCard title="Welcome to Stock Alert!" subtitle="Let's confirm a few things before we get started.">
+        <TermsAcceptanceStep onSubmit={() => patchProgress({ termsAccepted: true })} />
+      </OnboardingCard>
+    );
+  }
+
+  if (!progress.onboardingDone) {
+    return (
+      <OnboardingCard
+        title={onboardingStep === 1 ? "Confirm your store details" : "Configure inventory settings"}
+        subtitle={onboardingStep === 1 ? "Let's confirm your store details before we get started." : "Set your low-stock threshold and automation preferences."}
+      >
+        <OnboardingStepIndicator step={onboardingStep} />
+        {onboardingStep === 1 && shopInfo && (
+          <OnboardingConfirmStep shopInfo={shopInfo} onContinue={() => setOnboardingStep(2)} />
+        )}
+        {onboardingStep === 2 && existingSettings && (
+          <OnboardingSettingsStep
+            existingSettings={existingSettings}
+            onSubmit={() => patchProgress({ onboardingDone: true })}
+          />
+        )}
+      </OnboardingCard>
+    );
+  }
+
+  if (!progress.hasPlan) {
+    return (
+      <PlanSelectionStep
+        activePlan={(progress.activePlan ?? null) as PlanKey | null}
+        error={actionData && "error" in actionData ? actionData.error : null}
+      />
+    );
+  }
+
+  return <DashboardShell shop={shop} token={token} />;
+}
+
+// Split out from Dashboard() so its dashboard-data SSE connection (which
+// triggers a real backend aggregation query) only opens once the wizard is
+// actually done — Dashboard()'s early-return branches above never mount
+// this, so a merchant still on the terms/onboarding/plan steps costs
+// nothing on the dashboard-stream endpoint.
+function DashboardShell({ shop, token }: { shop: string; token: string }) {
   const setLoaderData = useDashboardStore((s) => s.setLoaderData);
   useEffect(() => { setLoaderData({ shop }); }, [shop, setLoaderData]);
 
@@ -85,18 +262,7 @@ export default function Dashboard() {
 function DashboardContent() {
   const shop = useDashboardStore((s) => s.shop);
   const data = useDashboardStore((s) => s.data);
-  // app.tsx's gate check runs in parallel and may still decide to bounce this
-  // merchant to onboarding/billing. Treat the page as still loading while
-  // appStatus is "loading" or "redirect", instead of flashing full dashboard
-  // content right before the redirect fires — only "ready" means it's safe
-  // to treat data as final.
-  const appStatus = useAppGateStore((s) => s.appStatus);
-  // Gate on the STORE's data, not the local `data` from useSSEData in the
-  // parent — the setSSEState effect hasn't committed yet in the same render
-  // where that local value first turns non-null, so this component would
-  // otherwise render against a stale/null value for one commit. See
-  // dashboard-store.ts.
-  const loading = !data || appStatus !== "ready";
+  const loading = !data;
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
   const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop ?? "", data?.syncRunning ?? false);
@@ -110,6 +276,9 @@ function DashboardContent() {
   const notificationEmail = data?.notificationEmail ?? null;
   const atRiskProducts = data?.atRiskProducts ?? [];
   const stockOutSoonCount = data?.stockOutSoonCount ?? 0;
+  const readyForReorderCount = data?.readyForReorderCount ?? 0;
+  const canManagePurchaseOrders = canUseFeature(plan, "purchaseOrders");
+  const planLimits = getPlanLimits(plan);
 
   const syncActionError = syncPct === null && syncFetcher.state === "idle" ? (syncFetcher.data?.error ?? null) : null;
   const syncError = syncStreamError ?? syncActionError;
@@ -138,6 +307,8 @@ function DashboardContent() {
           don't reserve space for it by default. */}
       {(!loading && stockOutSoonCount > 0) && <StockOutSoonBanner />}
 
+      {(!loading && canManagePurchaseOrders && readyForReorderCount > 0) && <ReadyForReorderBanner />}
+
       {/* Unlike the two above, this one renders during loading too (showing
           its own internal skeleton — see ProductsAtRiskSection.tsx's
           PLACEHOLDER_ROWS) and only disappears once data confirms there's
@@ -154,9 +325,13 @@ function DashboardContent() {
           <strong>Plan:</strong>{" "}
           <span
             className={loading ? "skeleton-text" : undefined}
-            style={{ background: plan === "pro" ? "#d1fae5" : "#dbeafe", color: plan === "pro" ? "#065f46" : "#1e40af", padding: "1px 8px", borderRadius: 12, fontSize: 12 }}
+            style={{
+              background: plan === "enterprise" ? "#ede9fe" : plan === "pro" ? "#d1fae5" : "#dbeafe",
+              color: plan === "enterprise" ? "#5b21b6" : plan === "pro" ? "#065f46" : "#1e40af",
+              padding: "1px 8px", borderRadius: 12, fontSize: 12,
+            }}
           >
-            {plan === "pro" ? "Professional" : "Basic"}
+            {planLimits.name}
           </span>
         </s-paragraph>
         {(loading || notificationEmail) && (
@@ -193,9 +368,9 @@ function DashboardContent() {
           {/* suppressHydrationWarning on these s-button elements: see the comment above the "Manage Products" button. */}
           {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
           <s-button href="/app/settings" suppressHydrationWarning>Configure Settings</s-button>
-          {plan !== "pro" && (
+          {plan !== "enterprise" && (
             // @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type
-            <s-button href="/app/billing" suppressHydrationWarning>Upgrade to Pro</s-button>
+            <s-button href="/app/billing" suppressHydrationWarning>{plan === "pro" ? "Upgrade to Enterprise" : "Upgrade Plan"}</s-button>
           )}
         </s-stack>
       </s-section>

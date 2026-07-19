@@ -2,12 +2,13 @@ import { useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO } from "../shopify.server";
+import { authenticate, BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE } from "../shopify.server";
 import prisma from "../db.server";
 import type { Plan } from "@prisma/client";
 import { getIsTestStore } from "../services/billing.server";
 import { invalidateShopCache } from "../lib/shop-cache.server";
 import { invalidateBillingCache } from "../services/billing.server";
+import { isPlanKey, billingNameForPlanKey, planKeyForBillingName, pickHighestPriority } from "../lib/billing-plans";
 import { useShopAwareNavigate } from "../lib/use-shop-aware-navigate";
 import { BillingConfirmStatus } from "../components/billing/BillingConfirmStatus";
 
@@ -15,7 +16,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
   const url = new URL(request.url);
   const intendedPlan = url.searchParams.get("intendedPlan");
-  return { intendedPlan: intendedPlan === "basic" || intendedPlan === "pro" ? intendedPlan : null };
+  return { intendedPlan: isPlanKey(intendedPlan) ? intendedPlan : null };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -27,7 +28,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const { appSubscriptions } = await billing.check({
-      plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO],
+      plans: [BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE],
       isTest,
     });
 
@@ -40,19 +41,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // approval screen — see app.billing._index.tsx), a merchant switching
     // plans can briefly have both the old and the just-approved new one
     // active at once. Prefer whichever one matches what they just chose;
-    // fall back to Pro > Basic if that's ambiguous (e.g. this page reloaded
+    // fall back to Enterprise > Pro > Basic (highest tier first, via
+    // pickHighestPriority) if that's ambiguous (e.g. this page reloaded
     // without the query param).
-    const intendedName = intendedPlan === "pro" ? BILLING_PLAN_PRO : intendedPlan === "basic" ? BILLING_PLAN_BASIC : null;
+    const intendedName = isPlanKey(intendedPlan) ? billingNameForPlanKey(intendedPlan) : null;
     const confirmed =
-      appSubscriptions.find((s) => s.name === intendedName) ??
-      appSubscriptions.find((s) => s.name === BILLING_PLAN_PRO) ??
-      appSubscriptions.find((s) => s.name === BILLING_PLAN_BASIC);
+      appSubscriptions.find((s) => s.name === intendedName) ?? pickHighestPriority(appSubscriptions);
 
     if (!confirmed) {
       return { status: "declined", message: "No active subscription found. You may have declined the charge, or approval is still pending. Please return to the billing page and select a plan to continue." };
     }
 
-    const activePlan: Plan = confirmed.name === BILLING_PLAN_PRO ? "pro" : "basic";
+    const activePlan: Plan = planKeyForBillingName(confirmed.name) ?? "basic";
 
     // Cancel any other still-active subscription (the one this plan switch
     // was meant to replace) now that the new one is confirmed active.

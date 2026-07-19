@@ -2,8 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { publishEvent } from "../lib/broadcast.server";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { EMAIL_RE } from "../lib/validation";
 
 // In-memory rate limit: max 5 signups per IP per 10 minutes
 const ipBucket = new Map<string, { count: number; resetAt: number }>();

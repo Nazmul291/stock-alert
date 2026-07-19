@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "react-router build",
-    "dev": "NODE_OPTIONS=--dns-result-order=ipv4first vite dev",
+    "dev": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' vite dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
     "deploy": "shopify app deploy",

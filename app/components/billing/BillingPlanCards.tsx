@@ -3,7 +3,7 @@ import { PLAN_LIMITS, formatMaxProducts } from "../../lib/plan-limits";
 
 // Purchasable, in ascending tier order — drives both the display order and
 // the "Upgrade to X" vs "Switch to X" button label (comparing index).
-const PURCHASABLE_PLAN_KEYS = ["basic", "pro"] as const;
+const PURCHASABLE_PLAN_KEYS = ["basic", "pro", "enterprise"] as const;
 // Display order for the whole card row, including non-purchasable previews.
 const PLAN_CARD_KEYS = ["basic", "pro", "enterprise"] as const;
 
@@ -16,7 +16,7 @@ const PLAN_ACCENT: Record<(typeof PLAN_CARD_KEYS)[number], { border: string; bad
   enterprise: { border: "#e5e7eb", badgeBg: "#e0e7ff", badgeColor: "#4338ca", buttonBg: null },
 };
 
-export function BillingPlanCards({ activePlan }: { activePlan: "basic" | "pro" | null }) {
+export function BillingPlanCards({ activePlan }: { activePlan: "basic" | "pro" | "enterprise" | null }) {
   const nav = useNavigation();
   const loading = nav.state === "submitting";
   const submittingPlan = loading ? (nav.formData?.get("plan") as string | null) : null;
@@ -34,7 +34,7 @@ export function BillingPlanCards({ activePlan }: { activePlan: "basic" | "pro" |
           : "Unlimited products";
         const bullets = [...plan.features, productsBullet, "30-day free trial"];
 
-        const tierIndex = isPurchasable ? PURCHASABLE_PLAN_KEYS.indexOf(key as "basic" | "pro") : -1;
+        const tierIndex = isPurchasable ? PURCHASABLE_PLAN_KEYS.indexOf(key as "basic" | "pro" | "enterprise") : -1;
         const buttonLabel =
           submittingPlan === key
             ? "Processing…"
@@ -82,6 +82,7 @@ export function BillingPlanCards({ activePlan }: { activePlan: "basic" | "pro" |
               </button>
             ) : !isCurrent ? (
               <Form method="post">
+                <input type="hidden" name="intent" value="select_plan" />
                 <input type="hidden" name="plan" value={key} />
                 <button
                   type="submit"

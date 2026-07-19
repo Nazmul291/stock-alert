@@ -26,6 +26,7 @@ import { OutboundWebhookSection } from "../components/integrations/OutboundWebho
 import { TestNotificationButton } from "../components/integrations/TestNotificationButton";
 import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
 import { canUseFeature } from "../lib/plan-limits";
+import { EMAIL_RE } from "../lib/validation";
 
 // Only the auth check blocks the response — integrations data loads entirely in
 // the background via api.integrations-stream.ts and is pushed to the client
@@ -207,8 +208,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (rawEmail) {
       const addresses = rawEmail.split(",").map((e) => e.trim()).filter(Boolean);
-      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      const bad = addresses.find((e) => !emailRe.test(e));
+      const bad = addresses.find((e) => !EMAIL_RE.test(e));
       if (bad) {
         return { intent: "save_email", success: false as const, error: `"${bad}" is not a valid email address.` };
       }

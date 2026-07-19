@@ -6,11 +6,13 @@ import { useCachedSSEData } from "../hooks/use-cached-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getMaxProducts, canUseFeature, formatMaxProducts, PLAN_LIMITS } from "../lib/plan-limits";
+import { getMaxProducts, canUseFeature, formatMaxProducts, getPlanLimits } from "../lib/plan-limits";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { refreshShopVelocity } from "../lib/velocity.server";
+import { publishEvent } from "../lib/broadcast.server";
+import { setInventoryQuantities } from "../lib/shopify-inventory.server";
 import { ProductEditModal } from "../components/products/ProductEditModal";
 import type { ProductRow } from "../components/products/ProductEditModal";
 import type { VariantInventory, LocationInventory } from "../components/products/InventorySection";
@@ -79,7 +81,7 @@ type SyncProductVariantEdge = {
 };
 type SyncProductEdge = {
   node: {
-    id: string; title: string; status: string;
+    id: string; title: string; status: string; tags: string[];
     featuredMedia: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
     customThreshold: { value: string } | null;
     variants: { edges: SyncProductVariantEdge[] };
@@ -95,9 +97,6 @@ type InventoryItemUpdateResponse = GraphQLResponse<{
 type ProductUpdateResponse = GraphQLResponse<{
   productUpdate: { product: { id: string; status: string } | null; userErrors: GraphQLUserError[] };
 }>;
-type InventorySetQuantitiesResponse = GraphQLResponse<{
-  inventorySetQuantities: { userErrors: GraphQLUserError[] };
-}>;
 type MetafieldsSetResponse = GraphQLResponse<{
   metafieldsSet: { userErrors: GraphQLUserError[] };
 }>;
@@ -106,7 +105,7 @@ type MetafieldInput = { ownerId: string; namespace: string; key: string; value: 
 type SyncVariantRow = {
   productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
   sku: string | null; currentQuantity: number; inventoryStatus: "in_stock" | "low_stock" | "out_of_stock";
-  imageUrl: string | null; imageAlt: string | null;
+  imageUrl: string | null; imageAlt: string | null; tags: string | null;
 };
 
 const SYNC_PRODUCTS_GRAPHQL = `
@@ -114,7 +113,7 @@ const SYNC_PRODUCTS_GRAPHQL = `
     products(first: $first, after: $after, query: $query) {
       edges {
         node {
-          id title status
+          id title status tags
           featuredMedia { preview { image { url altText } } }
           customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { value }
           variants(first: 100) {
@@ -154,14 +153,6 @@ const PRODUCT_UPDATE_MUTATION = `
   mutation productUpdate($product: ProductUpdateInput!) {
     productUpdate(product: $product) {
       product { id status }
-      userErrors { field message }
-    }
-  }
-`;
-
-const INVENTORY_SET_MUTATION = `
-  mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
-    inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
       userErrors { field message }
     }
   }
@@ -399,6 +390,9 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         seenProductIds.add(productId);
         const imageUrl = p.featuredMedia?.preview?.image?.url ?? null;
         const imageAlt = p.featuredMedia?.preview?.image?.altText ?? null;
+        // Comma-joined, consistent with StoreSettings.monitoringTags — used
+        // by the Enterprise "Core vs. Limited-Edition" report split.
+        const tags = p.tags && p.tags.length > 0 ? p.tags.join(",") : null;
 
         // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
         const productThreshold =
@@ -425,6 +419,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
             inventoryStatus: status,
             imageUrl,
             imageAlt,
+            tags,
           });
         }
       }
@@ -452,8 +447,8 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         chunk.map((v) =>
           prisma.inventoryTracking.upsert({
             where: { shop_variantId: { shop, variantId: v.variantId } },
-            update: { productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, lastCheckedAt: now },
-            create: { shop, productId: v.productId, variantId: v.variantId, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, previousQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt },
+            update: { productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags, lastCheckedAt: now },
+            create: { shop, productId: v.productId, variantId: v.variantId, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, previousQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags },
           }),
         ),
       );
@@ -484,22 +479,6 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       }
     }
 
-    // Velocity calculation — query last 30 days of orders to compute avg daily
-    // sales. avgDailySales/stockOutDays stay product-wide (velocity.server.ts
-    // only resolves orders down to the product level, not variant), so each
-    // variant's stockOutDays is "this variant's own quantity against the
-    // product's blended sales rate" — a reasonable approximation until
-    // per-variant velocity is added. Same shared function the daily velocity
-    // cron uses (see workers/inventory-buffer.worker.ts) — a manual sync just
-    // gets an on-demand refresh instead of waiting for the next cron run.
-    try {
-      await syncState.progress(shop, 99);
-      const { updatedProducts } = await refreshShopVelocity(shop, admin);
-      console.log(`[Sync] Velocity updated for ${updatedProducts} product(s) in ${shop}`);
-    } catch (err) {
-      console.warn(`[Sync] Velocity calc failed for ${shop}:`, err instanceof Error ? err.message : err);
-    }
-
     await prisma.setupProgress.upsert({
       where: { shop },
       update: { firstProductTracked: true, productThresholdsConfigured: true },
@@ -511,9 +490,37 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       console.log(`[Sync] Plan limit enforced for ${shop}: deactivated ${enforcement.deactivatedCount} products (max ${enforcement.maxAllowed})`);
     }
 
+    // Everything the UI actually waits on is done — signal completion now
+    // rather than after velocity too, which used to hold the progress bar at
+    // 99% for however long a 30-day order lookup takes on top of an
+    // already-finished sync. Velocity runs as its own detached background
+    // step below; refreshVelocityInBackground publishes its own live event
+    // when it lands, so the dashboard picks up the refined numbers without
+    // the merchant having to wait on them to see their sync finish.
     await syncState.done(shop, seenProductIds.size);
+
+    refreshVelocityInBackground(shop, admin);
   } catch (err) {
     await syncState.fail(shop, err instanceof Error ? err.message : "Unknown error");
+  }
+}
+
+// Query last 30 days of orders to compute avg daily sales. avgDailySales/
+// stockOutDays stay product-wide (velocity.server.ts only resolves orders
+// down to the product level, not variant), so each variant's stockOutDays is
+// "this variant's own quantity against the product's blended sales rate" — a
+// reasonable approximation until per-variant velocity is added. Same shared
+// function the daily velocity cron uses (see workers/inventory-buffer.worker.ts)
+// — a manual sync just gets an on-demand refresh instead of waiting for the
+// next cron run. Deliberately not awaited by its caller — see the comment
+// above runProductSync's syncState.done() call.
+async function refreshVelocityInBackground(shop: string, admin: AdminClient) {
+  try {
+    const { updatedProducts } = await refreshShopVelocity(shop, admin);
+    console.log(`[Sync] Velocity updated for ${updatedProducts} product(s) in ${shop}`);
+    await publishEvent(shop, ["products", "dashboard", "analytics"]);
+  } catch (err) {
+    console.warn(`[Sync] Velocity calc failed for ${shop}:`, err instanceof Error ? err.message : err);
   }
 }
 
@@ -565,19 +572,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (inventoryUpdates.length > 0) {
       try {
-        const invRes = await admin.graphql(INVENTORY_SET_MUTATION, {
-          variables: {
-            idempotencyKey: crypto.randomUUID(),
-            input: {
-              name: "available",
-              reason: "correction",
-              quantities: inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
-            },
-          },
-        });
-        const invJson: InventorySetQuantitiesResponse = await invRes.json();
-        const invErrs = invJson.data?.inventorySetQuantities?.userErrors ?? [];
-        if (invErrs.length > 0) errors.push(invErrs.map((e) => e.message).join(", "));
+        const { userErrors: invErrs } = await setInventoryQuantities(
+          admin,
+          inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
+          "correction",
+        );
+        if (invErrs.length > 0) errors.push(invErrs.join(", "));
       } catch (err) {
         errors.push(`Quantity update failed: ${err instanceof Error ? err.message : "Unknown"}`);
       }
@@ -599,6 +599,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // metafield) since this same submission is about to write it below.
     const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
     const plan = storeSession?.plan ?? "basic";
+
+    // Supplier/unit cost are an Enterprise feature — silently leave any
+    // existing value untouched (rather than erroring the whole save, or
+    // clearing it) when the plan doesn't have access, since a stale form
+    // submission from a since-downgraded plan must still degrade gracefully
+    // (the modal itself hides these fields when gated).
+    const canManageSupplier = canUseFeature(plan, "purchaseOrders");
+    const rawSupplierId = ((form.get("supplierId") as string) ?? "").trim();
+    const rawUnitCost = ((form.get("unitCost") as string) ?? "").trim();
+    // A supplierId is only ever offered to the client via the dropdown this
+    // same shop's suppliers populate, but the form value itself isn't
+    // trustworthy — verify it before saving rather than persisting a
+    // dangling/foreign id that would silently make this product ineligible
+    // for reorder suggestions with no error ever shown to the merchant.
+    const verifiedSupplierId =
+      canManageSupplier && rawSupplierId
+        ? (await prisma.supplier.findFirst({ where: { id: rawSupplierId, shop }, select: { id: true } }))?.id ?? null
+        : null;
+    const supplierFields = canManageSupplier
+      ? {
+          supplierId: verifiedSupplierId,
+          unitCost: rawUnitCost !== "" && !isNaN(parseFloat(rawUnitCost)) ? parseFloat(rawUnitCost) : null,
+        }
+      : {};
+
     const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
     const parsedCustomThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
     const effectiveThreshold =
@@ -691,6 +716,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               expectedRestockDate,
               ...statusPatch,
               ...(stockOutDays !== undefined ? { stockOutDays } : {}),
+              ...supplierFields,
             },
           });
         } else {
@@ -714,6 +740,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               monitoringEnabled,
               manualDailySales,
               expectedRestockDate,
+              ...supplierFields,
             },
           });
         }
@@ -915,7 +942,12 @@ function ProductsPageContent() {
   const loading = useProductsStore((s) => s.data === null);
   const shop = useProductsStore((s) => s.data?.shop) ?? "";
   const plan = useProductsStore((s) => s.data?.plan) ?? "basic";
-  const maxProducts = useProductsStore((s) => s.data?.maxProducts) ?? 0;
+  // null (not 0) is "not capped" — a loaded Enterprise store has
+  // data.maxProducts === null (unlimited), which must stay distinguishable
+  // from a real cap of 0. Only the "still loading" case falls back, via the
+  // outer `?? null` below, to the same null value, which is fine since the
+  // banner below is gated on `!loading` anyway.
+  const maxProducts = useProductsStore((s) => s.data?.maxProducts) ?? null;
   const trackedCount = useProductsStore((s) => s.data?.trackedCount) ?? 0;
   const threshold = useProductsStore((s) => s.data?.threshold) ?? 5;
   const products = useProductsStore((s) => s.data?.products) ?? [];
@@ -924,6 +956,7 @@ function ProductsPageContent() {
   const lastSyncCount = useProductsStore((s) => s.data?.lastSyncCount) ?? null;
   const autoHideEnabled = useProductsStore((s) => s.data?.autoHideEnabled) ?? false;
   const autoRepublishEnabled = useProductsStore((s) => s.data?.autoRepublishEnabled) ?? false;
+  const suppliers = useProductsStore((s) => s.data?.suppliers) ?? [];
   const filter = useProductsStore((s) => s.filter);
   const applyOptimisticPatch = useProductsStore((s) => s.applyOptimisticPatch);
 
@@ -1040,10 +1073,15 @@ function ProductsPageContent() {
       )}
 
       {/* Held back until data confirms it's actually needed, rather than
-          reserving space on every load. */}
-      {(!loading && Number.isFinite(maxProducts) && plan !== "pro") && (
+          reserving space on every load. Only basic/none are capped tiers
+          with something to upsell here — pro and enterprise are excluded by
+          name rather than by `maxProducts !== null`, since relying on the
+          cap alone previously broke for Enterprise (maxProducts is null —
+          unlimited — for both "still loading" and "genuinely uncapped",
+          which is why this checks the plan directly instead). */}
+      {(!loading && (plan === "basic" || plan === "none")) && (
         <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 12, fontSize: 14 }}>
-          {PLAN_LIMITS[plan === "basic" ? "basic" : "none"].name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
+          {getPlanLimits(plan).name} plan: monitoring up to {formatMaxProducts(maxProducts)} products. {trackedCount} of {formatMaxProducts(maxProducts)} tracked.{" "}
           <s-link href="/app/billing">Upgrade to Pro →</s-link>
         </div>
       )}
@@ -1097,6 +1135,7 @@ function ProductsPageContent() {
           threshold={threshold}
           autoHideEnabled={autoHideEnabled}
           autoRepublishEnabled={autoRepublishEnabled}
+          suppliers={suppliers}
           onClose={() => setEditProduct(null)}
           onSaved={(patch) => applyOptimisticPatch(editProduct.productId, patch)}
           onSaveError={(message) => setSaveErrorAfterClose(message)}

@@ -1,7 +1,21 @@
 import prisma from "../db.server";
-import { rollupStatusCounts } from "./inventory-rollup.server";
+import { rollupStatusCounts, rollupStatusCountsByTagGroup, type RollupStatus } from "./inventory-rollup.server";
+import { deadStockSummary, type DeadStockRow } from "./dead-stock.server";
+import { getCachedSession, getCachedSettings } from "./shop-cache.server";
+
+type StockHealth = { inStock: number; lowStock: number; outOfStock: number; deactivated: number };
+
+function mapToHealth(map: Map<RollupStatus, number>): StockHealth {
+  return {
+    inStock: map.get("in_stock") ?? 0,
+    lowStock: map.get("low_stock") ?? 0,
+    outOfStock: map.get("out_of_stock") ?? 0,
+    deactivated: map.get("deactivated") ?? 0,
+  };
+}
 
 export type AnalyticsData = {
+  plan: string;
   totalThisMonth: number;
   totalLastMonth: number;
   avgPerDay: number;
@@ -10,7 +24,10 @@ export type AnalyticsData = {
   typeBreakdown: { type: string; count: number }[];
   topProducts: { title: string; count: number }[];
   channel: { email: number; slack: number };
-  stockHealth: { inStock: number; lowStock: number; outOfStock: number; deactivated: number };
+  stockHealth: StockHealth;
+  // Enterprise-only — null for Basic/Pro shops (never queried for them).
+  deadStock: { count: number; thresholdDays: number; items: DeadStockRow[] } | null;
+  coreLimitedEdition: { tag: string; core: StockHealth; limitedEdition: StockHealth } | null;
 };
 
 export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
@@ -24,7 +41,7 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
   let channelRow: { email_count: number; slack_count: number }[] = [];
   let totalThisMonth = 0;
   let totalLastMonth = 0;
-  let stockMap: Map<string, number> = new Map();
+  let stockMap: Map<RollupStatus, number> = new Map();
 
   try {
   ([
@@ -80,6 +97,29 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
     console.error("[analytics] loader error:", err);
   }
 
+  // Enterprise-only sections — gated before either query runs, so Basic/Pro
+  // shops never pay for them. A separate try/catch from the block above:
+  // a failure here shouldn't blank out the alert/stock-health data that
+  // already loaded successfully.
+  const [storeSession, settings] = await Promise.all([getCachedSession(shop), getCachedSettings(shop)]);
+  const plan = storeSession?.plan ?? "basic";
+  let deadStock: AnalyticsData["deadStock"] = null;
+  let coreLimitedEdition: AnalyticsData["coreLimitedEdition"] = null;
+  if (plan === "enterprise") {
+    try {
+      const tag = (settings?.limitedEditionTag ?? "limited-edition").trim() || "limited-edition";
+      const thresholdDays = settings?.deadStockThresholdDays ?? 60;
+      const [{ core, limitedEdition }, ds] = await Promise.all([
+        rollupStatusCountsByTagGroup(shop, tag),
+        deadStockSummary(shop, thresholdDays),
+      ]);
+      coreLimitedEdition = { tag, core: mapToHealth(core), limitedEdition: mapToHealth(limitedEdition) };
+      deadStock = { count: ds.count, thresholdDays, items: ds.items };
+    } catch (err) {
+      console.error("[analytics] enterprise sections error:", err);
+    }
+  }
+
   // Build 30-element daily array (fill gaps with 0)
   // $queryRaw COUNT results come back as BigInt — convert to Number for JSON serialization
   const dayMap = new Map(dailyRows.map((r) => [r.day, Number(r.count)]));
@@ -94,6 +134,7 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
   const busiest = daily30.reduce((a, b) => (b.count > a.count ? b : a), { day: "", count: 0 });
 
   return {
+    plan,
     totalThisMonth,
     totalLastMonth,
     avgPerDay: daily30.reduce((s, d) => s + d.count, 0) / 30,
@@ -102,11 +143,8 @@ export async function loadAnalyticsData(shop: string): Promise<AnalyticsData> {
     typeBreakdown: typeRows.map((r) => ({ type: r.alert_type, count: Number(r.count) })),
     topProducts: topProductRows.map((r) => ({ title: r.product_title, count: Number(r.count) })),
     channel: { email: Number(channelRow[0]?.email_count ?? 0), slack: Number(channelRow[0]?.slack_count ?? 0) },
-    stockHealth: {
-      inStock:    stockMap.get("in_stock")    ?? 0,
-      lowStock:   stockMap.get("low_stock")   ?? 0,
-      outOfStock: stockMap.get("out_of_stock") ?? 0,
-      deactivated: stockMap.get("deactivated") ?? 0,
-    },
+    stockHealth: mapToHealth(stockMap),
+    deadStock,
+    coreLimitedEdition,
   };
 }

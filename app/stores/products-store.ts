@@ -34,6 +34,9 @@ function patchProduct(p: ProductRow, patch: OptimisticPatch): ProductRow {
       monitoringEnabled: false,
       expectedRestockDate: patch.expectedRestockDate,
       manualDailySales: patch.manualDailySales,
+      supplierId: patch.supplierId,
+      supplierName: patch.supplierName,
+      unitCost: patch.unitCost,
       variants: [],
       variantCount: 0,
       variantsAtRiskCount: 0,
@@ -48,6 +51,9 @@ function patchProduct(p: ProductRow, patch: OptimisticPatch): ProductRow {
       monitoringEnabled: patch.monitoringEnabled,
       expectedRestockDate: patch.expectedRestockDate,
       manualDailySales: patch.manualDailySales,
+      supplierId: patch.supplierId,
+      supplierName: patch.supplierName,
+      unitCost: patch.unitCost,
     };
   }
 
@@ -61,6 +67,9 @@ function patchProduct(p: ProductRow, patch: OptimisticPatch): ProductRow {
     monitoringEnabled: patch.monitoringEnabled,
     expectedRestockDate: patch.expectedRestockDate,
     manualDailySales: patch.manualDailySales,
+    supplierId: patch.supplierId,
+    supplierName: patch.supplierName,
+    unitCost: patch.unitCost,
   };
 }
 
