@@ -118,7 +118,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
             {po.lineItems.map((li) => (
               <tr key={li.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                 <td style={{ padding: "8px 12px" }}>
-                  {li.productTitle ?? "—"}{li.variantTitle ? ` — ${li.variantTitle}` : ""}
+                  {li.productTitle ?? "—"}{li.variantTitle && li.variantTitle !== "Default Title" ? ` — ${li.variantTitle}` : ""}
                   {li.locationName && <span style={{ display: "block", fontSize: 11, color: "#9ca3af" }}>{li.locationName}</span>}
                 </td>
                 <td style={{ padding: "8px 12px", color: "#6b7280" }}>{li.sku ?? "—"}</td>

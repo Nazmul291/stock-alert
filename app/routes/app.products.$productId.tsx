@@ -272,9 +272,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         locationId?: string | null;
         locationName?: string | null;
       }[];
-      const { purchaseOrderId } = await createPurchaseOrder(shop, supplierId, lines, admin);
+      const po = await createPurchaseOrder(shop, supplierId, lines, admin);
+      // Ordering from a supplier for this product makes them the product's
+      // supplier of record going forward — assigns/updates every variant of
+      // this product, not just the ones on this PO's lines, so the product
+      // stays consistently tied to one supplier (mirrors how ProductRow's
+      // supplierId is read from a single representative variant).
+      await prisma.inventoryTracking.updateMany({
+        where: { shop, productId: BigInt(productId) },
+        data: { supplierId },
+      });
       invalidateShopCache(shop);
-      return { success: true as const, intent, purchaseOrderId };
+      // Returns the full created PO (not just its id) so the client can patch
+      // it straight into the page's store instead of waiting on a background
+      // SSE refetch to see the new pending PO show up — see ProductCreatePoCard.
+      return { success: true as const, intent, ...po };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create purchase order.";
       return { success: false as const, error: message };
@@ -348,11 +360,12 @@ function ProductDetailContent({ plan }: { plan: string }) {
       {canManageSupplier ? (
         <s-section heading="Purchase Orders">
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            <ProductPurchaseOrdersList purchaseOrders={purchaseOrders} />
+            <ProductPurchaseOrdersList purchaseOrders={purchaseOrders} suppliers={suppliers} productTitle={product.productTitle} />
             <ProductCreatePoCard
               variants={variantsForPo}
               suppliers={suppliers}
               defaultSupplierId={product.supplierId ?? null}
+              productTitle={product.productTitle}
             />
           </div>
         </s-section>

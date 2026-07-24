@@ -13,7 +13,7 @@ const PENDING_STATUSES = new Set(["draft", "ordered", "partially_received"]);
 // A single "Edit" button opens ManagePurchaseOrderModal, which holds every
 // lifecycle action (send to supplier, mark as ordered, receive items) for
 // that PO — instead of a row cluttered with one button per possible action.
-function PendingPoRow({ po }: { po: ProductPurchaseOrderRow }) {
+function PendingPoRow({ po, suppliers, productTitle }: { po: ProductPurchaseOrderRow; suppliers: { id: string; name: string }[]; productTitle: string }) {
   const bumpLiveEvents = useLiveEventsStore((s) => s.bump);
   const [showManage, setShowManage] = useState(false);
   const s = STATUS_STYLE[po.status];
@@ -44,6 +44,8 @@ function PendingPoRow({ po }: { po: ProductPurchaseOrderRow }) {
       {showManage && (
         <ManagePurchaseOrderModal
           po={po}
+          suppliers={suppliers}
+          productTitle={productTitle}
           onClose={() => setShowManage(false)}
           onChanged={() => bumpLiveEvents(["product-detail"])}
         />
@@ -52,7 +54,7 @@ function PendingPoRow({ po }: { po: ProductPurchaseOrderRow }) {
   );
 }
 
-export function ProductPurchaseOrdersList({ purchaseOrders }: { purchaseOrders: ProductPurchaseOrderRow[] }) {
+export function ProductPurchaseOrdersList({ purchaseOrders, suppliers, productTitle }: { purchaseOrders: ProductPurchaseOrderRow[]; suppliers: { id: string; name: string }[]; productTitle: string }) {
   const pending = purchaseOrders.filter((po) => PENDING_STATUSES.has(po.status));
 
   if (pending.length === 0) {
@@ -70,7 +72,7 @@ export function ProductPurchaseOrdersList({ purchaseOrders }: { purchaseOrders: 
           </tr>
         </thead>
         <tbody>
-          {pending.map((po) => <PendingPoRow key={po.id} po={po} />)}
+          {pending.map((po) => <PendingPoRow key={po.id} po={po} suppliers={suppliers} productTitle={productTitle} />)}
         </tbody>
       </table>
     </div>
