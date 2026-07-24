@@ -86,7 +86,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   });
 
   return (
-    <div>
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <span style={{ background: s.bg, color: s.color, padding: "4px 10px", borderRadius: 12, fontSize: 13, fontWeight: 600 }}>{s.label}</span>
         {po.sentToSupplierAt && <span style={{ fontSize: 13, color: "#6b7280" }}>Sent to supplier {new Date(po.sentToSupplierAt).toLocaleDateString()}</span>}
