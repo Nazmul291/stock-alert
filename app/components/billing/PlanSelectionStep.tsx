@@ -11,7 +11,7 @@ import { BillingFeatureComparisonTable } from "./BillingFeatureComparisonTable";
 // and can't be avoided, but viewing the plans themselves needs no navigation.
 export function PlanSelectionStep({ activePlan, error }: { activePlan: PlanKey | null; error: string | null }) {
   return (
-    <div style={{ minHeight: "100vh", background: "#f6f6f7", padding: "40px 16px" }}>
+    <div style={{ minHeight: "100vh", background: "#f6f6f7", padding: "40px 16px", fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" }}>
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#d1fae5", borderRadius: 20, padding: "4px 12px", marginBottom: 16 }}>
