@@ -271,7 +271,7 @@ async function logAlert(
         data: { lastAlertSentAt: now, lastAlertType: alertType },
       }),
     ]);
-    publishEvent(shop, ['alerts', 'dashboard', 'analytics']).catch(() => {});
+    publishEvent(shop, ['alerts', 'dashboard', 'analytics', 'product-detail']).catch(() => {});
   } catch (err) {
     console.error('[Notifications] Failed to log alert:', err);
   }

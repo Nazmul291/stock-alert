@@ -1,9 +1,11 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
+import { getCachedSettings } from "./shop-cache.server";
 import { canUseFeature } from "./plan-limits";
 import { suggestReorderQuantity, getVariantLocationLevels, type VariantLocationLevel } from "./purchase-order.server";
 import { buildTrackedProductRow } from "./products-data.server";
-import type { ProductRow } from "../components/products/ProductEditModal";
+import { PRODUCT_INVENTORY_QUERY, PRODUCT_METAFIELDS_QUERY } from "./graphql";
+import type { ProductRow, VariantStatusRow } from "../components/products/ProductEditModal";
 import type { PurchaseOrderStatus } from "@prisma/client";
 
 export type ProductDetailVariantForPo = {
@@ -40,20 +42,103 @@ export type ProductHistoryEntry =
       variantTitle: string | null;
     };
 
+export type ProductPurchaseOrderLineItemRow = {
+  id: string;
+  variantId: string;
+  variantTitle: string | null;
+  sku: string | null;
+  quantityOrdered: number;
+  quantityReceived: number;
+  // Set when this line already has a fixed destination from creation time
+  // (the product-detail page's per-location Create Purchase Order flow) —
+  // when set, receiving shows this as plain text instead of a picker.
+  locationId: string | null;
+  locationName: string | null;
+  // Only used (and only populated) when locationId is null — a variant
+  // stocked at more than one location needs the merchant to pick which one
+  // received the shipment (see receivePurchaseOrderItems for why this can't
+  // be guessed).
+  locations: { id: string; name: string; available: number }[];
+};
+
+export type ProductPurchaseOrderRow = {
+  id: string;
+  poNumber: number;
+  status: PurchaseOrderStatus;
+  supplierName: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  createdAt: string;
+  lineItems: ProductPurchaseOrderLineItemRow[];
+};
+
+export type ProductDetailConfigure = {
+  autoHide: boolean | null;
+  autoRepublish: boolean | null;
+  customThreshold: string;
+  customThresholdMetafieldId: string | null;
+};
+
 export type ProductDetailData = {
   product: ProductRow;
+  configure: ProductDetailConfigure;
+  storeDefaults: { threshold: number; autoHideEnabled: boolean; autoRepublishEnabled: boolean };
   canManageSupplier: boolean;
   suppliers: { id: string; name: string }[];
   variantsForPo: ProductDetailVariantForPo[];
+  purchaseOrders: ProductPurchaseOrderRow[];
   history: ProductHistoryEntry[];
 };
 
 const HISTORY_LIMIT = 50;
 
-// Combines a product's variant rows, supplier list, and its full activity
-// timeline (stock alerts + purchase order events) for the product details
-// page. Returns null when nothing is tracked for this productId — the route
-// turns that into a 404 rather than rendering an empty page.
+type LiveShopifyProduct = {
+  title: string;
+  status: string;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  variants: { variantId: string; title: string | null; sku: string | null }[];
+} | null;
+
+// Live Shopify fetch — the sole source of a product's identity when it has
+// no InventoryTracking rows yet (see the untracked-fallback branch below).
+// Returns null on any GraphQL error or a genuinely nonexistent product id;
+// the caller turns that into a 404.
+async function fetchLiveProduct(admin: AdminApiContext, productId: string): Promise<LiveShopifyProduct> {
+  const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, { variables: { id: `gid://shopify/Product/${productId}` } });
+  const json = (await res.json()) as {
+    data?: {
+      product?: {
+        title: string;
+        status: string;
+        featuredMedia: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
+        variants: { edges: { node: { id: string; title: string; sku: string | null } }[] };
+      } | null;
+    };
+    errors?: { message: string }[];
+  };
+  const p = json.data?.product;
+  if (!p || json.errors?.length) return null;
+  return {
+    title: p.title,
+    status: p.status,
+    imageUrl: p.featuredMedia?.preview?.image?.url ?? null,
+    imageAlt: p.featuredMedia?.preview?.image?.altText ?? null,
+    variants: p.variants.edges.map((e) => ({
+      variantId: e.node.id.split("/").pop() as string,
+      title: e.node.title,
+      sku: e.node.sku || null,
+    })),
+  };
+}
+
+// Combines a product's variant rows, supplier list, purchase orders, and its
+// full activity timeline (stock alerts + PO events) for the product details
+// page. Returns null only when productId doesn't resolve to a real Shopify
+// product at all — a product with zero InventoryTracking rows (never
+// tracked, or tracking was turned off) still renders, sourced live from
+// Shopify instead of the DB, so the Configure tab can be used to start
+// tracking it for the first time.
 export async function getProductDetail(shop: string, productId: string, plan: string, admin: AdminApiContext): Promise<ProductDetailData | null> {
   const canManageSupplier = canUseFeature(plan, "purchaseOrders");
   let productIdBigInt: bigint;
@@ -63,25 +148,80 @@ export async function getProductDetail(shop: string, productId: string, plan: st
     return null;
   }
 
-  const [rows, settings, supplierRows] = await Promise.all([
+  const [rows, settings, supplierRows, metafields] = await Promise.all([
     prisma.inventoryTracking.findMany({ where: { shop, productId: productIdBigInt } }),
-    prisma.storeSettings.findUnique({ where: { shop } }),
+    getCachedSettings(shop),
     canManageSupplier
       ? prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true }, orderBy: { name: "asc" } })
       : Promise.resolve([]),
+    admin.graphql(PRODUCT_METAFIELDS_QUERY, { variables: { id: `gid://shopify/Product/${productId}` } })
+      .then((res) => res.json())
+      .catch(() => null) as Promise<{
+        data?: {
+          product?: {
+            customThreshold: { id: string; value: string } | null;
+            autoHide: { id: string; value: string } | null;
+            autoRepublish: { id: string; value: string } | null;
+          } | null;
+        };
+      } | null>,
   ]);
 
-  if (rows.length === 0) return null;
-
   const suppliersById = new Map(supplierRows.map((s) => [s.id, s.name]));
-  const product = buildTrackedProductRow(productId, rows, undefined, suppliersById);
+
+  let product: ProductRow;
+  if (rows.length > 0) {
+    product = buildTrackedProductRow(productId, rows, undefined, suppliersById);
+  } else {
+    const live = await fetchLiveProduct(admin, productId);
+    if (!live) return null;
+    const variants: VariantStatusRow[] = live.variants.map((v) => ({
+      id: v.variantId,
+      variantId: v.variantId,
+      variantTitle: v.title,
+      sku: v.sku,
+      currentQuantity: 0,
+      inventoryStatus: "not_tracked",
+    }));
+    product = {
+      id: productId,
+      productId,
+      productTitle: live.title,
+      sku: variants.length === 1 ? variants[0].sku : null,
+      currentQuantity: 0,
+      inventoryStatus: "not_tracked",
+      isHidden: false,
+      isTracked: false,
+      monitoringEnabled: false,
+      imageUrl: live.imageUrl,
+      imageAlt: live.imageAlt ?? live.title,
+      shopifyStatus: live.status,
+      inventoryItemId: null,
+      variants,
+      variantCount: variants.length,
+      variantsAtRiskCount: 0,
+    };
+  }
+
+  const p = metafields?.data?.product;
+  const configure: ProductDetailConfigure = {
+    customThreshold: p?.customThreshold?.value ?? "",
+    customThresholdMetafieldId: p?.customThreshold?.id ?? null,
+    autoHide: p?.autoHide?.value !== undefined ? p.autoHide?.value === "true" : null,
+    autoRepublish: p?.autoRepublish?.value !== undefined ? p.autoRepublish?.value === "true" : null,
+  };
 
   const defaultLeadTime = settings?.supplierLeadTimeDays ?? 7;
   // Best-effort — a Shopify API hiccup here shouldn't break the whole page,
   // it just means the Create Purchase Order card falls back to one combined
   // quantity field per variant instead of one per location (same defensive
-  // pattern app.purchase-orders.$id.tsx uses around this same call).
-  const locationsByVariant = await getVariantLocationLevels(admin, rows.map((r) => r.variantId)).catch(() => new Map<string, VariantLocationLevel[]>());
+  // pattern app.purchase-orders.$id.tsx uses around this same call). Skipped
+  // entirely on plans that can't manage suppliers/POs — this data is never
+  // rendered there (the section shows SuppliersUpsellCard instead), so
+  // there's no reason to pay for the extra Shopify API round trip.
+  const locationsByVariant = canManageSupplier && rows.length > 0
+    ? await getVariantLocationLevels(admin, rows.map((r) => r.variantId)).catch(() => new Map<string, VariantLocationLevel[]>())
+    : new Map<string, VariantLocationLevel[]>();
   const variantsForPo: ProductDetailVariantForPo[] = rows.map((r) => ({
     variantId: r.variantId.toString(),
     variantTitle: r.variantTitle,
@@ -119,7 +259,8 @@ export async function getProductDetail(shop: string, productId: string, plan: st
   // PO timestamps (createdAt/sentToSupplierAt/orderedAt/receivedAt) live on
   // the parent PurchaseOrder, not the line item — group this product's line
   // items by PO first so a multi-variant product with several lines on the
-  // same PO produces one "PO created"/"PO received" entry, not one per line.
+  // same PO produces one "PO created"/"PO received" entry, not one per line,
+  // and so the PO tab's list (below) shows one row per PO too.
   const lineItemsByPo = new Map<string, typeof lineItems>();
   for (const li of lineItems) {
     const list = lineItemsByPo.get(li.purchaseOrderId);
@@ -127,13 +268,14 @@ export async function getProductDetail(shop: string, productId: string, plan: st
   }
 
   const poEvents: ProductHistoryEntry[] = [];
-  for (const items of lineItemsByPo.values()) {
+  const purchaseOrders: ProductPurchaseOrderRow[] = [];
+  for (const [poId, items] of lineItemsByPo) {
     const po = items[0].purchaseOrder;
     const quantityOrdered = items.reduce((sum, i) => sum + i.quantityOrdered, 0);
     const quantityReceived = items.reduce((sum, i) => sum + i.quantityReceived, 0);
     const variantTitle = items.map((i) => i.variantTitle).filter(Boolean).join(", ") || null;
     const base = {
-      poId: po.id,
+      poId,
       poNumber: po.poNumber,
       status: po.status,
       supplierName: po.supplier.name,
@@ -145,7 +287,36 @@ export async function getProductDetail(shop: string, productId: string, plan: st
     if (po.sentToSupplierAt) poEvents.push({ type: "po", event: "sent", at: po.sentToSupplierAt.toISOString(), ...base });
     if (po.orderedAt) poEvents.push({ type: "po", event: "ordered", at: po.orderedAt.toISOString(), ...base });
     if (po.receivedAt) poEvents.push({ type: "po", event: "received", at: po.receivedAt.toISOString(), ...base });
+
+    purchaseOrders.push({
+      id: poId,
+      poNumber: po.poNumber,
+      status: po.status,
+      supplierName: po.supplier.name,
+      quantityOrdered,
+      quantityReceived,
+      createdAt: po.createdAt.toISOString(),
+      // locationsByVariant is the same lookup already built above for
+      // variantsForPo — these line items are always this product's own
+      // variants, so it covers them without a second Shopify call.
+      lineItems: items.map((li) => ({
+        id: li.id,
+        variantId: li.variantId.toString(),
+        variantTitle: li.variantTitle,
+        sku: li.sku,
+        quantityOrdered: li.quantityOrdered,
+        quantityReceived: li.quantityReceived,
+        locationId: li.locationId,
+        locationName: li.locationName,
+        locations: (locationsByVariant.get(li.variantId.toString()) ?? []).map((l) => ({
+          id: l.locationId,
+          name: l.locationName,
+          available: l.available,
+        })),
+      })),
+    });
   }
+  purchaseOrders.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 
   const history = [...alertEvents, ...poEvents]
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
@@ -153,9 +324,16 @@ export async function getProductDetail(shop: string, productId: string, plan: st
 
   return {
     product,
+    configure,
+    storeDefaults: {
+      threshold: settings?.lowStockThreshold ?? 5,
+      autoHideEnabled: settings?.autoHideEnabled ?? false,
+      autoRepublishEnabled: settings?.autoRepublishEnabled ?? false,
+    },
     canManageSupplier,
     suppliers: supplierRows,
     variantsForPo,
+    purchaseOrders,
     history,
   };
 }

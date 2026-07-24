@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { useFetcher, useNavigate } from "react-router";
+import { useFetcher, Link } from "react-router";
 import type { ProductDetailVariantForPo } from "../../lib/product-detail.server";
+import { useLiveEventsStore } from "../../stores/live-events-store";
 
 type SupplierOption = { id: string; name: string };
 type CreatePOResult = { success: boolean; error?: string; purchaseOrderId?: string };
@@ -24,7 +25,6 @@ export function ProductCreatePoCard({
   suppliers: SupplierOption[];
   defaultSupplierId: string | null;
 }) {
-  const navigate = useNavigate();
   const [supplierId, setSupplierId] = useState(defaultSupplierId ?? "");
   const [quantities, setQuantities] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
@@ -49,12 +49,20 @@ export function ProductCreatePoCard({
 
   const createFetcher = useFetcher<CreatePOResult>();
   const creating = createFetcher.state !== "idle";
+  const bumpLiveEvents = useLiveEventsStore((s) => s.bump);
 
+  // Stays on this page instead of navigating to the new PO — redirecting to
+  // the PO detail page is only what the general Purchase Orders page's own
+  // create flow does, not this one. Bumps the product-detail topic locally
+  // (no webhook fires for this) so the SSE-backed purchaseOrders/
+  // variantsForPo data refetches, and clears the form back to zero so it
+  // doesn't look like the same quantities are still waiting to be submitted.
   useEffect(() => {
-    if (createFetcher.state === "idle" && createFetcher.data?.success && createFetcher.data.purchaseOrderId) {
-      navigate(`/app/purchase-orders/${createFetcher.data.purchaseOrderId}`);
+    if (createFetcher.state === "idle" && createFetcher.data?.success) {
+      setQuantities((prev) => Object.fromEntries(Object.keys(prev).map((k) => [k, "0"])));
+      bumpLiveEvents(["product-detail"]);
     }
-  }, [createFetcher.state, createFetcher.data, navigate]);
+  }, [createFetcher.state, createFetcher.data, bumpLiveEvents]);
 
   const hasValidLine = Object.values(quantities).some((q) => (parseInt(q) || 0) > 0);
   const canSubmit = !!supplierId && hasValidLine && !creating;
@@ -81,6 +89,16 @@ export function ProductCreatePoCard({
       {createFetcher.data && !createFetcher.data.success && (
         <div style={{ marginBottom: 10, background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "8px 12px", color: "#991b1b", fontSize: 13 }}>
           {createFetcher.data.error}
+        </div>
+      )}
+      {createFetcher.state === "idle" && createFetcher.data?.success && (
+        <div style={{ marginBottom: 10, background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "8px 12px", color: "#065f46", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <span>Purchase order created.</span>
+          {createFetcher.data.purchaseOrderId && (
+            <Link to={`/app/purchase-orders/${createFetcher.data.purchaseOrderId}`} style={{ color: "#065f46", fontWeight: 600, whiteSpace: "nowrap" }}>
+              View it →
+            </Link>
+          )}
         </div>
       )}
 

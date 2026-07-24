@@ -253,7 +253,7 @@ async function processInventoryUpdate(
         ...(effectiveDailySales ? { stockOutDays: newStockOutDays } : {}),
       },
     });
-    publishEvent(shop, ["products", "dashboard", "analytics"], {
+    publishEvent(shop, ["products", "dashboard", "analytics", "product-detail"], {
       productId,
       variantId,
       currentQuantity: newQty,
