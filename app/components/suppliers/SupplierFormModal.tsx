@@ -58,9 +58,9 @@ export function SupplierFormModal({ supplier, onClose }: { supplier: SupplierRow
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Email</label>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Email *</label>
               <input
-                type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                type="email" name="email" required value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder="orders@supplier.com"
                 style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
               />
