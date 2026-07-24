@@ -5,8 +5,10 @@ import { useLiveEventsStore } from "../../stores/live-events-store";
 
 type SupplierOption = { id: string; name: string };
 type CreatePOResult = { success: boolean; error?: string; purchaseOrderId?: string };
+type CreateSupplierResult = { success: boolean; error?: string; id?: string; name?: string };
 
 const NO_LOCATION = "__none__";
+const NEW_SUPPLIER = "__new__";
 
 // One quantity field per (variant, location) pair so a variant stocked at
 // several locations can be ordered with a different quantity for each —
@@ -25,7 +27,45 @@ export function ProductCreatePoCard({
   suppliers: SupplierOption[];
   defaultSupplierId: string | null;
 }) {
+  const [supplierList, setSupplierList] = useState(suppliers);
   const [supplierId, setSupplierId] = useState(defaultSupplierId ?? "");
+  const [showNewSupplierForm, setShowNewSupplierForm] = useState(suppliers.length === 0);
+  const [newSupplierName, setNewSupplierName] = useState("");
+  const [newSupplierEmail, setNewSupplierEmail] = useState("");
+  const [newSupplierLeadTime, setNewSupplierLeadTime] = useState("");
+  const supplierFetcher = useFetcher<CreateSupplierResult>();
+
+  function handleSupplierChange(value: string) {
+    if (value === NEW_SUPPLIER) {
+      setShowNewSupplierForm(true);
+      return;
+    }
+    setSupplierId(value);
+    setShowNewSupplierForm(false);
+  }
+
+  function createNewSupplier() {
+    if (!newSupplierName.trim() || !newSupplierEmail.trim()) return;
+    supplierFetcher.submit(
+      { intent: "create_supplier", name: newSupplierName, email: newSupplierEmail, leadTimeDays: newSupplierLeadTime },
+      { method: "post" },
+    );
+  }
+
+  useEffect(() => {
+    if (supplierFetcher.state !== "idle" || !supplierFetcher.data) return;
+    if (supplierFetcher.data.success && supplierFetcher.data.id && supplierFetcher.data.name) {
+      const created = { id: supplierFetcher.data.id, name: supplierFetcher.data.name };
+      setSupplierList((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setSupplierId(created.id);
+      setShowNewSupplierForm(false);
+      setNewSupplierName("");
+      setNewSupplierEmail("");
+      setNewSupplierLeadTime("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierFetcher.state, supplierFetcher.data]);
+
   const [quantities, setQuantities] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const v of variants) {
@@ -102,23 +142,50 @@ export function ProductCreatePoCard({
         </div>
       )}
 
-      {suppliers.length === 0 ? (
-        <p style={{ fontSize: 13, color: "#9ca3af" }}>Add a supplier first to create a purchase order for this product.</p>
-      ) : (
-        <>
-          <label htmlFor="po-supplier-select" style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Supplier</label>
-          <select
-            id="po-supplier-select"
-            value={supplierId}
-            onChange={(e) => setSupplierId(e.target.value)}
-            style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, marginBottom: 14 }}
-          >
-            <option value="">Select a supplier…</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+      <label htmlFor="po-supplier-select" style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Supplier</label>
+      <select
+        id="po-supplier-select"
+        value={showNewSupplierForm ? NEW_SUPPLIER : supplierId}
+        onChange={(e) => handleSupplierChange(e.target.value)}
+        style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, marginBottom: 10 }}
+      >
+        <option value="">Select a supplier…</option>
+        {supplierList.map((s) => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+        <option value={NEW_SUPPLIER}>+ New Supplier…</option>
+      </select>
 
+      {showNewSupplierForm && (
+        <div style={{ marginBottom: 14, padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+          {supplierFetcher.data && !supplierFetcher.data.success && (
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: "#991b1b" }}>{supplierFetcher.data.error}</p>
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <input
+              type="text" placeholder="Supplier name *" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)}
+              style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="email" required placeholder="Email *" value={newSupplierEmail} onChange={(e) => setNewSupplierEmail(e.target.value)}
+              style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="number" min={1} placeholder="Lead time (days)" value={newSupplierLeadTime} onChange={(e) => setNewSupplierLeadTime(e.target.value)}
+              style={{ flex: "1 1 110px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+          </div>
+          <button
+            type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || supplierFetcher.state !== "idle"}
+            style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() || !newSupplierEmail.trim() ? "not-allowed" : "pointer" }}
+          >
+            {supplierFetcher.state !== "idle" ? "Creating…" : "Create Supplier"}
+          </button>
+        </div>
+      )}
+
+      {supplierId && (
+        <>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {variants.map((v) => (
               <div key={v.variantId} style={{ border: "1px solid #f3f4f6", borderRadius: 8, padding: "10px 12px" }}>
