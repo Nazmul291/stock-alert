@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { Link } from "react-router";
 import type { ProductRow } from "./ProductEditModal";
 import { StockOutBadge } from "./StockOutBadge";
 import { SalesVelocityBadge } from "./SalesVelocityBadge";
@@ -163,7 +164,13 @@ export function ProductsTable({
                         ▢
                       </div>
                     )}
-                    <span className={loading ? "skeleton-text" : undefined} style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
+                    {!loading && p.isTracked ? (
+                      <Link to={`/app/products/${p.productId}`} style={{ fontWeight: 500, color: "#111827", textDecoration: "none" }}>
+                        {p.productTitle ?? "—"}
+                      </Link>
+                    ) : (
+                      <span className={loading ? "skeleton-text" : undefined} style={{ fontWeight: 500 }}>{p.productTitle ?? "—"}</span>
+                    )}
                   </div>
                 </td>
                 <td style={{ padding: "10px 12px", fontWeight: 600, color: isNotTracked ? "#9ca3af" : p.inventoryStatus === "out_of_stock" ? "#dc2626" : p.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>

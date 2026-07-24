@@ -20,10 +20,16 @@ export type PurchaseOrderDetailData = {
     quantityOrdered: number;
     quantityReceived: number;
     unitCost: number | null;
-    // Only populated when the PO is ordered/partially_received — a variant
-    // stocked at more than one location needs the merchant to pick which one
-    // received the shipment (see receivePurchaseOrderItems in
-    // purchase-order.server.ts for why this can't be guessed).
+    // Set when this line already has a fixed destination location — from the
+    // product-detail page's per-location Create Purchase Order flow. When
+    // set, receiving shows this as plain text instead of the picker below.
+    locationId: string | null;
+    locationName: string | null;
+    // Only used (and only populated) when locationId is null and the PO is
+    // ordered/partially_received — a variant stocked at more than one
+    // location needs the merchant to pick which one received the shipment
+    // (see receivePurchaseOrderItems in purchase-order.server.ts for why this
+    // can't be guessed).
     locations: { id: string; name: string; available: number }[];
   }[];
 };
@@ -76,7 +82,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   // round trip for the common case of forgetting to pick one.
   const receiveLocationMissing = po.lineItems.some((li) => {
     const qty = Math.max(0, parseInt(receiveEdits[li.id] ?? "0") || 0);
-    return qty > 0 && li.locations.length > 1 && !receiveLocationEdits[li.id];
+    return qty > 0 && !li.locationId && li.locations.length > 1 && !receiveLocationEdits[li.id];
   });
 
   return (
@@ -111,7 +117,10 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
           <tbody>
             {po.lineItems.map((li) => (
               <tr key={li.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                <td style={{ padding: "8px 12px" }}>{li.productTitle ?? "—"}{li.variantTitle ? ` — ${li.variantTitle}` : ""}</td>
+                <td style={{ padding: "8px 12px" }}>
+                  {li.productTitle ?? "—"}{li.variantTitle ? ` — ${li.variantTitle}` : ""}
+                  {li.locationName && <span style={{ display: "block", fontSize: 11, color: "#9ca3af" }}>{li.locationName}</span>}
+                </td>
                 <td style={{ padding: "8px 12px", color: "#6b7280" }}>{li.sku ?? "—"}</td>
                 <td style={{ padding: "8px 12px" }}>
                   {isDraft ? (
@@ -143,20 +152,26 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
                         onChange={(e) => setReceiveEdits((prev) => ({ ...prev, [li.id]: e.target.value }))}
                         style={{ width: 70, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13 }}
                       />
-                      {li.locations.length > 1 && (
-                        <select
-                          value={receiveLocationEdits[li.id] ?? ""}
-                          onChange={(e) => setReceiveLocationEdits((prev) => ({ ...prev, [li.id]: e.target.value }))}
-                          style={{ width: 150, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 6px", fontSize: 12 }}
-                        >
-                          <option value="">Choose location…</option>
-                          {li.locations.map((loc) => (
-                            <option key={loc.id} value={loc.id}>{loc.name} ({loc.available} available)</option>
-                          ))}
-                        </select>
-                      )}
-                      {li.locations.length === 0 && (
-                        <span style={{ fontSize: 11, color: "#991b1b" }}>No location found</span>
+                      {li.locationId ? (
+                        <span style={{ fontSize: 11, color: "#6b7280" }}>{li.locationName ?? "Assigned location"}</span>
+                      ) : (
+                        <>
+                          {li.locations.length > 1 && (
+                            <select
+                              value={receiveLocationEdits[li.id] ?? ""}
+                              onChange={(e) => setReceiveLocationEdits((prev) => ({ ...prev, [li.id]: e.target.value }))}
+                              style={{ width: 150, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 6px", fontSize: 12 }}
+                            >
+                              <option value="">Choose location…</option>
+                              {li.locations.map((loc) => (
+                                <option key={loc.id} value={loc.id}>{loc.name} ({loc.available} available)</option>
+                              ))}
+                            </select>
+                          )}
+                          {li.locations.length === 0 && (
+                            <span style={{ fontSize: 11, color: "#991b1b" }}>No location found</span>
+                          )}
+                        </>
                       )}
                     </div>
                   </td>

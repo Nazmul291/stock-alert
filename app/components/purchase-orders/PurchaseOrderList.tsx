@@ -10,7 +10,7 @@ export type PurchaseOrderRow = {
   createdAt: string;
 };
 
-const STATUS_STYLE: Record<PurchaseOrderRow["status"], { bg: string; color: string; label: string }> = {
+export const STATUS_STYLE: Record<PurchaseOrderRow["status"], { bg: string; color: string; label: string }> = {
   draft: { bg: "#f3f4f6", color: "#374151", label: "Draft" },
   ordered: { bg: "#dbeafe", color: "#1e40af", label: "Ordered" },
   partially_received: { bg: "#fef3c7", color: "#92400e", label: "Partially Received" },

@@ -177,7 +177,17 @@ export async function searchTrackedProducts(shop: string, opts: { search?: strin
   }));
 }
 
-export type CreatePurchaseOrderLine = { variantId: string; quantityOrdered: number; unitCost?: number | null };
+export type CreatePurchaseOrderLine = {
+  variantId: string;
+  quantityOrdered: number;
+  unitCost?: number | null;
+  // Destination location for this line — only ever sent by the
+  // product-detail page's per-location Create Purchase Order flow. Omitted
+  // (or null) by the general Purchase Orders page, which has no location
+  // concept and keeps creating one location-less line per variant.
+  locationId?: string | null;
+  locationName?: string | null;
+};
 
 // Persists a PurchaseOrder from merchant-approved line items — forecast
 // suggestions (previewPurchaseOrders) or manual search (searchTrackedProducts)
@@ -186,10 +196,17 @@ export type CreatePurchaseOrderLine = { variantId: string; quantityOrdered: numb
 // from the DB rather than trusting whatever the client displayed, and keeps
 // the poNumber transaction + P2002 collision retry from the previous
 // forecast-only implementation.
+//
+// `admin` is only required when at least one line carries a locationId — it's
+// used to verify that id is actually a real location for that variant before
+// persisting (a client-supplied locationId isn't trustworthy on its own,
+// same reasoning as the supplierId check below). The general PO flow never
+// sends a locationId, so it never pays for this extra Shopify call.
 export async function createPurchaseOrder(
   shop: string,
   supplierId: string,
   lines: CreatePurchaseOrderLine[],
+  admin?: AdminApiContext,
 ): Promise<{ purchaseOrderId: string }> {
   const sanitizedLines = lines.map((l) => ({
     ...l,
@@ -214,6 +231,19 @@ export async function createPurchaseOrder(
   const rows = await prisma.inventoryTracking.findMany({ where: { shop, variantId: { in: variantIds } } });
   const rowsByVariantId = new Map(rows.map((r) => [r.variantId.toString(), r]));
 
+  const linesWithLocation = positiveLines.filter((l) => l.locationId);
+  let validLocationsByVariant: Map<string, VariantLocationLevel[]> | null = null;
+  if (linesWithLocation.length > 0) {
+    if (!admin) throw new Error("Cannot assign a location without an active Shopify session.");
+    validLocationsByVariant = await getVariantLocationLevels(admin, variantIds);
+    for (const l of linesWithLocation) {
+      const validLocations = validLocationsByVariant.get(l.variantId) ?? [];
+      if (!validLocations.some((loc) => loc.locationId === l.locationId)) {
+        throw new Error(`"${l.locationName ?? l.locationId}" is no longer a valid location for one of the selected products — refresh and try again.`);
+      }
+    }
+  }
+
   const resolvedLines = positiveLines
     .map((l) => {
       const row = rowsByVariantId.get(l.variantId);
@@ -226,6 +256,8 @@ export async function createPurchaseOrder(
         sku: row.sku,
         quantityOrdered: l.quantityOrdered,
         unitCost: l.unitCost ?? row.unitCost ?? null,
+        locationId: l.locationId ?? null,
+        locationName: l.locationName ?? null,
       };
     })
     .filter((l): l is NonNullable<typeof l> => l !== null);
@@ -384,19 +416,28 @@ export async function receivePurchaseOrderItems(
   const levelsByVariant = await getVariantLocationLevels(admin, validReceipts.map((r) => r.line.variantId));
 
   const quantities: Array<{ inventoryItemId: string; locationId: string; quantity: number; changeFromQuantity: null }> = [];
-  for (const { line, quantityReceived, locationId } of validReceipts) {
+  for (const { line, quantityReceived, locationId: receiptLocationId } of validReceipts) {
     const levels = levelsByVariant.get(line.variantId.toString()) ?? [];
     if (levels.length === 0) {
       throw new Error(`Could not find inventory location for ${line.productTitle ?? line.sku}.`);
     }
 
     let level: VariantLocationLevel;
-    if (levels.length === 1) {
+    if (line.locationId) {
+      // This line already has a fixed destination from creation time (the
+      // product-detail page's per-location Create Purchase Order flow) — no
+      // need to ask the merchant to pick again, just confirm it's still valid.
+      const match = levels.find((l) => l.locationId === line.locationId);
+      if (!match) {
+        throw new Error(`${line.productTitle ?? line.sku}: the location this was ordered for ("${line.locationName ?? line.locationId}") is no longer valid — refresh and try again.`);
+      }
+      level = match;
+    } else if (levels.length === 1) {
       level = levels[0];
-    } else if (!locationId) {
+    } else if (!receiptLocationId) {
       throw new Error(`${line.productTitle ?? line.sku} is stocked at ${levels.length} locations — choose which location received this shipment.`);
     } else {
-      const match = levels.find((l) => l.locationId === locationId);
+      const match = levels.find((l) => l.locationId === receiptLocationId);
       if (!match) {
         throw new Error(`${line.productTitle ?? line.sku}: the selected location is no longer valid for this variant — refresh and try again.`);
       }
