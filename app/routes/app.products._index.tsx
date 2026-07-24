@@ -9,13 +9,8 @@ import prisma from "../db.server";
 import { getMaxProducts, canUseFeature, formatMaxProducts, getPlanLimits } from "../lib/plan-limits";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
-import { PRODUCT_METAFIELDS_QUERY } from "../lib/graphql";
 import { refreshShopVelocity } from "../lib/velocity.server";
 import { publishEvent } from "../lib/broadcast.server";
-import { setInventoryQuantities } from "../lib/shopify-inventory.server";
-import { ProductEditModal } from "../components/products/ProductEditModal";
-import type { ProductRow } from "../components/products/ProductEditModal";
-import type { VariantInventory, LocationInventory } from "../components/products/InventorySection";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { ProductSyncButton } from "../components/products/ProductSyncButton";
 import { ProductsToolbar } from "../components/products/ProductsToolbar";
@@ -29,42 +24,11 @@ import type { InventoryStatus } from "@prisma/client";
 
 type AdminClient = Awaited<ReturnType<typeof authenticate.admin>>["admin"];
 
-type GraphQLUserError = { field?: string[] | null; message: string };
 type GraphQLResponse<T> = {
   data?: T;
   errors?: { message: string }[];
   extensions?: { cost?: { throttleStatus?: { currentlyAvailable: number; restoreRate: number } } };
 };
-
-type InventoryLevelEdge = {
-  node: {
-    location: { id: string; name: string };
-    quantities: Array<{ name: string; quantity: number }>;
-  };
-};
-type ProductInventoryVariantEdge = {
-  node: {
-    id: string;
-    title: string;
-    sku: string | null;
-    inventoryItem: {
-      id: string;
-      tracked: boolean;
-      inventoryLevels?: { edges: InventoryLevelEdge[] };
-    } | null;
-  };
-};
-type ProductInventoryResponse = GraphQLResponse<{
-  product: { variants: { edges: ProductInventoryVariantEdge[] } } | null;
-}>;
-
-type ProductMetafieldsResponse = GraphQLResponse<{
-  product: {
-    customThreshold: { id: string; value: string } | null;
-    autoHide: { id: string; value: string } | null;
-    autoRepublish: { id: string; value: string } | null;
-  } | null;
-}>;
 
 type CollectionsResponse = GraphQLResponse<{
   collections: {
@@ -90,17 +54,6 @@ type SyncProductEdge = {
 type SyncProductsResponse = GraphQLResponse<{
   products: { edges: SyncProductEdge[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
 }>;
-
-type InventoryItemUpdateResponse = GraphQLResponse<{
-  inventoryItemUpdate: { inventoryItem: { id: string; tracked: boolean } | null; userErrors: GraphQLUserError[] };
-}>;
-type ProductUpdateResponse = GraphQLResponse<{
-  productUpdate: { product: { id: string; status: string } | null; userErrors: GraphQLUserError[] };
-}>;
-type MetafieldsSetResponse = GraphQLResponse<{
-  metafieldsSet: { userErrors: GraphQLUserError[] };
-}>;
-type MetafieldInput = { ownerId: string; namespace: string; key: string; value: string; type: string };
 
 type SyncVariantRow = {
   productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
@@ -136,66 +89,6 @@ const COLLECTIONS_GRAPHQL = `
     collections(first: $first, after: $after) {
       edges { node { id title legacyResourceId } }
       pageInfo { hasNextPage endCursor }
-    }
-  }
-`;
-
-const INVENTORY_ITEM_UPDATE_MUTATION = `
-  mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
-    inventoryItemUpdate(id: $id, input: $input) {
-      inventoryItem { id tracked }
-      userErrors { field message }
-    }
-  }
-`;
-
-const PRODUCT_UPDATE_MUTATION = `
-  mutation productUpdate($product: ProductUpdateInput!) {
-    productUpdate(product: $product) {
-      product { id status }
-      userErrors { field message }
-    }
-  }
-`;
-
-const PRODUCT_INVENTORY_QUERY = `
-  query getProductInventory($id: ID!) {
-    product(id: $id) {
-      variants(first: 100) {
-        edges {
-          node {
-            id title sku
-            inventoryItem {
-              id tracked
-              inventoryLevels(first: 50) {
-                edges {
-                  node {
-                    location { id name }
-                    quantities(names: ["available"]) { name quantity }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-`;
-
-const METAFIELDS_SET_MUTATION = `
-  mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-    metafieldsSet(metafields: $metafields) {
-      userErrors { field message }
-    }
-  }
-`;
-
-const METAFIELDS_DELETE_MUTATION = `
-  mutation metafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
-    metafieldsDelete(metafields: $metafields) {
-      deletedMetafields { key namespace ownerId }
-      userErrors { field message }
     }
   }
 `;
@@ -267,71 +160,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       cursor = page.pageInfo.endCursor;
     }
     return { collections };
-  }
-
-  if (url.searchParams.get("intent") === "get_product_inventory") {
-    const productId = url.searchParams.get("productId") as string;
-    try {
-      const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
-        variables: { id: `gid://shopify/Product/${productId}` },
-      });
-      const json: ProductInventoryResponse = await res.json();
-
-      if (json.errors?.length) {
-        const msg = json.errors.map((e) => e.message).join("; ");
-        console.error("[get_product_inventory] GraphQL errors:", msg);
-        return { inventoryData: null, inventoryError: `GraphQL error: ${msg}` };
-      }
-
-      const variants: VariantInventory[] = (json.data?.product?.variants?.edges ?? []).map((e) => {
-        const v = e.node;
-        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le) => {
-          const quantities = le.node.quantities ?? [];
-          const available = quantities.find((q) => q.name === "available");
-          return {
-            locationId: le.node.location.id,
-            locationName: le.node.location.name,
-            quantity: available?.quantity ?? 0,
-          };
-        });
-        return {
-          id: v.id,
-          title: v.title,
-          sku: v.sku || null,
-          inventoryItemId: v.inventoryItem?.id ?? null,
-          tracked: v.inventoryItem?.tracked ?? false,
-          locations,
-        };
-      });
-
-      return { inventoryData: { variants } };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[get_product_inventory] Exception:", msg);
-      return { inventoryData: null, inventoryError: `Error: ${msg}` };
-    }
-  }
-
-  if (url.searchParams.get("intent") === "get_product_settings") {
-    const productId = url.searchParams.get("productId") as string;
-    try {
-      const res = await admin.graphql(PRODUCT_METAFIELDS_QUERY, {
-        variables: { id: `gid://shopify/Product/${productId}` },
-      });
-      const json: ProductMetafieldsResponse = await res.json();
-      const p = json.data?.product;
-      return {
-        productSettings: {
-          customThreshold: p?.customThreshold?.value ?? "",
-          customThresholdId: p?.customThreshold?.id ?? null,
-          autoHide: p?.autoHide?.value !== undefined ? p.autoHide.value === "true" : null,
-          autoRepublish: p?.autoRepublish?.value !== undefined ? p.autoRepublish.value === "true" : null,
-        },
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { productSettings: null, settingsError: msg };
-    }
   }
 
   const search = url.searchParams.get("search") ?? "";
@@ -530,305 +358,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = form.get("intent") as string;
 
-  if (intent === "update_product") {
-    const productId = form.get("productId") as string;
-    const shopifyStatus = form.get("shopifyStatus") as string;
-    const tracked = form.get("tracked") === "true";
-    const monitoringEnabled = form.get("monitoringEnabled") === "true";
-    const productTitle = form.get("productTitle") as string;
-    const shopifyInventoryItemId = (form.get("shopifyInventoryItemId") as string) || null;
-
-    let inventoryUpdates: Array<{ inventoryItemId: string; locationId: string; quantity: number }> = [];
-    try {
-      const raw = form.get("inventoryUpdates") as string;
-      if (raw) inventoryUpdates = JSON.parse(raw);
-    } catch { /* ignore parse errors */ }
-
-    const errors: string[] = [];
-
-    if (tracked && shopifyInventoryItemId) {
-      try {
-        const res = await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
-          variables: { id: shopifyInventoryItemId, input: { tracked: true } },
-        });
-        const json: InventoryItemUpdateResponse = await res.json();
-        const errs = json.data?.inventoryItemUpdate?.userErrors ?? [];
-        if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
-      } catch (err) {
-        errors.push(`Inventory tracking enable failed: ${err instanceof Error ? err.message : "Unknown"}`);
-      }
-    }
-
-    try {
-      const res = await admin.graphql(PRODUCT_UPDATE_MUTATION, {
-        variables: { product: { id: `gid://shopify/Product/${productId}`, status: shopifyStatus } },
-      });
-      const json: ProductUpdateResponse = await res.json();
-      const errs = json.data?.productUpdate?.userErrors ?? [];
-      if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
-    } catch (err) {
-      errors.push(`Status update failed: ${err instanceof Error ? err.message : "Unknown"}`);
-    }
-
-    if (inventoryUpdates.length > 0) {
-      try {
-        const { userErrors: invErrs } = await setInventoryQuantities(
-          admin,
-          inventoryUpdates.map((u) => ({ ...u, changeFromQuantity: null })),
-          "correction",
-        );
-        if (invErrs.length > 0) errors.push(invErrs.join(", "));
-      } catch (err) {
-        errors.push(`Quantity update failed: ${err instanceof Error ? err.message : "Unknown"}`);
-      }
-    }
-
-    const settings = await prisma.storeSettings.findUnique({ where: { shop } });
-    const threshold = settings?.lowStockThreshold ?? 5;
-    const existingRows = await prisma.inventoryTracking.findMany({
-      where: { shop, productId: BigInt(productId) },
-    });
-
-    const rawManualSales = ((form.get("manualDailySales") as string) ?? "").trim();
-    const manualDailySales = rawManualSales !== "" && !isNaN(parseFloat(rawManualSales)) ? parseFloat(rawManualSales) : null;
-    const rawRestockDate = ((form.get("expectedRestockDate") as string) ?? "").trim();
-    const expectedRestockDate = rawRestockDate ? new Date(rawRestockDate) : null;
-
-    // Per-product custom thresholds are a Pro feature; ignore the submitted
-    // value for basic stores. Read from the form (rather than re-fetching the
-    // metafield) since this same submission is about to write it below.
-    const storeSession = await prisma.session.findFirst({ where: { shop, isOnline: false } });
-    const plan = storeSession?.plan ?? "basic";
-
-    // Supplier/unit cost are an Enterprise feature — silently leave any
-    // existing value untouched (rather than erroring the whole save, or
-    // clearing it) when the plan doesn't have access, since a stale form
-    // submission from a since-downgraded plan must still degrade gracefully
-    // (the modal itself hides these fields when gated).
-    const canManageSupplier = canUseFeature(plan, "purchaseOrders");
-    const rawSupplierId = ((form.get("supplierId") as string) ?? "").trim();
-    const rawUnitCost = ((form.get("unitCost") as string) ?? "").trim();
-    // A supplierId is only ever offered to the client via the dropdown this
-    // same shop's suppliers populate, but the form value itself isn't
-    // trustworthy — verify it before saving rather than persisting a
-    // dangling/foreign id that would silently make this product ineligible
-    // for reorder suggestions with no error ever shown to the merchant.
-    const verifiedSupplierId =
-      canManageSupplier && rawSupplierId
-        ? (await prisma.supplier.findFirst({ where: { id: rawSupplierId, shop }, select: { id: true } }))?.id ?? null
-        : null;
-    const supplierFields = canManageSupplier
-      ? {
-          supplierId: verifiedSupplierId,
-          unitCost: rawUnitCost !== "" && !isNaN(parseFloat(rawUnitCost)) ? parseFloat(rawUnitCost) : null,
-        }
-      : {};
-
-    const customThresholdRaw = ((form.get("customThreshold") as string) ?? "").trim();
-    const parsedCustomThreshold = customThresholdRaw !== "" ? parseInt(customThresholdRaw) : NaN;
-    const effectiveThreshold =
-      canUseFeature(plan, "perProductThresholds") && !isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0
-        ? parsedCustomThreshold
-        : threshold;
-
-    if (tracked) {
-      // Re-derive the authoritative variant list straight from Shopify
-      // (rather than trusting a client-submitted snapshot) so this write
-      // never depends on the modal's inventory fetch having completed in
-      // time — that snapshot could be empty or stale, silently dropping the
-      // DB write while the Shopify-side mutations above still succeed.
-      let variantsFresh: Array<{ variantId: string; variantTitle: string | null; sku: string | null; qty: number }> = [];
-      try {
-        const res = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
-          variables: { id: `gid://shopify/Product/${productId}` },
-        });
-        const json: ProductInventoryResponse = await res.json();
-        if (json.errors?.length) throw new Error(json.errors.map((e) => e.message).join("; "));
-        const edges = json.data?.product?.variants?.edges ?? [];
-        variantsFresh = edges
-          .filter((e) => e.node.inventoryItem?.tracked !== false)
-          .map((e) => {
-            const v = e.node;
-            const qty = (v.inventoryItem?.inventoryLevels?.edges ?? []).reduce((sum: number, le) => {
-              const avail = (le.node.quantities ?? []).find((q) => q.name === "available");
-              return sum + (avail?.quantity ?? 0);
-            }, 0);
-            return { variantId: v.id.split("/").pop() as string, variantTitle: v.title ?? null, sku: v.sku || null, qty };
-          });
-      } catch (err) {
-        errors.push(`Failed to refresh inventory: ${err instanceof Error ? err.message : "Unknown"}`);
-      }
-
-      const existingByVariantId = new Map(existingRows.map((r) => [r.variantId.toString(), r]));
-
-      for (const v of variantsFresh) {
-        const existingRow = existingByVariantId.get(v.variantId);
-
-        if (existingRow) {
-          // currentQuantity/inventoryStatus are deliberately left untouched
-          // here — writing them directly made the real inventory webhook see
-          // "no change" right after a manual edit, silently swallowing its
-          // alert (the webhook is the only place that decides whether to
-          // notify). The webhook is now the sole source of truth for
-          // quantity/status; this save only touches fields it doesn't own.
-          // stockOutDays is recomputed off the currently-stored quantity so
-          // it still updates immediately when just the sales estimate changes.
-          const effectiveSales = manualDailySales ?? existingRow.avgDailySales ?? null;
-          const stockOutDays = effectiveSales
-            ? Math.min(999, Math.ceil(existingRow.currentQuantity / effectiveSales))
-            : undefined;
-
-          // A product benched by plan-limit enforcement can't be re-enabled
-          // from here — that would let a merchant self-service past their
-          // plan's product cap without upgrading.
-          const isPlanBenched = existingRow.inventoryStatus === "requires_upgrade";
-          const effectiveMonitoringEnabled = isPlanBenched ? false : monitoringEnabled;
-
-          // inventoryStatus is the one exception to "leave it untouched"
-          // above: the monitoring toggle owns it at the exact moment it
-          // flips, so plan-limit enforcement can tell "merchant turned this
-          // off" apart from "benched for being over the cap" (see
-          // BENCHED_STATUSES in plan-enforcement.ts). Turning back on
-          // recomputes the real stock status immediately — otherwise it
-          // would stay stuck 'deactivated' forever, since the inventory
-          // webhook skips any row whose previous status was 'deactivated'.
-          const monitoringChanged = !isPlanBenched && effectiveMonitoringEnabled !== existingRow.monitoringEnabled;
-          const recomputedStatus: "in_stock" | "low_stock" | "out_of_stock" =
-            existingRow.currentQuantity <= 0
-              ? "out_of_stock"
-              : existingRow.currentQuantity <= effectiveThreshold
-              ? "low_stock"
-              : "in_stock";
-          const statusPatch = !monitoringChanged
-            ? {}
-            : effectiveMonitoringEnabled
-            ? { inventoryStatus: recomputedStatus }
-            : { inventoryStatus: "deactivated" as const };
-
-          await prisma.inventoryTracking.update({
-            where: { id: existingRow.id },
-            data: {
-              productTitle,
-              variantTitle: v.variantTitle,
-              sku: v.sku,
-              monitoringEnabled: effectiveMonitoringEnabled,
-              manualDailySales,
-              expectedRestockDate,
-              ...statusPatch,
-              ...(stockOutDays !== undefined ? { stockOutDays } : {}),
-              ...supplierFields,
-            },
-          });
-        } else {
-          // First time this variant is tracked — no webhook history exists
-          // yet to fall back on, so seed its baseline quantity/status now
-          // (same reasoning as the PRODUCTS_CREATE webhook: nothing to
-          // compare against yet, so no transition alert is expected here).
-          const invStatus: "in_stock" | "low_stock" | "out_of_stock" =
-            v.qty <= 0 ? "out_of_stock" : v.qty <= effectiveThreshold ? "low_stock" : "in_stock";
-          await prisma.inventoryTracking.create({
-            data: {
-              shop,
-              productId: BigInt(productId),
-              variantId: BigInt(v.variantId),
-              productTitle,
-              variantTitle: v.variantTitle,
-              sku: v.sku,
-              currentQuantity: v.qty,
-              previousQuantity: v.qty,
-              inventoryStatus: invStatus,
-              monitoringEnabled,
-              manualDailySales,
-              expectedRestockDate,
-              ...supplierFields,
-            },
-          });
-        }
-      }
-      // Deliberately no pruning here. A single post-mutation re-fetch is
-      // exactly the kind of read that can catch Shopify's inventoryItem
-      // eventual-consistency window right after writing new inventory levels
-      // (variants missing or briefly reporting tracked:false) — the sync
-      // path hit this same class of bug when it tried to prune off of one
-      // fetch's result. Removing a variant's tracking is the sync's job,
-      // where it can be reasoned about across the whole catalog; a save on
-      // this one product should only ever add or update.
-    } else if (existingRows.length > 0) {
-      await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
-    }
-
-    if (tracked) {
-      const autoHide = form.get("autoHide") === "true";
-      const autoRepublish = form.get("autoRepublish") === "true";
-      const customThresholdMetafieldId = ((form.get("customThresholdMetafieldId") as string) ?? "").trim() || null;
-      const ownerId = `gid://shopify/Product/${productId}`;
-
-      const metafieldsToSet: MetafieldInput[] = [
-        { ownerId, namespace: "stock_alert", key: "auto_hide", value: String(autoHide), type: "boolean" },
-        { ownerId, namespace: "stock_alert", key: "auto_republish", value: String(autoRepublish), type: "boolean" },
-      ];
-
-      if (!isNaN(parsedCustomThreshold) && parsedCustomThreshold >= 0) {
-        metafieldsToSet.push({ ownerId, namespace: "stock_alert", key: "custom_threshold", value: String(parsedCustomThreshold), type: "number_integer" });
-      }
-
-      try {
-        const mfRes = await admin.graphql(METAFIELDS_SET_MUTATION, { variables: { metafields: metafieldsToSet } });
-        const mfJson: MetafieldsSetResponse = await mfRes.json();
-        const mfErrs = mfJson.data?.metafieldsSet?.userErrors ?? [];
-        if (mfErrs.length > 0) errors.push(mfErrs.map((e) => e.message).join(", "));
-      } catch (err) {
-        errors.push(`Metafield update failed: ${err instanceof Error ? err.message : "Unknown"}`);
-      }
-
-      if (customThresholdRaw === "" && customThresholdMetafieldId) {
-        try {
-          await admin.graphql(METAFIELDS_DELETE_MUTATION, {
-            variables: { metafields: [{ ownerId, namespace: "stock_alert", key: "custom_threshold" }] },
-          });
-        } catch {
-          // Non-critical
-        }
-      }
-    }
-
-    if (errors.length > 0) return { error: errors.join(" | "), updatedProductId: productId };
-    return { success: true, message: "Product updated successfully.", updatedProductId: productId };
-  }
-
-  if (intent === "enable_and_fetch_inventory") {
-    const productId = form.get("productId") as string;
-    try {
-      const invRes = await admin.graphql(PRODUCT_INVENTORY_QUERY, {
-        variables: { id: `gid://shopify/Product/${productId}` },
-      });
-      const invJson: ProductInventoryResponse = await invRes.json();
-      const edges = invJson.data?.product?.variants?.edges ?? [];
-
-      for (const edge of edges) {
-        const itemId = edge.node.inventoryItem?.id;
-        if (itemId && !edge.node.inventoryItem?.tracked) {
-          await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
-            variables: { id: itemId, input: { tracked: true } },
-          });
-        }
-      }
-
-      const variants: VariantInventory[] = edges.map((e) => {
-        const v = e.node;
-        const locations: LocationInventory[] = (v.inventoryItem?.inventoryLevels?.edges ?? []).map((le) => {
-          const available = (le.node.quantities ?? []).find((q) => q.name === "available");
-          return { locationId: le.node.location.id, locationName: le.node.location.name, quantity: available?.quantity ?? 0 };
-        });
-        return { id: v.id, title: v.title, sku: v.sku || null, inventoryItemId: v.inventoryItem?.id ?? null, tracked: true, locations };
-      });
-
-      return { enabledInventory: { variants } };
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : "Unknown error" };
-    }
-  }
-
   if (intent === "bulk_monitoring") {
     const productIds = JSON.parse((form.get("productIds") as string) ?? "[]") as string[];
     const enabled = form.get("monitoringEnabled") === "true";
@@ -949,16 +478,11 @@ function ProductsPageContent() {
   // banner below is gated on `!loading` anyway.
   const maxProducts = useProductsStore((s) => s.data?.maxProducts) ?? null;
   const trackedCount = useProductsStore((s) => s.data?.trackedCount) ?? 0;
-  const threshold = useProductsStore((s) => s.data?.threshold) ?? 5;
   const products = useProductsStore((s) => s.data?.products) ?? [];
   const syncRunning = useProductsStore((s) => s.data?.syncRunning) ?? false;
   const lastSyncCompletedAt = useProductsStore((s) => s.data?.lastSyncCompletedAt) ?? null;
   const lastSyncCount = useProductsStore((s) => s.data?.lastSyncCount) ?? null;
-  const autoHideEnabled = useProductsStore((s) => s.data?.autoHideEnabled) ?? false;
-  const autoRepublishEnabled = useProductsStore((s) => s.data?.autoRepublishEnabled) ?? false;
-  const suppliers = useProductsStore((s) => s.data?.suppliers) ?? [];
   const filter = useProductsStore((s) => s.filter);
-  const applyOptimisticPatch = useProductsStore((s) => s.applyOptimisticPatch);
 
   const nav = useNavigation();
   const submit = useSubmit();
@@ -1004,8 +528,6 @@ function ProductsPageContent() {
     });
   };
 
-  const [saveErrorAfterClose, setSaveErrorAfterClose] = useState<string | null>(null);
-
   const selectableIds = products.filter((p) => p.isTracked).map((p) => p.productId);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
 
@@ -1026,8 +548,6 @@ function ProductsPageContent() {
     setSelectedIds(new Set());
   };
 
-  const [editProduct, setEditProduct] = useState<ProductRow | null>(null);
-
   return (
     <>
       <ProductSyncButton
@@ -1040,14 +560,6 @@ function ProductsPageContent() {
       {actionData && "error" in actionData && (
         <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#991b1b" }}>
           {actionData.error}
-        </div>
-      )}
-      {saveErrorAfterClose && (
-        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", marginBottom: 12, color: "#991b1b", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <span>{saveErrorAfterClose}</span>
-          <button onClick={() => setSaveErrorAfterClose(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#991b1b", fontSize: 16, lineHeight: 1, padding: 0 }} aria-label="Dismiss">
-            ✕
-          </button>
         </div>
       )}
       {(actionData && "message" in actionData || bulkFetcher.data && "message" in bulkFetcher.data) && (
@@ -1112,7 +624,6 @@ function ProductsPageContent() {
           selectableIds={selectableIds}
           expandedProductIds={expandedProductIds}
           toggleExpandProduct={toggleExpandProduct}
-          onEditProduct={setEditProduct}
         />
 
         {selectedIds.size > 0 && (
@@ -1128,19 +639,6 @@ function ProductsPageContent() {
         <ProductsPagination />
       </s-section>
 
-      {editProduct && (
-        <ProductEditModal
-          product={editProduct}
-          plan={plan}
-          threshold={threshold}
-          autoHideEnabled={autoHideEnabled}
-          autoRepublishEnabled={autoRepublishEnabled}
-          suppliers={suppliers}
-          onClose={() => setEditProduct(null)}
-          onSaved={(patch) => applyOptimisticPatch(editProduct.productId, patch)}
-          onSaveError={(message) => setSaveErrorAfterClose(message)}
-        />
-      )}
     </>
   );
 }

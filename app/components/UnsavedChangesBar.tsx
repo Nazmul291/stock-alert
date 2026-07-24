@@ -1,7 +1,8 @@
-export function UnsavedChangesBar({ saving, onDiscard, onSave }: {
+export function UnsavedChangesBar({ saving, onDiscard, onSave, label = "Save Changes" }: {
   saving: boolean;
   onDiscard: () => void;
   onSave: () => void;
+  label?: string;
 }) {
   return (
     <div style={{
@@ -26,7 +27,7 @@ export function UnsavedChangesBar({ saving, onDiscard, onSave }: {
           disabled={saving}
           style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, opacity: saving ? 0.7 : 1 }}
         >
-          {saving ? "Saving…" : "Save Integrations"}
+          {saving ? "Saving…" : label}
         </button>
       </div>
     </div>

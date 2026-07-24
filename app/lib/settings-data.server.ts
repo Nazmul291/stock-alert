@@ -15,6 +15,10 @@ type SettingsValues = {
   monitoringTags: string;
   limitedEditionTag: string;
   deadStockThresholdDays: number;
+  alertDeliveryMode: string;
+  lowStockMuted: boolean;
+  outOfStockMuted: boolean;
+  restockMuted: boolean;
 };
 
 export type SettingsData = {
@@ -48,6 +52,10 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           monitoringTags: settings.monitoringTags ?? "",
           limitedEditionTag: settings.limitedEditionTag ?? "limited-edition",
           deadStockThresholdDays: settings.deadStockThresholdDays ?? 60,
+          alertDeliveryMode: settings.alertDeliveryMode ?? "instant",
+          lowStockMuted: settings.lowStockMuted ?? false,
+          outOfStockMuted: settings.outOfStockMuted ?? false,
+          restockMuted: settings.restockMuted ?? false,
         }
       : {
           autoHideEnabled: false,
@@ -64,6 +72,10 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           monitoringTags: "",
           limitedEditionTag: "limited-edition",
           deadStockThresholdDays: 60,
+          alertDeliveryMode: "instant",
+          lowStockMuted: false,
+          outOfStockMuted: false,
+          restockMuted: false,
         },
   };
 }

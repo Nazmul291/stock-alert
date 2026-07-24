@@ -593,7 +593,7 @@ function IntegrationsContent() {
       )}
 
       {isDirty && (
-        <UnsavedChangesBar saving={saving} onDiscard={handleDiscard} onSave={handleSave} />
+        <UnsavedChangesBar saving={saving} onDiscard={handleDiscard} onSave={handleSave} label="Save Integrations" />
       )}
     </>
   );

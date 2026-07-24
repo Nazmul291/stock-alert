@@ -1,5 +1,5 @@
 import { Form, useNavigation } from "react-router";
-import { PLAN_LIMITS, formatMaxProducts } from "../../lib/plan-limits";
+import { PLAN_LIMITS, TRIAL_DAYS, formatMaxProducts } from "../../lib/plan-limits";
 
 // Purchasable, in ascending tier order — drives both the display order and
 // the "Upgrade to X" vs "Switch to X" button label (comparing index).
@@ -32,7 +32,7 @@ export function BillingPlanCards({ activePlan }: { activePlan: "basic" | "pro" |
         const productsBullet = Number.isFinite(plan.maxProducts)
           ? `Up to ${formatMaxProducts(plan.maxProducts)} products`
           : "Unlimited products";
-        const bullets = [...plan.features, productsBullet, "30-day free trial"];
+        const bullets = [...plan.features, productsBullet, `${TRIAL_DAYS}-day free trial`];
 
         const tierIndex = isPurchasable ? PURCHASABLE_PLAN_KEYS.indexOf(key as "basic" | "pro" | "enterprise") : -1;
         const buttonLabel =
@@ -72,7 +72,7 @@ export function BillingPlanCards({ activePlan }: { activePlan: "basic" | "pro" |
             <p style={{ fontSize: 28, fontWeight: 700, margin: "0 0 4px" }}>
               {plan.price}<span style={{ fontSize: 14, fontWeight: 400, color: "#6b7280" }}>/month</span>
             </p>
-            <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 16px" }}>30-day free trial</p>
+            <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 16px" }}>{TRIAL_DAYS}-day free trial</p>
             <ul style={{ paddingLeft: 18, margin: "0 0 20px", lineHeight: 1.8, flex: 1 }}>
               {bullets.map((f) => <li key={f} style={{ fontSize: 14 }}>{f}</li>)}
             </ul>

@@ -1,3 +1,5 @@
+import { TRIAL_DAYS } from "./plan-limits";
+
 export type BlogBlock =
   | { type: "p"; text: string }
   | { type: "h2"; text: string }
@@ -1123,7 +1125,7 @@ const posts: BlogPost[] = [
       { type: "h2", text: "Getting Started" },
       {
         type: "p",
-        text: "If you've never set up anything like this before, don't overthink it. Stock Alert offers a free 30-day trial with plans starting at $3.99/month, and the setup is built for exactly this moment — a new store owner who wants low-stock and out-of-stock alerts (by email, Slack, or WhatsApp), plus back-in-stock notifications for customers, without needing to be an inventory expert to configure it.",
+        text: `If you've never set up anything like this before, don't overthink it. Stock Alert offers a free ${TRIAL_DAYS}-day trial with plans starting at $3.99/month, and the setup is built for exactly this moment — a new store owner who wants low-stock and out-of-stock alerts (by email, Slack, or WhatsApp), plus back-in-stock notifications for customers, without needing to be an inventory expert to configure it.`,
       },
       {
         type: "p",

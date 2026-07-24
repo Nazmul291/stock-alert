@@ -253,7 +253,7 @@ async function processInventoryUpdate(
         ...(effectiveDailySales ? { stockOutDays: newStockOutDays } : {}),
       },
     });
-    publishEvent(shop, ["products", "dashboard", "analytics"], {
+    publishEvent(shop, ["products", "dashboard", "analytics", "product-detail"], {
       productId,
       variantId,
       currentQuantity: newQty,
@@ -332,6 +332,10 @@ async function processInventoryUpdate(
     asanaEnabled: settings.asanaEnabled,
     asanaAccessToken: settings.asanaAccessToken,
     asanaWorkspaceGid: settings.asanaWorkspaceGid,
+    alertDeliveryMode: settings.alertDeliveryMode,
+    lowStockMuted: settings.lowStockMuted,
+    outOfStockMuted: settings.outOfStockMuted,
+    restockMuted: settings.restockMuted,
   };
   const productCtx = {
     id: productId,

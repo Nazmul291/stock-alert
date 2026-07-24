@@ -7,12 +7,13 @@ import { LandingFooter } from "../components/landing/LandingFooter";
 import { BillingFeatureComparisonTable } from "../components/billing/BillingFeatureComparisonTable";
 import chromeCss from "../styles/site-chrome.css?raw";
 import blogCss from "../styles/blog.css?raw";
+import { TRIAL_DAYS } from "../lib/plan-limits";
 
 const APP_NAME = "Stock Alert";
 const APP_STORE_URL = "https://apps.shopify.com/stock-alert-4";
 const TITLE = "Pricing — Stock Alert";
 const DESCRIPTION =
-  "Simple, transparent pricing for Stock Alert — Basic, Professional, and Enterprise plans, each with a 30-day free trial. Compare every feature side by side.";
+  `Simple, transparent pricing for Stock Alert — Basic, Professional, and Enterprise plans, each with a ${TRIAL_DAYS}-day free trial. Compare every feature side by side.`;
 const pageCss = `${chromeCss}\n${blogCss}`;
 
 // Static content — cache aggressively, same rationale as the landing page.
@@ -82,7 +83,7 @@ export default function Pricing() {
         </section>
 
         <p className="sa-trialNote">
-          Every plan starts with a 30-day free trial — no charge until the trial ends. Cancel
+          Every plan starts with a {TRIAL_DAYS}-day free trial — no charge until the trial ends. Cancel
           anytime before the trial expires and you won't be billed.
         </p>
       </main>

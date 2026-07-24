@@ -364,6 +364,85 @@ export function getDigestEmailTemplate(data: DigestEmailData, brand: BrandConfig
   };
 }
 
+export interface AlertBatchEvent {
+  productTitle: string | null;
+  variantTitle: string | null;
+  sku: string | null;
+  quantityAtAlert: number | null;
+}
+
+export interface AlertBatchEmailData {
+  shop: string;
+  outOfStock: AlertBatchEvent[];
+  lowStock: AlertBatchEvent[];
+  restock: AlertBatchEvent[];
+}
+
+// The once-daily batched summary for merchants who've turned off instant
+// Email/Slack alerts (see processAlertBatches in notifications.ts) — lists
+// the day's actual logged events, unlike getDigestEmailTemplate above which
+// queries live current-state and is a wholly separate feature.
+export function getAlertBatchEmailTemplate(data: AlertBatchEmailData, brand: BrandConfig = {}): { subject: string; html: string } {
+  const storeName = data.shop.replace('.myshopify.com', '');
+  const total = data.outOfStock.length + data.lowStock.length + data.restock.length;
+
+  const BADGES = {
+    outOfStock: { text: 'Out of Stock', bg: '#fee2e2', color: '#991b1b' },
+    lowStock: { text: 'Low Stock', bg: '#fef3c7', color: '#92400e' },
+    restock: { text: 'Back in Stock', bg: '#d1fae5', color: '#065f46' },
+  } as const;
+
+  const eventRow = (e: AlertBatchEvent, badge: { text: string; bg: string; color: string }) => `
+    <tr>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
+        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(e.productTitle ?? 'Unknown')}${e.variantTitle ? ` — ${esc(e.variantTitle)}` : ''}</div>
+        ${e.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(e.sku)}</div>` : ''}
+      </td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;">
+        ${e.quantityAtAlert != null ? `<span style="font-size:14px;font-weight:700;color:${badge.color};">${e.quantityAtAlert}</span>` : ''}
+        <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:${badge.bg};color:${badge.color};font-size:11px;font-weight:600;">${badge.text}</span>
+      </td>
+    </tr>`;
+
+  const rows = [
+    ...data.outOfStock.map((e) => eventRow(e, BADGES.outOfStock)),
+    ...data.lowStock.map((e) => eventRow(e, BADGES.lowStock)),
+    ...data.restock.map((e) => eventRow(e, BADGES.restock)),
+  ].join('');
+
+  const summaryCell = (label: string, count: number, color: string, last: boolean) => `
+    <td style="padding:16px 20px;background:#f9fafb;text-align:center;${last ? '' : 'border-right:1px solid #e5e7eb;'}">
+      <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">${label}</div>
+      <div style="font-size:30px;font-weight:800;color:${color};line-height:1;">${count}</div>
+    </td>`;
+
+  const body = `
+    ${header('🔔', 'Daily Alert Summary', `${total} alert${total !== 1 ? 's' : ''} today — ${storeName}`, brand)}
+    <tr>
+      <td style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+          <tr>
+            ${summaryCell('Out of Stock', data.outOfStock.length, BADGES.outOfStock.color, false)}
+            ${summaryCell('Low Stock', data.lowStock.length, BADGES.lowStock.color, false)}
+            ${summaryCell('Back in Stock', data.restock.length, BADGES.restock.color, true)}
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
+          <tr style="background:#f9fafb;">
+            <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Product</th>
+            <th style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Event</th>
+          </tr>
+          ${rows}
+        </table>
+      </td>
+    </tr>`;
+
+  return {
+    subject: `🔔 Daily Alert Summary: ${total} alert${total !== 1 ? 's' : ''} — ${storeName}`,
+    html: shell(`${total} alerts today — ${storeName}`, body, brand),
+  };
+}
+
 export interface PurchaseOrderEmailLine {
   productTitle: string | null;
   variantTitle: string | null;

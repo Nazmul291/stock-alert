@@ -52,6 +52,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       quantityOrdered: li.quantityOrdered,
       quantityReceived: li.quantityReceived,
       unitCost: li.unitCost,
+      locationId: li.locationId,
+      locationName: li.locationName,
       locations: (locationsByVariant.get(li.variantId.toString()) ?? []).map((l) => ({
         id: l.locationId,
         name: l.locationName,

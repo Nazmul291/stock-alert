@@ -22,7 +22,11 @@ function parseSupplierInput(input: SupplierInput): { data: { name: string; email
   const rawLeadTime = input.leadTimeDays ?? "";
 
   if (!name) return { error: "Supplier name is required." };
-  if (email && !EMAIL_RE.test(email)) return { error: `"${email}" is not a valid email address.` };
+  // Purchase orders are sent to this address (sendPurchaseOrderEmail) — a
+  // supplier with no email can never actually receive a PO, so this is
+  // required rather than merely validated-if-present.
+  if (!email) return { error: "Supplier email is required." };
+  if (!EMAIL_RE.test(email)) return { error: `"${email}" is not a valid email address.` };
 
   const leadTimeDays =
     rawLeadTime.trim() !== "" && !isNaN(parseInt(rawLeadTime)) && parseInt(rawLeadTime) > 0 ? parseInt(rawLeadTime) : null;

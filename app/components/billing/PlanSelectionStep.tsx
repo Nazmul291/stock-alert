@@ -1,4 +1,5 @@
 import type { PlanKey } from "../../lib/billing-plans";
+import { TRIAL_DAYS } from "../../lib/plan-limits";
 import { BillingPlanCards } from "./BillingPlanCards";
 import { BillingFeatureComparisonTable } from "./BillingFeatureComparisonTable";
 
@@ -17,7 +18,7 @@ export function PlanSelectionStep({ activePlan, error }: { activePlan: PlanKey |
             <span style={{ color: "#065f46", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>✦ ALMOST THERE</span>
           </div>
           <h1 style={{ margin: "0 0 8px", fontSize: 26, fontWeight: 700, color: "#111827" }}>Choose your plan</h1>
-          <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Every plan includes a 30-day free trial — no charge until it ends.</p>
+          <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Every plan includes a {TRIAL_DAYS}-day free trial — no charge until it ends.</p>
         </div>
 
         {error && (

@@ -7,6 +7,11 @@
 //   handles it so retiring a plan later is a one-line status flip.
 export type PlanStatus = 'active' | 'coming_soon' | 'disabled';
 
+// Single source of truth for trial length — read by shopify.server.ts's
+// billing config and by every marketing/UI string that mentions the trial,
+// so changing it is a one-line edit instead of a grep-and-replace.
+export const TRIAL_DAYS = 7;
+
 export const PLAN_LIMITS = {
   none: {
     name: 'None',

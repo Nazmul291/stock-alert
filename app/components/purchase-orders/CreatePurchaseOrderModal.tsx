@@ -45,7 +45,7 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
   }
 
   function createNewSupplier() {
-    if (!newSupplierName.trim()) return;
+    if (!newSupplierName.trim() || !newSupplierEmail.trim()) return;
     supplierFetcher.submit(
       { intent: "create_supplier", name: newSupplierName, email: newSupplierEmail, leadTimeDays: newSupplierLeadTime },
       { method: "post" },
@@ -204,7 +204,7 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
                     style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
                   />
                   <input
-                    type="email" placeholder="Email (optional)" value={newSupplierEmail} onChange={(e) => setNewSupplierEmail(e.target.value)}
+                    type="email" required placeholder="Email *" value={newSupplierEmail} onChange={(e) => setNewSupplierEmail(e.target.value)}
                     style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
                   />
                   <input
@@ -213,8 +213,8 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
                   />
                 </div>
                 <button
-                  type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || supplierFetcher.state !== "idle"}
-                  style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() ? "not-allowed" : "pointer" }}
+                  type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || supplierFetcher.state !== "idle"}
+                  style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() || !newSupplierEmail.trim() ? "not-allowed" : "pointer" }}
                 >
                   {supplierFetcher.state !== "idle" ? "Creating…" : "Create Supplier"}
                 </button>

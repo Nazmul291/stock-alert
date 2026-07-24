@@ -1,0 +1,85 @@
+import { Toggle, fieldLabel, helpText } from "../IntegrationControls";
+
+export function AlertDeliverySection({
+  alertDeliveryMode,
+  lowStockMuted,
+  outOfStockMuted,
+  restockMuted,
+  onAlertDeliveryModeChange,
+  onLowStockMutedChange,
+  onOutOfStockMutedChange,
+  onRestockMutedChange,
+}: {
+  alertDeliveryMode: string;
+  lowStockMuted: boolean;
+  outOfStockMuted: boolean;
+  restockMuted: boolean;
+  onAlertDeliveryModeChange: (v: string) => void;
+  onLowStockMutedChange: (v: boolean) => void;
+  onOutOfStockMutedChange: (v: boolean) => void;
+  onRestockMutedChange: (v: boolean) => void;
+}) {
+  return (
+    <div style={{ marginTop: 24 }}>
+      <s-section heading="Alert Delivery">
+        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 0, marginBottom: 16 }}>
+          Controls <strong>Email and Slack only</strong> for low-stock, out-of-stock, and back-in-stock alerts.
+          In-app alert history, WhatsApp, Klaviyo, Asana, and Shopify Flow are unaffected and always send immediately.
+        </p>
+
+        <p style={fieldLabel}>Delivery</p>
+        <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+          {(["instant", "daily"] as const).map((mode) => (
+            <label
+              key={mode}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                padding: "10px 18px", borderRadius: 8,
+                border: `1.5px solid ${alertDeliveryMode === mode ? "#4f46e5" : "#e5e7eb"}`,
+                background: alertDeliveryMode === mode ? "#eef2ff" : "#fff",
+                fontSize: 14, fontWeight: 500, color: alertDeliveryMode === mode ? "#4338ca" : "#374151",
+              }}
+            >
+              <input
+                type="radio"
+                name="alertDeliveryMode"
+                value={mode}
+                checked={alertDeliveryMode === mode}
+                onChange={() => onAlertDeliveryModeChange(mode)}
+                style={{ display: "none" }}
+              />
+              {mode === "instant" ? "Every event" : "Once per day"}
+            </label>
+          ))}
+        </div>
+        <p style={helpText}>
+          {alertDeliveryMode === "daily"
+            ? "One combined summary — a single table of low-stock, out-of-stock, and back-in-stock events — is sent at 11:55 PM UTC instead of a separate email/Slack message per event."
+            : "An email/Slack message is sent the moment each alert fires (today's behavior)."}
+        </p>
+
+        <div style={{ marginTop: 16 }}>
+          <p style={fieldLabel}>Mute specific alerts</p>
+          <Toggle
+            label="Low stock alerts"
+            description="Mute Email and Slack for low-stock alerts."
+            checked={!lowStockMuted}
+            onChange={(v) => onLowStockMutedChange(!v)}
+          />
+          <Toggle
+            label="Out of stock alerts"
+            description="Mute Email and Slack for out-of-stock alerts."
+            checked={!outOfStockMuted}
+            onChange={(v) => onOutOfStockMutedChange(!v)}
+          />
+          <Toggle
+            label="Back in stock alerts"
+            description="Mute Email and Slack for restock alerts."
+            checked={!restockMuted}
+            onChange={(v) => onRestockMutedChange(!v)}
+          />
+        </div>
+      </s-section>
+    </div>
+  );
+}

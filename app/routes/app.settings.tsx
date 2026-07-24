@@ -15,6 +15,7 @@ import { useLiveEventsStore } from "../stores/live-events-store";
 import { PlanCard } from "../components/settings/PlanCard";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
 import { DigestEmailsSection } from "../components/settings/DigestEmailsSection";
+import { AlertDeliverySection } from "../components/settings/AlertDeliverySection";
 import { EmailBrandingSection } from "../components/settings/EmailBrandingSection";
 import { MonitoringScopeSection } from "../components/settings/MonitoringScopeSection";
 import { EnterpriseReportingSection } from "../components/settings/EnterpriseReportingSection";
@@ -66,6 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const rawDigestFrequency = form.get("digestFrequency") as string;
+  const rawAlertDeliveryMode = form.get("alertDeliveryMode") as string;
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
   const rawMonitoringFilter = form.get("monitoringFilter");
@@ -76,6 +78,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     lowStockThreshold: rawThreshold,
     digestEnabled: bool("digestEnabled"),
     digestFrequency: canUseFeature(plan, "dailyDigest") && rawDigestFrequency === "daily" ? "daily" : "weekly",
+    alertDeliveryMode: rawAlertDeliveryMode === "daily" ? "daily" : "instant",
+    lowStockMuted: bool("lowStockMuted"),
+    outOfStockMuted: bool("outOfStockMuted"),
+    restockMuted: bool("restockMuted"),
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
     monitoringFilter:
       rawMonitoringFilter === "all" || rawMonitoringFilter === "collection" || rawMonitoringFilter === "tags"
@@ -92,7 +98,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       limitedEditionTag: ((form.get("limitedEditionTag") as string) ?? "").trim() || "limited-edition",
     } : {}),
     ...(canUseFeature(plan, "deadStockAlerts") ? {
-      deadStockThresholdDays: [30, 60, 90].includes(rawDeadStockThresholdDays) ? rawDeadStockThresholdDays : 60,
+      deadStockThresholdDays: [30, 60].includes(rawDeadStockThresholdDays) ? rawDeadStockThresholdDays : 60,
     } : {}),
   };
 
@@ -186,6 +192,10 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   monitoringTags: "",
   limitedEditionTag: "limited-edition",
   deadStockThresholdDays: 60,
+  alertDeliveryMode: "instant",
+  lowStockMuted: false,
+  outOfStockMuted: false,
+  restockMuted: false,
 };
 
 // Always renders the real layout — read-only display values (PlanCard) read
@@ -212,6 +222,10 @@ function SettingsContent() {
   const [monitoringTags, setMonitoringTags] = useState(settings.monitoringTags);
   const [limitedEditionTag, setLimitedEditionTag] = useState(settings.limitedEditionTag);
   const [deadStockThresholdDays, setDeadStockThresholdDays] = useState(settings.deadStockThresholdDays);
+  const [alertDeliveryMode, setAlertDeliveryMode] = useState(settings.alertDeliveryMode);
+  const [lowStockMuted, setLowStockMuted] = useState(settings.lowStockMuted);
+  const [outOfStockMuted, setOutOfStockMuted] = useState(settings.outOfStockMuted);
+  const [restockMuted, setRestockMuted] = useState(settings.restockMuted);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -234,6 +248,10 @@ function SettingsContent() {
     setMonitoringTags(settings.monitoringTags);
     setLimitedEditionTag(settings.limitedEditionTag);
     setDeadStockThresholdDays(settings.deadStockThresholdDays);
+    setAlertDeliveryMode(settings.alertDeliveryMode);
+    setLowStockMuted(settings.lowStockMuted);
+    setOutOfStockMuted(settings.outOfStockMuted);
+    setRestockMuted(settings.restockMuted);
     // Only re-seed on the loading -> loaded transition, not on every
     // settings identity change (e.g. an in-place SSE re-push), so it
     // doesn't clobber in-progress edits.
@@ -253,6 +271,10 @@ function SettingsContent() {
     setMonitoringTags(settings.monitoringTags);
     setLimitedEditionTag(settings.limitedEditionTag);
     setDeadStockThresholdDays(settings.deadStockThresholdDays);
+    setAlertDeliveryMode(settings.alertDeliveryMode);
+    setLowStockMuted(settings.lowStockMuted);
+    setOutOfStockMuted(settings.outOfStockMuted);
+    setRestockMuted(settings.restockMuted);
     formRef.current?.reset();
     setIsDirty(false);
   }
@@ -293,6 +315,10 @@ function SettingsContent() {
     fd.set("brandSenderName", brandSenderName);
     fd.set("limitedEditionTag", limitedEditionTag);
     fd.set("deadStockThresholdDays", String(deadStockThresholdDays));
+    fd.set("alertDeliveryMode", alertDeliveryMode);
+    fd.set("lowStockMuted", lowStockMuted ? "true" : "false");
+    fd.set("outOfStockMuted", outOfStockMuted ? "true" : "false");
+    fd.set("restockMuted", restockMuted ? "true" : "false");
     saveFetcher.submit(fd, { method: "post" });
   }
 
@@ -347,6 +373,17 @@ function SettingsContent() {
           canDailyDigest={canDailyDigest}
           onDigestEnabledChange={(v) => { setDigestEnabled(v); markDirty(); }}
           onDigestFrequencyChange={(v) => { setDigestFrequency(v); markDirty(); }}
+        />
+
+        <AlertDeliverySection
+          alertDeliveryMode={alertDeliveryMode}
+          lowStockMuted={lowStockMuted}
+          outOfStockMuted={outOfStockMuted}
+          restockMuted={restockMuted}
+          onAlertDeliveryModeChange={(v) => { setAlertDeliveryMode(v); markDirty(); }}
+          onLowStockMutedChange={(v) => { setLowStockMuted(v); markDirty(); }}
+          onOutOfStockMutedChange={(v) => { setOutOfStockMuted(v); markDirty(); }}
+          onRestockMutedChange={(v) => { setRestockMuted(v); markDirty(); }}
         />
 
         <EmailBrandingSection

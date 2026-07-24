@@ -1,10 +1,10 @@
-import { PLAN_LIMITS } from "../../lib/plan-limits";
+import { PLAN_LIMITS, TRIAL_DAYS } from "../../lib/plan-limits";
 
 export function LandingPricing({ appStoreUrl }: { appStoreUrl: string }) {
   return (
     <section id="pricing" className="sa-pricing">
       <h2 className="sa-sectionHeading">Simple, transparent pricing</h2>
-      <p className="sa-sectionSub">Every plan includes a 30-day free trial.</p>
+      <p className="sa-sectionSub">Every plan includes a {TRIAL_DAYS}-day free trial.</p>
       <div className="sa-pricingGrid">
         {(["basic", "pro", "enterprise"] as const).map((key) => {
           const plan = PLAN_LIMITS[key];

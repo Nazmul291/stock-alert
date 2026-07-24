@@ -83,7 +83,7 @@ export type ProductsData = {
 // imageUrl/imageAlt/shopifyStatus can be overridden with fresher live-Shopify
 // data where available (the live-paginated branch has it; the DB-only branch
 // doesn't need to call Shopify at all).
-function buildTrackedProductRow(
+export function buildTrackedProductRow(
   productId: string,
   rows: InventoryTracking[],
   overrides?: { imageUrl?: string | null; imageAlt?: string | null; shopifyStatus?: string },
