@@ -463,7 +463,7 @@ export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, bran
   const lineRow = (l: PurchaseOrderEmailLine) => `
     <tr>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
-        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(l.productTitle ?? 'Unknown')}${l.variantTitle ? ` — ${esc(l.variantTitle)}` : ''}</div>
+        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(l.productTitle ?? 'Unknown')}${l.variantTitle && l.variantTitle !== 'Default Title' ? ` — ${esc(l.variantTitle)}` : ''}</div>
         ${l.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(l.sku)}</div>` : ''}
       </td>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;color:#111827;">${l.quantityOrdered}</td>
