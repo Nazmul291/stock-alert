@@ -1,3 +1,5 @@
+import { TRIAL_DAYS } from "../../lib/plan-limits";
+
 export function LandingFinalCta({ appStoreUrl }: { appStoreUrl: string }) {
   return (
     <section className="sa-finalCta">
@@ -8,7 +10,7 @@ export function LandingFinalCta({ appStoreUrl }: { appStoreUrl: string }) {
         target="_blank"
         rel="noopener noreferrer"
       >
-        Add to Shopify — Free 30-day trial
+        Add to Shopify — Free {TRIAL_DAYS}-day trial
       </a>
     </section>
   );

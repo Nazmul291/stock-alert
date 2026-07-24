@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import { getCachedSession } from "../lib/shop-cache.server";
 import { requestPlanSubscription } from "../lib/billing-request.server";
 import type { PlanKey } from "../lib/billing-plans";
+import { TRIAL_DAYS } from "../lib/plan-limits";
 import { BillingPlanCards } from "../components/billing/BillingPlanCards";
 import { BillingFeatureComparisonTable } from "../components/billing/BillingFeatureComparisonTable";
 
@@ -32,7 +33,7 @@ export default function BillingPage() {
   const actionData = useActionData<typeof action>();
 
   return (
-    <s-page heading="Billing &amp; Plans" sub-heading="All plans include a 30-day free trial">
+    <s-page heading="Billing &amp; Plans" sub-heading={`All plans include a ${TRIAL_DAYS}-day free trial`}>
       {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
       <s-button slot="primary-action" variant="primary" href="/app" suppressHydrationWarning>Back to Dashboard</s-button>
 
@@ -51,9 +52,9 @@ export default function BillingPage() {
         <BillingFeatureComparisonTable />
       </s-section>
 
-      <s-section heading="30-day free trial">
+      <s-section heading={`${TRIAL_DAYS}-day free trial`}>
         <s-paragraph>
-          Every plan starts with a 30-day free trial — no charge until the trial ends. Cancel anytime before the trial expires and you won't be billed.
+          Every plan starts with a {TRIAL_DAYS}-day free trial — no charge until the trial ends. Cancel anytime before the trial expires and you won't be billed.
         </s-paragraph>
       </s-section>
     </s-page>

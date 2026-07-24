@@ -11,6 +11,7 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import prisma from "./db.server";
 
 import { BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE } from "./lib/billing-plans";
+import { TRIAL_DAYS } from "./lib/plan-limits";
 export { BILLING_PLAN_BASIC, BILLING_PLAN_PRO, BILLING_PLAN_ENTERPRISE };
 
 const shopify = shopifyApp({
@@ -29,7 +30,7 @@ const shopify = shopifyApp({
   distribution: AppDistribution.AppStore,
   billing: {
     [BILLING_PLAN_BASIC]: {
-      trialDays: 30,
+      trialDays: TRIAL_DAYS,
       lineItems: [
         {
           amount: 3.99,
@@ -39,7 +40,7 @@ const shopify = shopifyApp({
       ],
     },
     [BILLING_PLAN_PRO]: {
-      trialDays: 30,
+      trialDays: TRIAL_DAYS,
       lineItems: [
         {
           amount: 9.99,
@@ -49,7 +50,7 @@ const shopify = shopifyApp({
       ],
     },
     [BILLING_PLAN_ENTERPRISE]: {
-      trialDays: 30,
+      trialDays: TRIAL_DAYS,
       lineItems: [
         {
           amount: 19.99,

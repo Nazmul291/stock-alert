@@ -5,6 +5,7 @@ import { LandingHeader } from "../components/landing/LandingHeader";
 import { LandingFooter } from "../components/landing/LandingFooter";
 import chromeCss from "../styles/site-chrome.css?raw";
 import blogCss from "../styles/blog.css?raw";
+import { TRIAL_DAYS } from "../lib/plan-limits";
 
 const APP_NAME = "Stock Alert";
 const APP_STORE_URL = "https://apps.shopify.com/stock-alert-4";
@@ -87,7 +88,7 @@ export default function Docs() {
             <h2 id="getting-started">Getting started</h2>
             <p>
               Install Stock Alert from the Shopify App Store and it starts syncing your product and
-              inventory data immediately. Every plan includes a 30-day free trial and no credit card is
+              inventory data immediately. Every plan includes a {TRIAL_DAYS}-day free trial and no credit card is
               required to start it.
             </p>
             <ol>
@@ -157,7 +158,7 @@ export default function Docs() {
 
             <h2 id="faq">FAQ</h2>
             <h3>Do I need a credit card to start my trial?</h3>
-            <p>No — every plan includes a 30-day free trial with no credit card required to start it.</p>
+            <p>No — every plan includes a {TRIAL_DAYS}-day free trial with no credit card required to start it.</p>
             <h3>What happens to my data if I uninstall?</h3>
             <p>
               Shopify sends us a <code>shop/redact</code> webhook within 48 hours of uninstall, which
