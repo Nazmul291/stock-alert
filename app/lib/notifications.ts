@@ -6,11 +6,15 @@ import {
   getOutOfStockEmailTemplate,
   getRestockEmailTemplate,
   getDigestEmailTemplate,
+  getAlertBatchEmailTemplate,
   getBackInStockCustomerTemplate,
   getPurchaseOrderEmailTemplate,
   type DigestEmailData,
+  type AlertBatchEmailData,
+  type AlertBatchEvent,
   type BrandConfig,
 } from './email-templates';
+import { unauthenticated } from '../shopify.server';
 import { fireFlowTrigger } from './flow-trigger.server';
 import { sendKlaviyoEvent } from './klaviyo.server';
 import { sendWhatsAppTemplate } from './whatsapp.server';
@@ -46,6 +50,13 @@ interface SettingsContext {
   asanaEnabled?: boolean;
   asanaAccessToken?: string | null;
   asanaWorkspaceGid?: string | null;
+  // Email + Slack cadence/mute for low_stock/out_of_stock/restock only — every
+  // other channel above (WhatsApp/Klaviyo/Asana) plus the Flow trigger and
+  // AlertHistory logging are unaffected by these two fields.
+  alertDeliveryMode?: string;
+  lowStockMuted?: boolean;
+  outOfStockMuted?: boolean;
+  restockMuted?: boolean;
 }
 
 const ASANA_EVENT_LABELS: Record<'low_stock' | 'out_of_stock' | 'restock', string> = {
@@ -292,7 +303,12 @@ export async function sendLowStockAlert(
   let sentToEmail: string | null = null;
   let sentToSlack = false;
 
-  if (settings.emailNotifications) {
+  // Email/Slack cadence + mute — every other channel below is unaffected.
+  const emailConfigured = settings.emailNotifications;
+  const slackConfigured = !!(settings.slackNotifications && settings.slackWebhookUrl);
+  const sendEmailSlackNow = settings.alertDeliveryMode !== "daily" && !settings.lowStockMuted;
+
+  if (emailConfigured && sendEmailSlackNow) {
     const rawEmail = settings.notificationEmail || store.email;
     if (rawEmail) {
       const recipients = rawEmail.split(",").map((e) => e.trim()).filter(Boolean);
@@ -320,9 +336,9 @@ export async function sendLowStockAlert(
     console.log(`[Notifications] Email notifications disabled for ${store.shop} — skipping low stock email`);
   }
 
-  if (settings.slackNotifications && settings.slackWebhookUrl) {
+  if (slackConfigured && sendEmailSlackNow) {
     try {
-      const webhook = new IncomingWebhook(settings.slackWebhookUrl);
+      const webhook = new IncomingWebhook(settings.slackWebhookUrl!);
       await webhook.send({
         text: `⚠️ Low Stock: ${product.title} (${currentQuantity} remaining) — ${store.shop}`,
         blocks: [
@@ -398,7 +414,12 @@ export async function sendLowStockAlert(
     });
   }
 
-  if (sentToEmail || sentToSlack) {
+  // Deliberately gated on "is email/Slack configured at all", not on
+  // sentToEmail/sentToSlack — the in-app AlertHistory record (and the
+  // dashboard's Recent Alerts) must appear exactly as it did before the
+  // daily-batch/mute settings existed, regardless of whether this particular
+  // event's Email/Slack send was deferred or muted.
+  if (emailConfigured || slackConfigured) {
     await logAlert(store.shop, productId, product.variantId ?? productId, product.title, variantTitle, 'low_stock', currentQuantity, threshold, sentToEmail, sentToSlack);
   }
 }
@@ -425,7 +446,11 @@ export async function sendOutOfStockAlert(
   let sentToEmail: string | null = null;
   let sentToSlack = false;
 
-  if (settings.emailNotifications) {
+  const emailConfigured = settings.emailNotifications;
+  const slackConfigured = !!(settings.slackNotifications && settings.slackWebhookUrl);
+  const sendEmailSlackNow = settings.alertDeliveryMode !== "daily" && !settings.outOfStockMuted;
+
+  if (emailConfigured && sendEmailSlackNow) {
     const rawEmail = settings.notificationEmail || store.email;
     if (rawEmail) {
       const recipients = rawEmail.split(",").map((e) => e.trim()).filter(Boolean);
@@ -447,9 +472,9 @@ export async function sendOutOfStockAlert(
     }
   }
 
-  if (settings.slackNotifications && settings.slackWebhookUrl) {
+  if (slackConfigured && sendEmailSlackNow) {
     try {
-      const webhook = new IncomingWebhook(settings.slackWebhookUrl);
+      const webhook = new IncomingWebhook(settings.slackWebhookUrl!);
       await webhook.send({
         text: `❌ Out of Stock: ${product.title} — ${store.shop}`,
         blocks: [
@@ -517,7 +542,10 @@ export async function sendOutOfStockAlert(
     });
   }
 
-  if (sentToEmail || sentToSlack) {
+  // See sendLowStockAlert's identical comment — gated on channel configuration,
+  // not on whether this event's send was deferred/muted, so in-app history
+  // behavior is unchanged.
+  if (emailConfigured || slackConfigured) {
     await logAlert(store.shop, productId, product.variantId ?? productId, product.title, variantTitle, 'out_of_stock', 0, null, sentToEmail, sentToSlack);
   }
 }
@@ -658,7 +686,11 @@ export async function sendRestockAlert(
   let sentToEmail: string | null = null;
   let sentToSlack = false;
 
-  if (settings.emailNotifications) {
+  const emailConfigured = settings.emailNotifications;
+  const slackConfigured = !!(settings.slackNotifications && settings.slackWebhookUrl);
+  const sendEmailSlackNow = settings.alertDeliveryMode !== "daily" && !settings.restockMuted;
+
+  if (emailConfigured && sendEmailSlackNow) {
     const rawEmail = settings.notificationEmail || store.email;
     if (rawEmail) {
       const recipients = rawEmail.split(",").map((e) => e.trim()).filter(Boolean);
@@ -680,9 +712,9 @@ export async function sendRestockAlert(
     }
   }
 
-  if (settings.slackNotifications && settings.slackWebhookUrl) {
+  if (slackConfigured && sendEmailSlackNow) {
     try {
-      const webhook = new IncomingWebhook(settings.slackWebhookUrl);
+      const webhook = new IncomingWebhook(settings.slackWebhookUrl!);
       await webhook.send({
         text: `🎉 Back in Stock: ${product.title} (${currentQuantity} units) — ${store.shop}`,
         blocks: [
@@ -752,7 +784,8 @@ export async function sendRestockAlert(
     });
   }
 
-  if (sentToEmail || sentToSlack) {
+  // See sendLowStockAlert's identical comment.
+  if (emailConfigured || slackConfigured) {
     await logAlert(store.shop, productId, product.variantId ?? productId, product.title, variantTitle, 'restock', currentQuantity, null, sentToEmail, sentToSlack);
   }
 }
@@ -842,27 +875,125 @@ export async function sendDigestEmail(shop: string, recipients: string[], data: 
   }
 }
 
+// Once-daily batched summary for shops on alertDeliveryMode "daily" — see
+// processAlertBatches in workers/inventory-buffer.worker.ts, the orchestrator
+// that gathers the day's AlertHistory events and calls this (and/or
+// sendAlertBatchSlack below). Mirrors sendDigestEmail's shape exactly; kept
+// separate since it's a different feature (see AlertBatchEmailData's comment).
+export async function sendAlertBatchEmail(shop: string, recipients: string[], data: AlertBatchEmailData, brand: BrandConfig = {}): Promise<void> {
+  const { subject, html } = getAlertBatchEmailTemplate(data, brand);
+  const senderName = brand.senderName || 'Stock Alert';
+  for (const recipient of recipients) {
+    try {
+      await transporter.sendMail({
+        from: { name: senderName, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+        to: recipient,
+        subject,
+        html,
+      });
+      console.log(`[Notifications] Alert batch email sent to ${recipient} for ${shop}`);
+    } catch (err) {
+      console.error(`[Notifications] Alert batch email failed to ${recipient} for ${shop}:`, err);
+    }
+  }
+}
+
+// Slack counterpart to sendAlertBatchEmail — one message per shop per day,
+// grouped by event type, capped at 10 listed products per type (a "…and N
+// more" line covers the rest) so a busy day's message stays within Slack's
+// practical block-size limits.
+export async function sendAlertBatchSlack(webhookUrl: string, data: AlertBatchEmailData, storeName: string): Promise<boolean> {
+  const total = data.outOfStock.length + data.lowStock.length + data.restock.length;
+  if (total === 0) return false;
+
+  const listSection = (label: string, events: AlertBatchEvent[]): string | null => {
+    if (events.length === 0) return null;
+    const lines = events.slice(0, 10).map((e) => {
+      const suffix = e.variantTitle ? ` — ${e.variantTitle}` : '';
+      const qty = e.quantityAtAlert != null ? ` (${e.quantityAtAlert} units)` : '';
+      return `• ${e.productTitle ?? 'Unknown'}${suffix}${qty}`;
+    });
+    if (events.length > 10) lines.push(`…and ${events.length - 10} more`);
+    return `*${label} (${events.length}):*\n${lines.join('\n')}`;
+  };
+
+  const sections = [
+    listSection('❌ Out of Stock', data.outOfStock),
+    listSection('⚠️ Low Stock', data.lowStock),
+    listSection('🎉 Back in Stock', data.restock),
+  ].filter((s): s is string => s !== null);
+
+  try {
+    const webhook = new IncomingWebhook(webhookUrl);
+    await webhook.send({
+      text: `🔔 Daily Alert Summary: ${total} alert${total !== 1 ? 's' : ''} — ${storeName}`,
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: '🔔 Daily Alert Summary' } },
+        { type: 'section', text: { type: 'mrkdwn', text: `${total} alert${total !== 1 ? 's' : ''} today for *${storeName}*` } },
+        ...sections.map((text) => ({ type: 'section' as const, text: { type: 'mrkdwn' as const, text } })),
+      ],
+    });
+    return true;
+  } catch (err) {
+    console.error(`[Notifications] Alert batch Slack failed for ${storeName}:`, err);
+    return false;
+  }
+}
+
 // Re-fetches the PO fresh from Prisma rather than taking already-assembled
 // data, since this runs detached from the request that triggered it (see
 // app.purchase-orders.$id.tsx's "send_to_supplier" intent) — the request
 // context that could have assembled the data may be long gone by the time
 // this resolves.
+// Real Shopify shop name/email, for the "sent as the merchant's own business"
+// framing below — best-effort only. A supplier-facing PO email should never
+// look like it's from a third-party app the supplier has no relationship
+// with, so this always prefers the merchant's actual business identity over
+// the generic "Stock Alert" fallback the other (merchant-facing) email types
+// in this file use. Falls back to the shop domain if the API call fails or
+// the store hasn't set a shop name/email (e.g. a fresh dev store).
+async function getShopIdentity(shop: string): Promise<{ name: string | null; email: string | null }> {
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    const res = await admin.graphql(`#graphql
+      query ShopIdentity { shop { name email } }
+    `);
+    const json = await res.json() as { data?: { shop?: { name: string | null; email: string | null } } };
+    return { name: json.data?.shop?.name ?? null, email: json.data?.shop?.email ?? null };
+  } catch (err) {
+    console.error(`[Notifications] Failed to fetch shop identity for ${shop}:`, err);
+    return { name: null, email: null };
+  }
+}
+
 export async function sendPurchaseOrderEmail(shop: string, purchaseOrderId: string): Promise<{ success: boolean; error?: string }> {
-  const [po, settings] = await Promise.all([
+  const [po, settings, shopIdentity] = await Promise.all([
     prisma.purchaseOrder.findFirst({
       where: { id: purchaseOrderId, shop },
       include: { supplier: true, lineItems: true },
     }),
     prisma.storeSettings.findUnique({ where: { shop } }),
+    getShopIdentity(shop),
   ]);
   if (!po) return { success: false, error: 'Purchase order not found.' };
   if (!po.supplier.email) return { success: false, error: 'Supplier has no email on file.' };
+
+  // Merchant-set branding wins if they've configured it; otherwise the real
+  // Shopify shop name reads far better to a supplier than the raw
+  // ".myshopify.com" domain, which is the last-resort fallback.
+  const storeName = settings?.brandSenderName || shopIdentity.name || shop.replace('.myshopify.com', '');
+  // So a supplier hitting "Reply" reaches the merchant directly instead of
+  // this app's own noreply-style inbox.
+  const replyTo = shopIdentity.email || settings?.notificationEmail || undefined;
+  // The merchant gets a copy of every PO sent to a supplier, same address
+  // their own stock alerts already go to.
+  const bcc = settings?.notificationEmail || undefined;
 
   const brand = settings ? toBrand(settings) : {};
   const { subject, html } = getPurchaseOrderEmailTemplate({
     poNumber: po.poNumber,
     supplierName: po.supplier.name,
-    storeName: shop.replace('.myshopify.com', ''),
+    storeName,
     totalCost: po.totalCost,
     lines: po.lineItems.map((li) => ({
       productTitle: li.productTitle,
@@ -875,12 +1006,14 @@ export async function sendPurchaseOrderEmail(shop: string, purchaseOrderId: stri
 
   try {
     await transporter.sendMail({
-      from: settings ? fromAddress(settings) : { name: 'Stock Alert', address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+      from: { name: storeName, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
       to: po.supplier.email,
+      replyTo,
+      bcc,
       subject,
       html,
     });
-    console.log(`[Notifications] PO #${po.poNumber} sent to ${po.supplier.email} for ${shop}`);
+    console.log(`[Notifications] PO #${po.poNumber} sent to ${po.supplier.email} for ${shop}${bcc ? ` (bcc: ${bcc})` : ''}`);
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to send email.';

@@ -3,6 +3,7 @@ import { PgBoss } from "pg-boss";
 export const QUEUE_NAME = "inventory-buffer";
 export const DIGEST_QUEUE_NAME = "digest-daily";
 export const VELOCITY_QUEUE_NAME = "velocity-daily";
+export const ALERT_BATCH_QUEUE_NAME = "alert-batch-daily";
 export const DEBOUNCE_SECONDS = 10;
 export const JOB_RETRY_LIMIT = 3;
 export const JOB_RETRY_DELAY = 60;
@@ -29,6 +30,10 @@ export interface SettingsCtx {
   asanaEnabled?: boolean;
   asanaAccessToken?: string | null;
   asanaWorkspaceGid?: string | null;
+  alertDeliveryMode?: string;
+  lowStockMuted?: boolean;
+  outOfStockMuted?: boolean;
+  restockMuted?: boolean;
 }
 
 export interface ProductCtx {

@@ -332,6 +332,10 @@ async function processInventoryUpdate(
     asanaEnabled: settings.asanaEnabled,
     asanaAccessToken: settings.asanaAccessToken,
     asanaWorkspaceGid: settings.asanaWorkspaceGid,
+    alertDeliveryMode: settings.alertDeliveryMode,
+    lowStockMuted: settings.lowStockMuted,
+    outOfStockMuted: settings.outOfStockMuted,
+    restockMuted: settings.restockMuted,
   };
   const productCtx = {
     id: productId,

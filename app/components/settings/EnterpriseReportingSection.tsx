@@ -1,6 +1,6 @@
 import { fieldLabel, inputStyle, helpText } from "../IntegrationControls";
 
-const THRESHOLD_OPTIONS = [30, 60, 90] as const;
+const THRESHOLD_OPTIONS = [30, 60] as const;
 
 export function EnterpriseReportingSection({
   limitedEditionTag, deadStockThresholdDays, canCoreLimitedEdition, canDeadStockAlerts,

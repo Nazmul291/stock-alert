@@ -19,14 +19,19 @@ import {
   sendLowStockAlert,
   sendOutOfStockAlert,
   sendDigestEmail,
+  sendAlertBatchEmail,
+  sendAlertBatchSlack,
 } from "../app/lib/notifications.js";
 import {
   QUEUE_NAME,
   DIGEST_QUEUE_NAME,
   VELOCITY_QUEUE_NAME,
+  ALERT_BATCH_QUEUE_NAME,
   type BufferPayload,
   type InventoryBufferJobData,
 } from "../app/lib/queue.js";
+import type { AlertBatchEmailData, AlertBatchEvent } from "../app/lib/email-templates.js";
+import type { AlertType } from "@prisma/client";
 import { atRiskRepresentativeRows } from "../app/lib/inventory-rollup.server.js";
 import { refreshShopVelocity } from "../app/lib/velocity.server.js";
 import { unauthenticated } from "../app/shopify.server.js";
@@ -44,7 +49,8 @@ await boss.start();
 await boss.createQueue(QUEUE_NAME);
 await boss.createQueue(DIGEST_QUEUE_NAME);
 await boss.createQueue(VELOCITY_QUEUE_NAME);
-console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME);
+await boss.createQueue(ALERT_BATCH_QUEUE_NAME);
+console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────
 // pg-boss v12 WorkHandler always receives Job<T>[] — an array.
@@ -128,6 +134,19 @@ console.log("[Worker] Velocity cron scheduled — fires daily at 05:00 UTC (Pro/
 
 await boss.work<Record<string, never>>(VELOCITY_QUEUE_NAME, async () => {
   await processVelocityRefresh();
+});
+
+// ── Alert batch cron ───────────────────────────────────────────────────────────
+// Fires once per day at 23:55 UTC (end of day) — flushes the day's
+// Email/Slack-pending alert events for shops on alertDeliveryMode "daily".
+// Only ever touches Email and Slack: in-app history, WhatsApp, Klaviyo,
+// Asana, and Flow already fired instantly regardless of this setting (see
+// sendLowStockAlert et al.).
+await boss.schedule(ALERT_BATCH_QUEUE_NAME, "55 23 * * *", {});
+console.log("[Worker] Alert batch cron scheduled — fires daily at 23:55 UTC");
+
+await boss.work<Record<string, never>>(ALERT_BATCH_QUEUE_NAME, async () => {
+  await processAlertBatches();
 });
 
 async function processVelocityRefresh(): Promise<void> {
@@ -214,6 +233,102 @@ async function processDigests(): Promise<void> {
     });
 
     console.log(`[Digest] ${frequency} digest → [${recipients.join(", ")}] for ${shop} — ${atRisk.length} products`);
+  }
+}
+
+// Sources from AlertHistory (written unconditionally by logAlert whenever
+// Email or Slack is configured at all — see sendLowStockAlert's comment)
+// rather than a separate accumulation table: every deferred/instant event
+// already has a row there, so this just picks up what hasn't been delivered
+// yet. sentToEmail is the recipient address (or null if never sent);
+// sentToSlack is a plain boolean — both null/false is exactly "logged but
+// still owed a delivery."
+async function processAlertBatches(): Promise<void> {
+  const now = new Date();
+  console.log(`[AlertBatch] Running check — ${now.toUTCString()}`);
+
+  const shops = await prisma.storeSettings.findMany({
+    where: {
+      alertDeliveryMode: "daily",
+      OR: [
+        { emailNotifications: true },
+        { slackNotifications: true, slackWebhookUrl: { not: null } },
+      ],
+    },
+  });
+
+  console.log(`[AlertBatch] ${shops.length} shop(s) on daily delivery`);
+
+  for (const settings of shops) {
+    const shop = settings.shop;
+
+    // Skip if already flushed in the last 20 hours (restart-safety guard,
+    // same pattern as processDigests above).
+    if (settings.lastAlertBatchSentAt) {
+      const hoursSince = (now.getTime() - settings.lastAlertBatchSentAt.getTime()) / 3_600_000;
+      if (hoursSince < 20) {
+        console.log(`[AlertBatch] Skipping ${shop} — sent ${hoursSince.toFixed(1)}h ago`);
+        continue;
+      }
+    }
+
+    const events = await prisma.alertHistory.findMany({
+      where: {
+        shop,
+        sentAt: { gt: settings.lastAlertBatchSentAt ?? new Date(0) },
+        sentToEmail: null,
+        sentToSlack: false,
+      },
+      orderBy: { sentAt: "asc" },
+    });
+
+    // Re-checked here (flush time), not when each event originally fired —
+    // an unmute between the event and tonight's flush is honored.
+    const mutedTypes = new Set<AlertType>([
+      ...(settings.lowStockMuted ? (["low_stock"] as const) : []),
+      ...(settings.outOfStockMuted ? (["out_of_stock"] as const) : []),
+      ...(settings.restockMuted ? (["restock"] as const) : []),
+    ]);
+    const eligible = events.filter((e) => e.alertType && !mutedTypes.has(e.alertType));
+
+    if (eligible.length === 0) {
+      console.log(`[AlertBatch] ${shop} — nothing to report, skipping`);
+      continue;
+    }
+
+    const toEvent = (e: (typeof eligible)[number]): AlertBatchEvent => ({
+      productTitle: e.productTitle,
+      variantTitle: e.variantTitle,
+      sku: null, // AlertHistory doesn't store SKU — only shown on instant alerts
+      quantityAtAlert: e.quantityAtAlert,
+    });
+
+    const data: AlertBatchEmailData = {
+      shop,
+      outOfStock: eligible.filter((e) => e.alertType === "out_of_stock").map(toEvent),
+      lowStock: eligible.filter((e) => e.alertType === "low_stock").map(toEvent),
+      restock: eligible.filter((e) => e.alertType === "restock").map(toEvent),
+    };
+
+    if (settings.emailNotifications && settings.notificationEmail) {
+      const recipients = settings.notificationEmail.split(",").map((e) => e.trim()).filter(Boolean);
+      await sendAlertBatchEmail(shop, recipients, data, {
+        logoUrl: settings.brandLogoUrl,
+        color: settings.brandColor,
+        senderName: settings.brandSenderName,
+      });
+    }
+
+    if (settings.slackNotifications && settings.slackWebhookUrl) {
+      await sendAlertBatchSlack(settings.slackWebhookUrl, data, shop.replace(".myshopify.com", ""));
+    }
+
+    await prisma.storeSettings.update({
+      where: { shop },
+      data: { lastAlertBatchSentAt: now },
+    });
+
+    console.log(`[AlertBatch] Sent for ${shop} — ${eligible.length} event(s)`);
   }
 }
 
