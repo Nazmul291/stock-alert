@@ -74,6 +74,16 @@ model StoreSettings {
   digestEnabled        Boolean   @default(true) @map("digest_enabled")
   digestFrequency      String    @default("weekly") @map("digest_frequency")
   lastDigestSentAt     DateTime? @map("last_digest_sent_at") @db.Timestamptz
+  // Email + Slack cadence only for low_stock/out_of_stock/restock alerts —
+  // "instant" (today's behavior) or "daily" (one batched summary at 23:55 UTC,
+  // see processAlertBatches). In-app history, WhatsApp, Klaviyo, Asana, and
+  // Shopify Flow are unaffected by this and always fire immediately.
+  alertDeliveryMode      String    @default("instant") @map("alert_delivery_mode")
+  lastAlertBatchSentAt   DateTime? @map("last_alert_batch_sent_at") @db.Timestamptz
+  // Per-event-type mute — Email + Slack only, same scoping as above.
+  lowStockMuted          Boolean   @default(false) @map("low_stock_muted")
+  outOfStockMuted        Boolean   @default(false) @map("out_of_stock_muted")
+  restockMuted           Boolean   @default(false) @map("restock_muted")
   brandLogoUrl         String?   @map("brand_logo_url") @db.VarChar(500)
   brandColor           String?   @map("brand_color") @db.VarChar(7)
   brandSenderName      String?   @map("brand_sender_name") @db.VarChar(100)
@@ -199,6 +209,7 @@ model AlertHistory {
   @@index([shop])
   @@index([sentAt(sort: Desc)])
   @@index([shop, sentAt(sort: Desc)])
+  @@index([shop, productId])
   @@map("alert_history")
 }
 
@@ -265,11 +276,18 @@ model PurchaseOrderLineItem {
   quantityOrdered  Int      @map("quantity_ordered")
   quantityReceived Int      @default(0) @map("quantity_received")
   unitCost         Float?   @map("unit_cost")
+  // Destination location this line was ordered for — only set by the
+  // product-detail page's per-location Create Purchase Order flow. Null for
+  // lines created the general way (app.purchase-orders._index.tsx), which
+  // still lets receivePurchaseOrderItems fall back to its existing
+  // single-location-auto-pick/ask-the-merchant behavior.
+  locationId       String?  @map("location_id") @db.VarChar(50)
+  locationName     String?  @map("location_name") @db.VarChar(200)
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
 
-  @@unique([purchaseOrderId, variantId])
+  @@unique([purchaseOrderId, variantId, locationId])
   @@index([purchaseOrderId])
   @@map("purchase_order_line_items")
 }
