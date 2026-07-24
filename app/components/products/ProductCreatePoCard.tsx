@@ -1,10 +1,30 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, Link } from "react-router";
 import type { ProductDetailVariantForPo } from "../../lib/product-detail.server";
 import { useLiveEventsStore } from "../../stores/live-events-store";
+import { useProductDetailStore } from "../../stores/product-detail-store";
 
 type SupplierOption = { id: string; name: string };
-type CreatePOResult = { success: boolean; error?: string; purchaseOrderId?: string };
+type CreatedPoLine = {
+  id: string;
+  variantId: string;
+  variantTitle: string | null;
+  sku: string | null;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitCost: number | null;
+  locationId: string | null;
+  locationName: string | null;
+};
+type CreatePOResult = {
+  success: boolean;
+  error?: string;
+  purchaseOrderId?: string;
+  poNumber?: number;
+  createdAt?: string;
+  supplierName?: string;
+  lineItems?: CreatedPoLine[];
+};
 type CreateSupplierResult = { success: boolean; error?: string; id?: string; name?: string };
 
 const NO_LOCATION = "__none__";
@@ -22,10 +42,12 @@ export function ProductCreatePoCard({
   variants,
   suppliers,
   defaultSupplierId,
+  productTitle,
 }: {
   variants: ProductDetailVariantForPo[];
   suppliers: SupplierOption[];
   defaultSupplierId: string | null;
+  productTitle: string;
 }) {
   const [supplierList, setSupplierList] = useState(suppliers);
   const [supplierId, setSupplierId] = useState(defaultSupplierId ?? "");
@@ -90,19 +112,57 @@ export function ProductCreatePoCard({
   const createFetcher = useFetcher<CreatePOResult>();
   const creating = createFetcher.state !== "idle";
   const bumpLiveEvents = useLiveEventsStore((s) => s.bump);
+  const addPurchaseOrder = useProductDetailStore((s) => s.addPurchaseOrder);
+  const [showSuccess, setShowSuccess] = useState(false);
+  // Read inside the success effect via .current rather than as a dependency
+  // — the effect must only fire once per submission, not every time the
+  // supplier dropdown changes (e.g. picking a different supplier right after
+  // an earlier order succeeded would otherwise re-run this and add a
+  // duplicate row for the already-created PO).
+  const supplierIdRef = useRef(supplierId);
+  supplierIdRef.current = supplierId;
 
   // Stays on this page instead of navigating to the new PO — redirecting to
   // the PO detail page is only what the general Purchase Orders page's own
-  // create flow does, not this one. Bumps the product-detail topic locally
-  // (no webhook fires for this) so the SSE-backed purchaseOrders/
-  // variantsForPo data refetches, and clears the form back to zero so it
-  // doesn't look like the same quantities are still waiting to be submitted.
+  // create flow does, not this one. Patches the new PO straight into the
+  // page's store so the pending list above shows it immediately, rather than
+  // waiting on the bump below's background SSE refetch (still fired, so
+  // other tabs on the same product — and this one, eventually — reconcile
+  // with the server's copy) — see product-detail-store.ts's addPurchaseOrder.
+  // Every freshly created line always has either a real locationId (a
+  // multi-location variant) or an empty `locations` array (a single-location
+  // variant/shop), matching exactly what a real refetch would also produce
+  // for a brand-new PO, so `locations: []` here is never wrong, just
+  // unpopulated the same way the server-driven data would be too.
   useEffect(() => {
-    if (createFetcher.state === "idle" && createFetcher.data?.success) {
-      setQuantities((prev) => Object.fromEntries(Object.keys(prev).map((k) => [k, "0"])));
-      bumpLiveEvents(["product-detail"]);
+    if (createFetcher.state !== "idle" || !createFetcher.data?.success) return;
+    const po = createFetcher.data;
+    if (po.purchaseOrderId && po.poNumber != null && po.createdAt && po.supplierName && po.lineItems) {
+      addPurchaseOrder({
+        id: po.purchaseOrderId,
+        poNumber: po.poNumber,
+        status: "draft",
+        supplierId: supplierIdRef.current,
+        supplierName: po.supplierName,
+        quantityOrdered: po.lineItems.reduce((sum, li) => sum + li.quantityOrdered, 0),
+        quantityReceived: 0,
+        createdAt: po.createdAt,
+        lineItems: po.lineItems.map((li) => ({ ...li, locations: [] })),
+      });
     }
-  }, [createFetcher.state, createFetcher.data, bumpLiveEvents]);
+    setQuantities((prev) => Object.fromEntries(Object.keys(prev).map((k) => [k, "0"])));
+    bumpLiveEvents(["product-detail"]);
+    setShowSuccess(true);
+  }, [createFetcher.state, createFetcher.data, bumpLiveEvents, addPurchaseOrder]);
+
+  // Auto-dismisses the "Purchase order created" banner after 5s instead of
+  // leaving it up indefinitely — the new PO is already visible in the
+  // pending list above by then, so the banner's job is done.
+  useEffect(() => {
+    if (!showSuccess) return;
+    const timer = setTimeout(() => setShowSuccess(false), 5000);
+    return () => clearTimeout(timer);
+  }, [showSuccess]);
 
   const hasValidLine = Object.values(quantities).some((q) => (parseInt(q) || 0) > 0);
   const canSubmit = !!supplierId && hasValidLine && !creating;
@@ -131,7 +191,7 @@ export function ProductCreatePoCard({
           {createFetcher.data.error}
         </div>
       )}
-      {createFetcher.state === "idle" && createFetcher.data?.success && (
+      {showSuccess && createFetcher.data?.success && (
         <div style={{ marginBottom: 10, background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "8px 12px", color: "#065f46", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <span>Purchase order created.</span>
           {createFetcher.data.purchaseOrderId && (
@@ -191,7 +251,7 @@ export function ProductCreatePoCard({
               <div key={v.variantId} style={{ border: "1px solid #f3f4f6", borderRadius: 8, padding: "10px 12px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: v.locations.length > 1 ? 8 : 6 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
-                    {v.variantTitle ?? "Default"}
+                    {productTitle}{v.variantTitle && v.variantTitle !== "Default Title" ? ` — ${v.variantTitle}` : ""}
                     {v.sku && <span style={{ fontWeight: 400, color: "#9ca3af" }}> · {v.sku}</span>}
                   </span>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
@@ -233,7 +293,7 @@ export function ProductCreatePoCard({
                       value={quantities[lineKey(v.variantId, v.locations[0]?.locationId ?? null)] ?? "0"}
                       onChange={(e) => setQuantities((prev) => ({ ...prev, [lineKey(v.variantId, v.locations[0]?.locationId ?? null)]: e.target.value }))}
                       style={{ width: 70, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13 }}
-                      aria-label={`Quantity to order for ${v.variantTitle ?? "this variant"}`}
+                      aria-label={`Quantity to order for ${v.variantTitle && v.variantTitle !== "Default Title" ? `${productTitle} — ${v.variantTitle}` : productTitle}`}
                     />
                   </div>
                 )}

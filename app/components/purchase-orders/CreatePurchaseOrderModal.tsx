@@ -265,7 +265,7 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
                           }}
                         >
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {row.productTitle ?? "—"}{row.variantTitle ? ` — ${row.variantTitle}` : ""}
+                            {row.productTitle ?? "—"}{row.variantTitle && row.variantTitle !== "Default Title" ? ` — ${row.variantTitle}` : ""}
                             {row.sku && <span style={{ color: "#9ca3af" }}> · {row.sku}</span>}
                           </span>
                           <span style={{ flexShrink: 0, fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>
@@ -297,7 +297,7 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
                     <tbody>
                       {lineEntries.map(([variantId, l]) => (
                         <tr key={variantId} style={{ borderBottom: "1px solid #f9fafb" }}>
-                          <td style={{ padding: "6px 8px" }}>{l.productTitle ?? "—"}{l.variantTitle ? ` — ${l.variantTitle}` : ""}</td>
+                          <td style={{ padding: "6px 8px" }}>{l.productTitle ?? "—"}{l.variantTitle && l.variantTitle !== "Default Title" ? ` — ${l.variantTitle}` : ""}</td>
                           <td style={{ padding: "6px 8px", color: "#6b7280" }}>{l.sku ?? "—"}</td>
                           <td style={{ padding: "6px 8px" }}>
                             <input

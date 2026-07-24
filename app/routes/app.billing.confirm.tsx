@@ -105,7 +105,7 @@ export default function BillingConfirmPage() {
     isLoading ? "loading" : fetcher.data?.status === "success" ? "success" : fetcher.data?.status === "declined" ? "declined" : "error";
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f6f6f7", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ minHeight: "100vh", background: "#f6f6f7", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" }}>
       <BillingConfirmStatus
         status={status}
         message={fetcher.data?.message}

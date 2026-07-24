@@ -49,6 +49,7 @@ export type ProductPurchaseOrderLineItemRow = {
   sku: string | null;
   quantityOrdered: number;
   quantityReceived: number;
+  unitCost: number | null;
   // Set when this line already has a fixed destination from creation time
   // (the product-detail page's per-location Create Purchase Order flow) —
   // when set, receiving shows this as plain text instead of a picker.
@@ -65,6 +66,7 @@ export type ProductPurchaseOrderRow = {
   id: string;
   poNumber: number;
   status: PurchaseOrderStatus;
+  supplierId: string;
   supplierName: string;
   quantityOrdered: number;
   quantityReceived: number;
@@ -292,6 +294,7 @@ export async function getProductDetail(shop: string, productId: string, plan: st
       id: poId,
       poNumber: po.poNumber,
       status: po.status,
+      supplierId: po.supplierId,
       supplierName: po.supplier.name,
       quantityOrdered,
       quantityReceived,
@@ -306,6 +309,7 @@ export async function getProductDetail(shop: string, productId: string, plan: st
         sku: li.sku,
         quantityOrdered: li.quantityOrdered,
         quantityReceived: li.quantityReceived,
+        unitCost: li.unitCost,
         locationId: li.locationId,
         locationName: li.locationName,
         locations: (locationsByVariant.get(li.variantId.toString()) ?? []).map((l) => ({

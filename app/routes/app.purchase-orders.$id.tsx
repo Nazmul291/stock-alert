@@ -82,13 +82,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = form.get("intent") as string;
 
-  if (intent === "update_line_items") {
-    if (po.status !== "draft") {
-      return { success: false as const, error: "Only a draft purchase order can be edited." };
+  // Shared by update_line_items (edit-only) and order_now (edit-then-order)
+  // below — both let a draft's quantities/unit costs/supplier be changed
+  // right before whatever happens next. Throws on a bad supplierId so both
+  // callers surface the same "Supplier not found." message.
+  async function applyDraftEdits() {
+    const updates = JSON.parse((form.get("lineItems") as string) ?? "[]") as { id: string; quantityOrdered: number; unitCost: number | null }[];
+    const supplierId = (form.get("supplierId") as string) || null;
+    if (supplierId) {
+      const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, shop } });
+      if (!supplier) throw new Error("Supplier not found.");
     }
-    try {
-      const updates = JSON.parse((form.get("lineItems") as string) ?? "[]") as { id: string; quantityOrdered: number; unitCost: number | null }[];
-
+    if (updates.length > 0) {
       await prisma.$transaction(
         updates.map((u) =>
           prisma.purchaseOrderLineItem.updateMany({
@@ -97,9 +102,19 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           }),
         ),
       );
-      const refreshed = await prisma.purchaseOrderLineItem.findMany({ where: { purchaseOrderId: id } });
-      const totalCost = refreshed.reduce((sum, li) => sum + li.quantityOrdered * (li.unitCost ?? 0), 0);
-      await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { totalCost } });
+    }
+    const refreshed = await prisma.purchaseOrderLineItem.findMany({ where: { purchaseOrderId: id } });
+    const totalCost = refreshed.reduce((sum, li) => sum + li.quantityOrdered * (li.unitCost ?? 0), 0);
+    await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { totalCost, ...(supplierId ? { supplierId } : {}) } });
+    return refreshed;
+  }
+
+  if (intent === "update_line_items") {
+    if (po.status !== "draft") {
+      return { success: false as const, error: "Only a draft purchase order can be edited." };
+    }
+    try {
+      await applyDraftEdits();
       invalidateShopCache(shop);
       return { success: true as const, intent };
     } catch (err) {
@@ -108,6 +123,41 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
   }
 
+  // Consolidates the old two-step draft → "Send to Supplier" → "Mark as
+  // Ordered" flow into one action: saves any pending edits, flips straight
+  // to ordered, and fires the supplier email — same fire-and-forget pattern
+  // as send_to_supplier below, just triggered from here instead of a
+  // separate manual click.
+  if (intent === "order_now") {
+    if (po.status !== "draft") {
+      return { success: false as const, error: "Only a draft purchase order can be ordered." };
+    }
+    try {
+      const refreshed = await applyDraftEdits();
+      if (refreshed.length === 0 || refreshed.every((li) => li.quantityOrdered <= 0)) {
+        return { success: false as const, error: "Add at least one product with a quantity greater than zero." };
+      }
+      await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { status: "ordered", orderedAt: new Date() } });
+      invalidateShopCache(shop);
+      sendPurchaseOrderEmail(shop, id)
+        .then(async (result) => {
+          if (result.success) {
+            await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { sentToSupplierAt: new Date() } });
+            invalidateShopCache(shop);
+          } else {
+            console.error(`[PO] Email failed for PO ${id}:`, result.error);
+          }
+        })
+        .catch((err) => console.error(`[PO] Email failed for PO ${id}:`, err));
+      return { success: true as const, intent };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to place the order.";
+      return { success: false as const, error: message };
+    }
+  }
+
+  // Kept alongside order_now above — the general Purchase Orders page still
+  // uses this as its own separate manual step (PurchaseOrderDetail.tsx).
   if (intent === "mark_ordered") {
     if (po.status !== "draft") {
       return { success: false as const, error: "Only a draft purchase order can be marked as ordered." };

@@ -202,12 +202,32 @@ export type CreatePurchaseOrderLine = {
 // persisting (a client-supplied locationId isn't trustworthy on its own,
 // same reasoning as the supplierId check below). The general PO flow never
 // sends a locationId, so it never pays for this extra Shopify call.
+export type CreatedPurchaseOrderLine = {
+  id: string;
+  variantId: string;
+  variantTitle: string | null;
+  sku: string | null;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitCost: number | null;
+  locationId: string | null;
+  locationName: string | null;
+};
+
+export type CreatedPurchaseOrder = {
+  purchaseOrderId: string;
+  poNumber: number;
+  createdAt: string;
+  supplierName: string;
+  lineItems: CreatedPurchaseOrderLine[];
+};
+
 export async function createPurchaseOrder(
   shop: string,
   supplierId: string,
   lines: CreatePurchaseOrderLine[],
   admin?: AdminApiContext,
-): Promise<{ purchaseOrderId: string }> {
+): Promise<CreatedPurchaseOrder> {
   const sanitizedLines = lines.map((l) => ({
     ...l,
     quantityOrdered: sanitizeQuantity(l.quantityOrdered),
@@ -281,9 +301,26 @@ export async function createPurchaseOrder(
             generatedFromForecast: false,
             lineItems: { create: resolvedLines },
           },
+          include: { lineItems: true },
         });
       });
-      return { purchaseOrderId: purchaseOrder.id };
+      return {
+        purchaseOrderId: purchaseOrder.id,
+        poNumber: purchaseOrder.poNumber,
+        createdAt: purchaseOrder.createdAt.toISOString(),
+        supplierName: supplier.name,
+        lineItems: purchaseOrder.lineItems.map((li) => ({
+          id: li.id,
+          variantId: li.variantId.toString(),
+          variantTitle: li.variantTitle,
+          sku: li.sku,
+          quantityOrdered: li.quantityOrdered,
+          quantityReceived: li.quantityReceived,
+          unitCost: li.unitCost,
+          locationId: li.locationId,
+          locationName: li.locationName,
+        })),
+      };
     } catch (err) {
       const isPoNumberCollision = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
       if (isPoNumberCollision && attempt === 0) continue;
