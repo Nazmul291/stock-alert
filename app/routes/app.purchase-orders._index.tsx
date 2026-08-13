@@ -54,7 +54,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           include: { supplier: { select: { name: true } }, _count: { select: { lineItems: true } } },
           orderBy: { createdAt: "desc" },
         }),
-        prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+        prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true, paymentTerms: true }, orderBy: { name: "asc" } }),
       ])
     : [[], []];
 
@@ -90,6 +90,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       email: (form.get("email") as string) ?? "",
       phone: (form.get("phone") as string) ?? "",
       leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
+      contactName: (form.get("contactName") as string) ?? "",
+      website: (form.get("website") as string) ?? "",
+      address1: (form.get("address1") as string) ?? "",
+      address2: (form.get("address2") as string) ?? "",
+      city: (form.get("city") as string) ?? "",
+      province: (form.get("province") as string) ?? "",
+      zip: (form.get("zip") as string) ?? "",
+      country: (form.get("country") as string) ?? "",
+      paymentTerms: (form.get("paymentTerms") as string) ?? "",
+      currency: (form.get("currency") as string) ?? "",
     });
     return { ...result, intent };
   }
@@ -100,7 +110,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     try {
       const lines = JSON.parse((form.get("lines") as string) ?? "[]") as { variantId: string; quantityOrdered: number; unitCost?: number | null }[];
-      const { purchaseOrderId } = await createPurchaseOrder(shop, supplierId, lines);
+      const { purchaseOrderId } = await createPurchaseOrder(shop, supplierId, lines, undefined, {
+        referenceNumber: (form.get("referenceNumber") as string) ?? "",
+        supplierNote: (form.get("supplierNote") as string) ?? "",
+        terms: (form.get("terms") as string) ?? "",
+        tags: JSON.parse((form.get("tags") as string) ?? "[]") as string[],
+      });
       invalidateShopCache(shop);
       return { success: true as const, intent, purchaseOrderId };
     } catch (err) {

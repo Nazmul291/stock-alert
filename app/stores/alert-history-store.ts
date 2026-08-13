@@ -1,36 +1,23 @@
 import { create } from "zustand";
 import type { AlertsData } from "../lib/alert-history-data.server";
 import { assertClientOnly } from "./assert-client-only";
+import { createSSECacheSlice, type SSECacheSlice } from "./sse-cache-slice";
 
-type AlertHistoryStore = {
+export type AlertHistoryStore = SSECacheSlice<AlertsData> & {
   page: number;
   typeFilter: string;
   productSearch: string;
-  data: AlertsData | null;
-  error: string | null;
-  retry: (() => void) | null;
-  lastFetchedAt: number;
-  lastKey: string | null;
   setLoaderData: (fields: { page: number; typeFilter: string; productSearch: string }) => void;
-  setSSEState: (state: { data: AlertsData | null; error: string | null; retry: () => void; lastFetchedAt: number; lastKey: string }) => void;
 };
 
-export const useAlertHistoryStore = create<AlertHistoryStore>((set) => ({
+export const useAlertHistoryStore = create<AlertHistoryStore>()((set, get, api) => ({
+  ...createSSECacheSlice<AlertsData, AlertHistoryStore>("useAlertHistoryStore")(set, get, api),
   page: 1,
   typeFilter: "all",
   productSearch: "",
-  data: null,
-  error: null,
-  retry: null,
-  lastFetchedAt: 0,
-  lastKey: null,
   setLoaderData: (fields) => {
     assertClientOnly("useAlertHistoryStore", "setLoaderData");
     set(fields);
-  },
-  setSSEState: (state) => {
-    assertClientOnly("useAlertHistoryStore", "setSSEState");
-    set(state);
   },
 }));
 

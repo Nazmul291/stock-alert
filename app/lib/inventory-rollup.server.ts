@@ -121,6 +121,19 @@ export async function countDistinctProducts(where: Prisma.InventoryTrackingWhere
   return groups.length;
 }
 
+// Shared by every paginated-by-product-id query in this file and in
+// dead-stock.server.ts: each of those runs a `COUNT(*) OVER()` windowed
+// query (one round-trip for both the page and the total match count) and
+// then needs this same null-safe extraction — `rows` is empty exactly when
+// there's no match at all, not when the count happens to be zero, so `total`
+// has to come from the first row rather than `rows.length`.
+export function toPaginatedIds(rows: { product_id: bigint; total: bigint }[]): { productIds: bigint[]; total: number } {
+  return {
+    productIds: rows.map((r) => r.product_id),
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+  };
+}
+
 // Paginates distinct products by worst-case status (the same classification
 // rollupStatusCounts uses), for the Products page's status-filter tabs — so
 // a tab's results always match the dashboard tile counts. Returns the total
@@ -156,8 +169,5 @@ export async function paginatedProductIdsByStatus(
     LIMIT ${take} OFFSET ${skip}
   `;
 
-  return {
-    productIds: rows.map((r) => r.product_id),
-    total: rows.length > 0 ? Number(rows[0].total) : 0,
-  };
+  return toPaginatedIds(rows);
 }

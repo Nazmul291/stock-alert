@@ -3,6 +3,7 @@ import { getMaxProducts, canUseFeature } from "./plan-limits";
 import { syncState } from "./sync-state.server";
 import { classifyProductStatus, countDistinctProducts, paginatedProductIdsByStatus } from "./inventory-rollup.server";
 import type { RollupStatus } from "./inventory-rollup.server";
+import { paginatedDeadStockProductIds } from "./dead-stock.server";
 import type { ProductRow, VariantStatusRow } from "../components/products/ProductEditModal";
 import type { InventoryTracking } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
@@ -52,6 +53,11 @@ const PRODUCTS_GRAPHQL = `
 `;
 
 const STATUS_FILTERS = new Set(["out_of_stock", "low_stock", "in_stock"]);
+// Filters answered straight from the DB (see the loadProductsData branch
+// below) — "all" (every tracked product) and "dead_stock" join the plain
+// status filters here so that branch's guard is a single Set lookup instead
+// of an `||` chain repeating "all"/"dead_stock" as separate literals.
+const DB_FILTERS = new Set([...STATUS_FILTERS, "all", "dead_stock"]);
 
 export type ProductsData = {
   shop: string;
@@ -133,9 +139,15 @@ export function buildTrackedProductRow(
   };
 }
 
-export async function loadProductsData({ admin, shop, search, after, filter }: {
+export async function loadProductsData({ admin, shop, search, after, filter: rawFilter }: {
   admin: AdminApiContext; shop: string; search: string; after: string | null; filter: string;
 }): Promise<ProductsData> {
+  // "tracked" was the "All Products" tab's filter value before it was
+  // renamed to "all" — normalized here so a stale bookmark/browser-history
+  // entry from before that rename still gets the tracked-only list it used
+  // to, instead of silently falling through to the unfiltered live-Shopify
+  // branch at the bottom of this function.
+  const filter = rawFilter === "tracked" ? "all" : rawFilter;
   const pageSize = 50;
 
   // storeSession fetched first so the supplier query below can be skipped
@@ -158,24 +170,41 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
   const threshold = settings?.lowStockThreshold ?? 5;
   const suppliersById = new Map(supplierRows.map((s) => [s.id, s.name]));
 
-  // Status/tracked filters are answered straight from the DB — it holds the
-  // status (and now the cached image) for every tracked product regardless of
-  // catalog size, whereas the Shopify products() query below only returns one
-  // page at a time. Filtering that single page client-side (as this used to
-  // do) made the counts depend on which page Shopify happened to return, e.g.
-  // showing "0 out of stock" when the true out-of-stock products just weren't
-  // on the fetched page. No live Shopify call is needed here at all: the
-  // webhook handlers delete a row the moment a product leaves ACTIVE, so any
-  // row still present in inventoryTracking is guaranteed to be active, and
-  // imageUrl/imageAlt are kept in sync by sync + the product webhooks.
+  // Status/all/dead-stock filters are answered straight from the DB — it
+  // holds the status (and now the cached image) for every tracked product
+  // regardless of catalog size, whereas the Shopify products() query below
+  // only returns one page at a time. Filtering that single page client-side
+  // (as this used to do) made the counts depend on which page Shopify
+  // happened to return, e.g. showing "0 out of stock" when the true
+  // out-of-stock products just weren't on the fetched page. No live Shopify
+  // call is needed here at all: the webhook handlers delete a row the moment
+  // a product leaves ACTIVE, so any row still present in inventoryTracking is
+  // guaranteed to be active, and imageUrl/imageAlt are kept in sync by sync +
+  // the product webhooks.
   //
-  // Pagination happens on distinct products (via paginatedProductIdsByStatus,
-  // which applies the same worst-case-per-product classification used for
-  // the dashboard tiles), not on tracking rows — a product with several
-  // variants must count once, not once per variant.
-  if (STATUS_FILTERS.has(filter) || filter === "tracked") {
+  // "all" means every *tracked* product (not-tracked products are their own
+  // tab) — it reuses paginatedProductIdsByStatus's "tracked" classification,
+  // which is "not deactivated / not benched by plan limits" rather than a
+  // literal status. Pagination happens on distinct products (via
+  // paginatedProductIdsByStatus, which applies the same worst-case-per-product
+  // classification used for the dashboard tiles), not on tracking rows — a
+  // product with several variants must count once, not once per variant.
+  if (DB_FILTERS.has(filter)) {
     const skip = after ? parseInt(after, 10) : 0;
-    const { productIds, total } = await paginatedProductIdsByStatus(shop, filter as RollupStatus | "tracked", search, skip, pageSize);
+
+    let productIds: bigint[];
+    let total: number;
+    if (filter === "dead_stock") {
+      // Gated before the query, not just in the toolbar's tab list — a
+      // downgraded shop hitting this filter directly via URL must not get a
+      // dead-stock page back just because the tab happens to be hidden.
+      const canDeadStock = canUseFeature(plan, "deadStockAlerts");
+      ({ productIds, total } = canDeadStock
+        ? await paginatedDeadStockProductIds(shop, settings?.deadStockThresholdDays ?? 60, search, skip, pageSize)
+        : { productIds: [], total: 0 });
+    } else {
+      ({ productIds, total } = await paginatedProductIdsByStatus(shop, filter === "all" ? "tracked" : (filter as RollupStatus), search, skip, pageSize));
+    }
 
     const [rows, trackedCountDb] = await Promise.all([
       productIds.length > 0
@@ -305,9 +334,10 @@ export async function loadProductsData({ admin, shop, search, after, filter }: {
     };
   });
 
-  // Status/tracked filters are handled by the DB-driven branch above and
-  // return early — only "not_tracked" and "all" (plus title search) fall
-  // through to here, both inherently scoped to whatever page Shopify returns.
+  // Status/all/dead-stock filters are handled by the DB-driven branch above
+  // and return early — only "not_tracked" (plus title search) falls through
+  // to here, since discovering untracked products means asking Shopify
+  // directly rather than the DB, which only ever holds tracked rows.
   const products = filter === "not_tracked" ? allProducts.filter((p) => !p.isTracked) : allProducts;
 
   return {

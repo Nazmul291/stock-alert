@@ -5,6 +5,9 @@
     "**/*.tsx",
     ".react-router/types/**/*"
   ],
+  "exclude": [
+    "extensions"
+  ],
   "compilerOptions": {
     "lib": [
       "DOM",

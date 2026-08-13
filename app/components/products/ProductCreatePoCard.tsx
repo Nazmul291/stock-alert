@@ -3,6 +3,7 @@ import { useFetcher, Link } from "react-router";
 import type { ProductDetailVariantForPo } from "../../lib/product-detail.server";
 import { useLiveEventsStore } from "../../stores/live-events-store";
 import { useProductDetailStore } from "../../stores/product-detail-store";
+import { SkeletonBlock } from "../Skeleton";
 
 type SupplierOption = { id: string; name: string };
 type CreatedPoLine = {
@@ -53,7 +54,18 @@ export function ProductCreatePoCard({
   const [supplierId, setSupplierId] = useState(defaultSupplierId ?? "");
   const [showNewSupplierForm, setShowNewSupplierForm] = useState(suppliers.length === 0);
   const [newSupplierName, setNewSupplierName] = useState("");
+  const [newSupplierContactName, setNewSupplierContactName] = useState("");
   const [newSupplierEmail, setNewSupplierEmail] = useState("");
+  const [newSupplierPhone, setNewSupplierPhone] = useState("");
+  const [newSupplierWebsite, setNewSupplierWebsite] = useState("");
+  const [newSupplierAddress1, setNewSupplierAddress1] = useState("");
+  const [newSupplierAddress2, setNewSupplierAddress2] = useState("");
+  const [newSupplierCity, setNewSupplierCity] = useState("");
+  const [newSupplierProvince, setNewSupplierProvince] = useState("");
+  const [newSupplierZip, setNewSupplierZip] = useState("");
+  const [newSupplierCountry, setNewSupplierCountry] = useState("");
+  const [newSupplierPaymentTerms, setNewSupplierPaymentTerms] = useState("");
+  const [newSupplierCurrency, setNewSupplierCurrency] = useState("");
   const [newSupplierLeadTime, setNewSupplierLeadTime] = useState("");
   const supplierFetcher = useFetcher<CreateSupplierResult>();
 
@@ -66,10 +78,43 @@ export function ProductCreatePoCard({
     setShowNewSupplierForm(false);
   }
 
+  function resetNewSupplierForm() {
+    setNewSupplierName("");
+    setNewSupplierContactName("");
+    setNewSupplierEmail("");
+    setNewSupplierPhone("");
+    setNewSupplierWebsite("");
+    setNewSupplierAddress1("");
+    setNewSupplierAddress2("");
+    setNewSupplierCity("");
+    setNewSupplierProvince("");
+    setNewSupplierZip("");
+    setNewSupplierCountry("");
+    setNewSupplierPaymentTerms("");
+    setNewSupplierCurrency("");
+    setNewSupplierLeadTime("");
+  }
+
   function createNewSupplier() {
-    if (!newSupplierName.trim() || !newSupplierEmail.trim()) return;
+    if (!newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim()) return;
     supplierFetcher.submit(
-      { intent: "create_supplier", name: newSupplierName, email: newSupplierEmail, leadTimeDays: newSupplierLeadTime },
+      {
+        intent: "create_supplier",
+        name: newSupplierName,
+        contactName: newSupplierContactName,
+        email: newSupplierEmail,
+        phone: newSupplierPhone,
+        website: newSupplierWebsite,
+        address1: newSupplierAddress1,
+        address2: newSupplierAddress2,
+        city: newSupplierCity,
+        province: newSupplierProvince,
+        zip: newSupplierZip,
+        country: newSupplierCountry,
+        paymentTerms: newSupplierPaymentTerms,
+        currency: newSupplierCurrency,
+        leadTimeDays: newSupplierLeadTime,
+      },
       { method: "post" },
     );
   }
@@ -81,9 +126,7 @@ export function ProductCreatePoCard({
       setSupplierList((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setSupplierId(created.id);
       setShowNewSupplierForm(false);
-      setNewSupplierName("");
-      setNewSupplierEmail("");
-      setNewSupplierLeadTime("");
+      resetNewSupplierForm();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierFetcher.state, supplierFetcher.data]);
@@ -223,12 +266,64 @@ export function ProductCreatePoCard({
           )}
           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
             <input
-              type="text" placeholder="Supplier name *" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)}
+              type="text" placeholder="Company *" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)}
               style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
             />
             <input
+              type="text" placeholder="Contact name" value={newSupplierContactName} onChange={(e) => setNewSupplierContactName(e.target.value)}
+              style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <input
               type="email" required placeholder="Email *" value={newSupplierEmail} onChange={(e) => setNewSupplierEmail(e.target.value)}
               style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="tel" required placeholder="Phone *" value={newSupplierPhone} onChange={(e) => setNewSupplierPhone(e.target.value)}
+              style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="url" placeholder="Website" value={newSupplierWebsite} onChange={(e) => setNewSupplierWebsite(e.target.value)}
+              style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <input
+              type="text" placeholder="Address" value={newSupplierAddress1} onChange={(e) => setNewSupplierAddress1(e.target.value)}
+              style={{ flex: "1 1 200px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="text" placeholder="Apartment, suite, etc" value={newSupplierAddress2} onChange={(e) => setNewSupplierAddress2(e.target.value)}
+              style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <input
+              type="text" placeholder="City" value={newSupplierCity} onChange={(e) => setNewSupplierCity(e.target.value)}
+              style={{ flex: "1 1 120px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="text" placeholder="State/Province" value={newSupplierProvince} onChange={(e) => setNewSupplierProvince(e.target.value)}
+              style={{ flex: "1 1 120px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="text" placeholder="ZIP code" value={newSupplierZip} onChange={(e) => setNewSupplierZip(e.target.value)}
+              style={{ flex: "1 1 100px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="text" placeholder="Country/region" value={newSupplierCountry} onChange={(e) => setNewSupplierCountry(e.target.value)}
+              style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <input
+              type="text" placeholder="Payment terms (e.g. Net 30)" value={newSupplierPaymentTerms} onChange={(e) => setNewSupplierPaymentTerms(e.target.value)}
+              style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+            />
+            <input
+              type="text" maxLength={10} placeholder="Currency (e.g. USD)" value={newSupplierCurrency} onChange={(e) => setNewSupplierCurrency(e.target.value)}
+              style={{ flex: "1 1 130px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
             />
             <input
               type="number" min={1} placeholder="Lead time (days)" value={newSupplierLeadTime} onChange={(e) => setNewSupplierLeadTime(e.target.value)}
@@ -236,8 +331,8 @@ export function ProductCreatePoCard({
             />
           </div>
           <button
-            type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || supplierFetcher.state !== "idle"}
-            style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() || !newSupplierEmail.trim() ? "not-allowed" : "pointer" }}
+            type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() || supplierFetcher.state !== "idle"}
+            style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() ? "not-allowed" : "pointer" }}
           >
             {supplierFetcher.state !== "idle" ? "Creating…" : "Create Supplier"}
           </button>
@@ -309,6 +404,21 @@ export function ProductCreatePoCard({
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+// Shown instead of the real card while product-detail data is still
+// loading — same reasoning as ProductConfigureCardSkeleton: this form's
+// per-variant quantity/cost inputs are seeded from `variants`/`suppliers`
+// only once, on mount, so it can't be mounted early with placeholder props.
+export function ProductCreatePoCardSkeleton() {
+  return (
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+      <SkeletonBlock width={180} height={16} />
+      <SkeletonBlock width="100%" height={34} borderRadius={6} />
+      <SkeletonBlock width="100%" height={80} borderRadius={8} />
+      <SkeletonBlock width={140} height={34} borderRadius={6} />
     </div>
   );
 }

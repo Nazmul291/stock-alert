@@ -9,6 +9,7 @@ import {
   getAlertBatchEmailTemplate,
   getBackInStockCustomerTemplate,
   getPurchaseOrderEmailTemplate,
+  htmlToPlainText,
   type DigestEmailData,
   type AlertBatchEmailData,
   type AlertBatchEvent,
@@ -825,10 +826,17 @@ export async function sendBackInStockNotifications(
     }, brand);
     try {
       await transporter.sendMail({
-        from: { name: storeName, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+        // Same "{Store} via Stock Alert" disclosure as sendPurchaseOrderEmail
+        // — this is the one email in this file that reaches an actual shop
+        // customer rather than the merchant or a supplier, so it's exactly
+        // as exposed to a recipient-side "Unconfirmed Sender" warning when
+        // the display name (the merchant's store) doesn't match the sending
+        // domain (nazmulcodes.org).
+        from: { name: `${storeName} via Stock Alert`, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
         to: sub.email,
         subject,
         html,
+        text: htmlToPlainText(html),
       });
       await prisma.backInStockSubscriber.update({
         where: { id: sub.id },
@@ -995,6 +1003,10 @@ export async function sendPurchaseOrderEmail(shop: string, purchaseOrderId: stri
     supplierName: po.supplier.name,
     storeName,
     totalCost: po.totalCost,
+    currency: po.supplier.currency,
+    terms: po.terms,
+    referenceNumber: po.referenceNumber,
+    supplierNote: po.supplierNote,
     lines: po.lineItems.map((li) => ({
       productTitle: li.productTitle,
       variantTitle: li.variantTitle,
@@ -1006,12 +1018,19 @@ export async function sendPurchaseOrderEmail(shop: string, purchaseOrderId: stri
 
   try {
     await transporter.sendMail({
-      from: { name: storeName, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
+      // Self-discloses that this is sent on the merchant's behalf by this
+      // app, rather than letting the mismatch between the display name
+      // (the merchant's store) and the sending domain (nazmulcodes.org) look
+      // undisclosed — Zoho and other providers flag exactly that mismatch as
+      // an "Unconfirmed Sender" warning otherwise, even though SPF/DKIM/DMARC
+      // all pass for this domain. Same pattern as "Acme Inc via DocuSign".
+      from: { name: `${storeName} via Stock Alert`, address: process.env.EMAIL_USER || 'noreply@nazmulcodes.org' },
       to: po.supplier.email,
       replyTo,
       bcc,
       subject,
       html,
+      text: htmlToPlainText(html),
     });
     console.log(`[Notifications] PO #${po.poNumber} sent to ${po.supplier.email} for ${shop}${bcc ? ` (bcc: ${bcc})` : ''}`);
     return { success: true };

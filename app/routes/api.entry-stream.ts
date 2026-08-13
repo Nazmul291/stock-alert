@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { singleShotSSE } from "../lib/sse.server";
+import { singleShotJSON } from "../lib/sse.server";
 
 // Confirms whether "/" was loaded embedded inside the Shopify admin iframe,
 // mirroring the exact check _index/route.tsx's loader already did — moved
@@ -10,5 +10,5 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const embedded = ["shop", "host", "embedded", "appLoadId"].some((key) => url.searchParams.has(key));
 
-  return singleShotSSE(async () => ({ embedded }));
+  return singleShotJSON(async () => ({ embedded }));
 };

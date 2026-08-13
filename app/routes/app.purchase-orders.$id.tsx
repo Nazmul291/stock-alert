@@ -38,11 +38,30 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     poNumber: po.poNumber,
     status: po.status,
     totalCost: po.totalCost,
+    referenceNumber: po.referenceNumber,
+    supplierNote: po.supplierNote,
+    terms: po.terms,
+    tags: po.tags,
     sentToSupplierAt: po.sentToSupplierAt?.toISOString() ?? null,
     orderedAt: po.orderedAt?.toISOString() ?? null,
     receivedAt: po.receivedAt?.toISOString() ?? null,
     createdAt: po.createdAt.toISOString(),
-    supplier: { id: po.supplier.id, name: po.supplier.name, email: po.supplier.email },
+    supplier: {
+      id: po.supplier.id,
+      name: po.supplier.name,
+      email: po.supplier.email,
+      phone: po.supplier.phone,
+      contactName: po.supplier.contactName,
+      website: po.supplier.website,
+      address1: po.supplier.address1,
+      address2: po.supplier.address2,
+      city: po.supplier.city,
+      province: po.supplier.province,
+      zip: po.supplier.zip,
+      country: po.supplier.country,
+      paymentTerms: po.supplier.paymentTerms,
+      currency: po.supplier.currency,
+    },
     lineItems: po.lineItems.map((li) => ({
       id: li.id,
       variantId: li.variantId.toString(),
@@ -105,7 +124,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
     const refreshed = await prisma.purchaseOrderLineItem.findMany({ where: { purchaseOrderId: id } });
     const totalCost = refreshed.reduce((sum, li) => sum + li.quantityOrdered * (li.unitCost ?? 0), 0);
-    await prisma.purchaseOrder.updateMany({ where: { id, shop }, data: { totalCost, ...(supplierId ? { supplierId } : {}) } });
+    // Same "merchant-facing, mirrors Shopify's own create screen" fields as
+    // createPurchaseOrder — editable while still a draft, same as the line
+    // items and supplier above. Gated on form.has(...), not just reading with
+    // a "" fallback — this same helper also backs update_line_items/order_now
+    // as submitted by ManagePurchaseOrderModal.tsx (the product page's PO
+    // editor), which never includes these fields at all; treating "absent"
+    // the same as "submitted blank" would silently wipe out a reference
+    // number/note/terms/tags set from the Purchase Orders page the moment
+    // the merchant edited the same draft from the product page instead.
+    const detailsPatch: { referenceNumber?: string | null; supplierNote?: string | null; terms?: string | null; tags?: string[] } = {};
+    if (form.has("referenceNumber")) detailsPatch.referenceNumber = ((form.get("referenceNumber") as string) ?? "").trim() || null;
+    if (form.has("supplierNote")) detailsPatch.supplierNote = ((form.get("supplierNote") as string) ?? "").trim() || null;
+    if (form.has("terms")) detailsPatch.terms = ((form.get("terms") as string) ?? "").trim() || null;
+    if (form.has("tags")) detailsPatch.tags = (JSON.parse((form.get("tags") as string) ?? "[]") as string[]).map((t) => t.trim()).filter(Boolean);
+    await prisma.purchaseOrder.updateMany({
+      where: { id, shop },
+      data: { totalCost, ...detailsPatch, ...(supplierId ? { supplierId } : {}) },
+    });
     return refreshed;
   }
 

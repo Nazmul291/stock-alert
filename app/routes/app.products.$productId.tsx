@@ -4,35 +4,35 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
-import { mintSseToken } from "../lib/sse-token.server";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { canUseFeature } from "../lib/plan-limits";
 import { createSupplier } from "../lib/supplier.server";
 import { createPurchaseOrder } from "../lib/purchase-order.server";
 import { PRODUCT_INVENTORY_QUERY, INVENTORY_ITEM_UPDATE_MUTATION, METAFIELDS_SET_MUTATION, METAFIELDS_DELETE_MUTATION } from "../lib/graphql";
 import type { ProductDetailData } from "../lib/product-detail.server";
-import { useProductDetailStore } from "../stores/product-detail-store";
+import { useProductDetailStore, type ProductDetailStore } from "../stores/product-detail-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { ProductDetailHeader } from "../components/products/ProductDetailHeader";
-import { ProductConfigureCard } from "../components/products/ProductConfigureCard";
-import { ProductCreatePoCard } from "../components/products/ProductCreatePoCard";
+import { ProductConfigureCard, ProductConfigureCardSkeleton } from "../components/products/ProductConfigureCard";
+import { ProductCreatePoCard, ProductCreatePoCardSkeleton } from "../components/products/ProductCreatePoCard";
 import { ProductPurchaseOrdersList } from "../components/products/ProductPurchaseOrdersList";
 import { ProductHistoryTimeline } from "../components/products/ProductHistoryTimeline";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
+import type { ProductRow } from "../components/products/ProductEditModal";
 
-// Only mints a token and hands off to api.product-detail-stream.ts for the
-// actual DB/Shopify-API work — matches every other page in this app
-// (Products list, Dashboard, Settings, etc.), instead of blocking the
-// document response on getProductDetail directly. See product-detail-store.ts.
+// Only the auth check + plan lookup block the response — hands off to
+// api.product-detail-stream.ts (authenticated the same way as this loader,
+// via App Bridge's automatic session-token fetch header) for the actual
+// DB/Shopify-API work, matching every other page in this app (Products list,
+// Dashboard, Settings, etc.) instead of blocking the document response on
+// getProductDetail directly. See product-detail-store.ts.
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const shop = session.shop;
-  const storeSession = await getCachedSession(shop);
+  const storeSession = await getCachedSession(session.shop);
   const plan = storeSession?.plan ?? "basic";
   const productId = params.productId as string;
-  const token = await mintSseToken(shop);
 
-  return { productId, plan, token };
+  return { productId, plan };
 };
 
 type InventoryItemUpdateResponse = {
@@ -255,7 +255,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const result = await createSupplier(shop, {
       name: (form.get("name") as string) ?? "",
       email: (form.get("email") as string) ?? "",
+      phone: (form.get("phone") as string) ?? "",
       leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
+      contactName: (form.get("contactName") as string) ?? "",
+      website: (form.get("website") as string) ?? "",
+      address1: (form.get("address1") as string) ?? "",
+      address2: (form.get("address2") as string) ?? "",
+      city: (form.get("city") as string) ?? "",
+      province: (form.get("province") as string) ?? "",
+      zip: (form.get("zip") as string) ?? "",
+      country: (form.get("country") as string) ?? "",
+      paymentTerms: (form.get("paymentTerms") as string) ?? "",
+      currency: (form.get("currency") as string) ?? "",
     });
     return { ...result, intent };
   }
@@ -297,20 +308,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function ProductDetailPage() {
-  const { productId, plan, token } = useLoaderData<typeof loader>();
+  const { productId, plan } = useLoaderData<typeof loader>();
 
-  const cachedData = useProductDetailStore((s) => s.data);
-  const cachedKey = useProductDetailStore((s) => s.lastKey);
-  const lastFetchedAt = useProductDetailStore((s) => s.lastFetchedAt);
-  const setSSEState = useProductDetailStore((s) => s.setSSEState);
-  useCachedSSEData<ProductDetailData>(
+  useSSECacheStore<ProductDetailData, ProductDetailStore>(
+    useProductDetailStore,
     productId,
-    () => `/api/product-detail-stream?token=${encodeURIComponent(token)}&productId=${encodeURIComponent(productId)}`,
+    () => `/api/product-detail-stream?productId=${encodeURIComponent(productId)}`,
     "product-detail",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
   );
 
   const storeError = useProductDetailStore((s) => s.error);
@@ -331,42 +335,76 @@ export default function ProductDetailPage() {
   );
 }
 
-// Always renders inside the same <s-page> — while loading, this shows a
-// lightweight placeholder instead of the Products list's full skeleton-row
-// treatment, since the nested cards here (Configure, PO list, history) don't
-// have their own skeleton variants and this is a page merchants navigate to
-// deliberately rather than one they leave open indefinitely.
+// Reserves the same header shape as a real product (single-variant summary
+// block, not the multi-variant table) while data is still loading — see
+// ProductsTable.tsx's PLACEHOLDER_ROWS for the equivalent on the list page.
+const PLACEHOLDER_PRODUCT: ProductRow = {
+  id: "skeleton",
+  productId: "skeleton",
+  productTitle: "Product name",
+  sku: "SKU-0000",
+  currentQuantity: 0,
+  inventoryStatus: "in_stock",
+  isHidden: false,
+  isTracked: false,
+  monitoringEnabled: false,
+  imageUrl: null,
+  imageAlt: "",
+  shopifyStatus: "ACTIVE",
+  inventoryItemId: null,
+  stockOutDays: null,
+  avgDailySales: null,
+  manualDailySales: null,
+  expectedRestockDate: null,
+  variants: [],
+};
+
+// Always renders inside the same <s-page>, with the exact same section
+// layout whether loading or loaded — matching the rest of the app's
+// skeleton architecture (Products list, Dashboard, etc.): mask individual
+// dynamic values with `.skeleton-text` instead of swapping in a different
+// placeholder layout, so there's no layout shift once real data lands.
+// ProductConfigureCard/ProductCreatePoCard are the one exception — both
+// seed their form state from props only once, on mount (see each one's own
+// Skeleton export for why), so they're swapped for a shape-only skeleton
+// instead of being mounted early with placeholder data.
 function ProductDetailContent({ plan }: { plan: string }) {
   const data = useProductDetailStore((s) => s.data);
+  const loading = data === null;
   const canPerProductThreshold = canUseFeature(plan, "perProductThresholds");
+  // Derived from `plan` (already known from the loader), not `data` — so
+  // this branch is decided correctly from the very first render instead of
+  // flipping between SuppliersUpsellCard and the real section once data
+  // arrives.
+  const canManageSupplier = canUseFeature(plan, "purchaseOrders");
 
-  if (!data) {
-    return (
-      <s-section heading="Overview">
-        <p style={{ fontSize: 14, color: "#6b7280" }}>Loading product…</p>
-      </s-section>
-    );
-  }
-
-  const { product, configure, storeDefaults, canManageSupplier, suppliers, variantsForPo, purchaseOrders, history } = data;
+  const product = data?.product ?? PLACEHOLDER_PRODUCT;
+  const purchaseOrders = data?.purchaseOrders ?? [];
+  const suppliers = data?.suppliers ?? [];
+  const variantsForPo = data?.variantsForPo ?? [];
+  const history = data?.history ?? [];
 
   return (
     <>
       {/* Main (left) column — overview, purchase orders, and activity history. */}
       <s-section heading="Overview">
-        <ProductDetailHeader product={product} />
+        <ProductDetailHeader product={product} loading={loading} />
       </s-section>
 
       {canManageSupplier ? (
         <s-section heading="Purchase Orders">
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            <ProductPurchaseOrdersList purchaseOrders={purchaseOrders} suppliers={suppliers} productTitle={product.productTitle} />
-            <ProductCreatePoCard
-              variants={variantsForPo}
-              suppliers={suppliers}
-              defaultSupplierId={product.supplierId ?? null}
-              productTitle={product.productTitle}
-            />
+            <ProductPurchaseOrdersList purchaseOrders={purchaseOrders} suppliers={suppliers} productTitle={product.productTitle} loading={loading} />
+            {data ? (
+              <ProductCreatePoCard
+                variants={variantsForPo}
+                suppliers={suppliers}
+                defaultSupplierId={product.supplierId ?? null}
+                productTitle={product.productTitle}
+              />
+            ) : (
+              <ProductCreatePoCardSkeleton />
+            )}
           </div>
         </s-section>
       ) : (
@@ -374,7 +412,7 @@ function ProductDetailContent({ plan }: { plan: string }) {
       )}
 
       <s-section heading="History">
-        <ProductHistoryTimeline history={history} />
+        <ProductHistoryTimeline history={history} loading={loading} />
       </s-section>
 
       {/* Aside (right) column — same two-column layout the dashboard uses
@@ -382,12 +420,16 @@ function ProductDetailContent({ plan }: { plan: string }) {
           so ProductConfigureCard's own card border is the only container —
           no extra heading/box wrapping it. */}
       <div slot="aside">
-        <ProductConfigureCard
-          product={product}
-          configure={configure}
-          storeDefaults={storeDefaults}
-          canPerProductThreshold={canPerProductThreshold}
-        />
+        {data ? (
+          <ProductConfigureCard
+            product={data.product}
+            configure={data.configure}
+            storeDefaults={data.storeDefaults}
+            canPerProductThreshold={canPerProductThreshold}
+          />
+        ) : (
+          <ProductConfigureCardSkeleton />
+        )}
       </div>
     </>
   );

@@ -8,17 +8,52 @@ export type SupplierInput = {
   phone?: string;
   notes?: string;
   leadTimeDays?: string;
+  contactName?: string;
+  website?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  zip?: string;
+  country?: string;
+  paymentTerms?: string;
+  currency?: string;
 };
 
 export type SupplierMutationResult =
   | { success: true; id: string; name: string }
   | { success: false; error: string };
 
-function parseSupplierInput(input: SupplierInput): { data: { name: string; email: string | null; phone: string | null; notes: string | null; leadTimeDays: number | null } } | { error: string } {
+type ParsedSupplierData = {
+  name: string;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+  leadTimeDays: number | null;
+  contactName: string | null;
+  website: string | null;
+  address1: string | null;
+  address2: string | null;
+  city: string | null;
+  province: string | null;
+  zip: string | null;
+  country: string | null;
+  paymentTerms: string | null;
+  currency: string | null;
+};
+
+// Trims a possibly-undefined string field down to null-if-empty — shared by
+// every optional Supplier field below so an empty form input clears the
+// field in the DB rather than persisting an empty string.
+function trimmedOrNull(value: string | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return trimmed || null;
+}
+
+function parseSupplierInput(input: SupplierInput): { data: ParsedSupplierData } | { error: string } {
   const name = input.name.trim();
   const email = (input.email ?? "").trim();
   const phone = (input.phone ?? "").trim();
-  const notes = (input.notes ?? "").trim();
   const rawLeadTime = input.leadTimeDays ?? "";
 
   if (!name) return { error: "Supplier name is required." };
@@ -27,11 +62,32 @@ function parseSupplierInput(input: SupplierInput): { data: { name: string; email
   // required rather than merely validated-if-present.
   if (!email) return { error: "Supplier email is required." };
   if (!EMAIL_RE.test(email)) return { error: `"${email}" is not a valid email address.` };
+  if (!phone) return { error: "Supplier phone number is required." };
 
   const leadTimeDays =
     rawLeadTime.trim() !== "" && !isNaN(parseInt(rawLeadTime)) && parseInt(rawLeadTime) > 0 ? parseInt(rawLeadTime) : null;
 
-  return { data: { name, email: email || null, phone: phone || null, notes: notes || null, leadTimeDays } };
+  return {
+    data: {
+      name,
+      email: email || null,
+      phone,
+      notes: trimmedOrNull(input.notes),
+      leadTimeDays,
+      contactName: trimmedOrNull(input.contactName),
+      website: trimmedOrNull(input.website),
+      address1: trimmedOrNull(input.address1),
+      address2: trimmedOrNull(input.address2),
+      city: trimmedOrNull(input.city),
+      province: trimmedOrNull(input.province),
+      zip: trimmedOrNull(input.zip),
+      country: trimmedOrNull(input.country),
+      paymentTerms: trimmedOrNull(input.paymentTerms),
+      // Normalized to uppercase (e.g. "usd" -> "USD") so email-templates.ts
+      // can key a symbol lookup off it without also normalizing there.
+      currency: input.currency?.trim() ? input.currency.trim().toUpperCase() : null,
+    },
+  };
 }
 
 export async function createSupplier(shop: string, input: SupplierInput): Promise<SupplierMutationResult> {

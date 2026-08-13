@@ -74,6 +74,8 @@ export function ProductsTable({
         <p style={{ fontSize: 14 }}>
           {filter === "not_tracked"
             ? "All products have been synced and are tracked."
+            : filter === "dead_stock"
+            ? "No dead stock right now — nice."
             : "Click Sync Products to import your Shopify inventory."}
         </p>
       </div>

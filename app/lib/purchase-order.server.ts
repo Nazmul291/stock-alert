@@ -219,7 +219,21 @@ export type CreatedPurchaseOrder = {
   poNumber: number;
   createdAt: string;
   supplierName: string;
+  referenceNumber: string | null;
+  supplierNote: string | null;
+  terms: string | null;
+  tags: string[];
   lineItems: CreatedPurchaseOrderLine[];
+};
+
+// Merchant-facing fields mirroring Shopify's own native "Create purchase
+// order" screen — see the matching comment on the Prisma model. All optional;
+// `terms` falls back to the supplier's own paymentTerms when left blank.
+export type CreatePurchaseOrderDetails = {
+  referenceNumber?: string | null;
+  supplierNote?: string | null;
+  terms?: string | null;
+  tags?: string[];
 };
 
 export async function createPurchaseOrder(
@@ -227,6 +241,7 @@ export async function createPurchaseOrder(
   supplierId: string,
   lines: CreatePurchaseOrderLine[],
   admin?: AdminApiContext,
+  details?: CreatePurchaseOrderDetails,
 ): Promise<CreatedPurchaseOrder> {
   const sanitizedLines = lines.map((l) => ({
     ...l,
@@ -287,6 +302,13 @@ export async function createPurchaseOrder(
   }
 
   const totalCost = resolvedLines.reduce((sum, l) => sum + l.quantityOrdered * (l.unitCost ?? 0), 0);
+  const referenceNumber = details?.referenceNumber?.trim() || null;
+  const supplierNote = details?.supplierNote?.trim() || null;
+  // Falls back to the supplier's own paymentTerms, same as Shopify's own
+  // supplier form promising this ("This will auto populate the payment
+  // information on the purchase order.") — still fully editable per-PO.
+  const terms = details?.terms?.trim() || supplier.paymentTerms || null;
+  const tags = (details?.tags ?? []).map((t) => t.trim()).filter(Boolean);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -299,6 +321,10 @@ export async function createPurchaseOrder(
             poNumber,
             totalCost,
             generatedFromForecast: false,
+            referenceNumber,
+            supplierNote,
+            terms,
+            tags,
             lineItems: { create: resolvedLines },
           },
           include: { lineItems: true },
@@ -309,6 +335,10 @@ export async function createPurchaseOrder(
         poNumber: purchaseOrder.poNumber,
         createdAt: purchaseOrder.createdAt.toISOString(),
         supplierName: supplier.name,
+        referenceNumber: purchaseOrder.referenceNumber,
+        supplierNote: purchaseOrder.supplierNote,
+        terms: purchaseOrder.terms,
+        tags: purchaseOrder.tags,
         lineItems: purchaseOrder.lineItems.map((li) => ({
           id: li.id,
           variantId: li.variantId.toString(),

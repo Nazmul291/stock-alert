@@ -3,14 +3,16 @@ import { STATUS_STYLE } from "./ProductsTable";
 import { SalesVelocityBadge } from "./SalesVelocityBadge";
 import { StockOutBadge } from "./StockOutBadge";
 
-export function ProductDetailHeader({ product }: { product: ProductRow }) {
+export function ProductDetailHeader({ product, loading = false }: { product: ProductRow; loading?: boolean }) {
   const s = STATUS_STYLE[product.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
   const variants = product.variants ?? [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        {product.imageUrl ? (
+        {loading ? (
+          <div className="skeleton-text" style={{ width: 64, height: 64, borderRadius: 8, flexShrink: 0 }} />
+        ) : product.imageUrl ? (
           <img src={product.imageUrl} alt={product.imageAlt} width={64} height={64} loading="lazy"
             style={{ borderRadius: 8, objectFit: "cover", border: "1px solid #e5e7eb", flexShrink: 0 }} />
         ) : (
@@ -19,10 +21,13 @@ export function ProductDetailHeader({ product }: { product: ProductRow }) {
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 18, color: "#111827" }}>{product.productTitle}</p>
-          {product.sku && <p style={{ margin: "2px 0 0", fontSize: 13, color: "#9ca3af" }}>SKU: {product.sku}</p>}
+          <p className={loading ? "skeleton-text" : undefined} style={{ margin: 0, fontWeight: 700, fontSize: 18, color: "#111827" }}>{product.productTitle}</p>
+          {product.sku && <p className={loading ? "skeleton-text" : undefined} style={{ margin: "2px 0 0", fontSize: 13, color: "#9ca3af" }}>SKU: {product.sku}</p>}
         </div>
-        <span style={{ background: s.bg, color: s.color, padding: "4px 10px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+        <span
+          className={loading ? "skeleton-text" : undefined}
+          style={{ background: loading ? "#f3f4f6" : s.bg, color: loading ? "#6b7280" : s.color, padding: "4px 10px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}
+        >
           {s.label}
         </span>
       </div>
@@ -60,15 +65,19 @@ export function ProductDetailHeader({ product }: { product: ProductRow }) {
         <div style={{ display: "flex", gap: 24, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
           <div>
             <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>Quantity</p>
-            <p style={{ margin: "2px 0 0", fontWeight: 600, fontSize: 15 }}>{product.currentQuantity}</p>
+            <p className={loading ? "skeleton-text" : undefined} style={{ margin: "2px 0 0", fontWeight: 600, fontSize: 15 }}>{product.currentQuantity}</p>
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>Sales Velocity</p>
-            <SalesVelocityBadge unitsPerDay={product.avgDailySales ?? null} isManual={!!product.manualDailySales} />
+            <span className={loading ? "skeleton-text" : undefined}>
+              <SalesVelocityBadge unitsPerDay={product.avgDailySales ?? null} isManual={!!product.manualDailySales} />
+            </span>
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>Days Left</p>
-            <StockOutBadge days={product.stockOutDays ?? null} isManual={!!product.manualDailySales} />
+            <span className={loading ? "skeleton-text" : undefined}>
+              <StockOutBadge days={product.stockOutDays ?? null} isManual={!!product.manualDailySales} />
+            </span>
           </div>
         </div>
       )}
