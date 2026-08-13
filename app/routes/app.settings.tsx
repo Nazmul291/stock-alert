@@ -1,16 +1,15 @@
 import { useState, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData, Form, useFetcher } from "react-router";
+import { Form, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { mintSseToken } from "../lib/sse-token.server";
 import type { SettingsData } from "../lib/settings-data.server";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { canUseFeature } from "../lib/plan-limits";
-import { useSettingsStore } from "../stores/settings-store";
+import { useSettingsStore, type SettingsStore } from "../stores/settings-store";
 import { useLiveEventsStore } from "../stores/live-events-store";
 import { PlanCard } from "../components/settings/PlanCard";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
@@ -24,15 +23,12 @@ import { DangerZoneSection } from "../components/settings/DangerZoneSection";
 import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
 
 // Only the auth check blocks the response — settings data loads entirely in
-// the background via api.settings-stream.ts and is pushed to the client over
-// SSE once ready. loadSettingsData itself lives in
-// app/lib/settings-data.server.ts, not here — see app._index.tsx's loader
-// comment for why a plain exported function can't stay in a route file.
+// the background via api.settings-stream.ts (authenticated the same way as
+// this loader, via App Bridge's automatic session-token fetch header) and is
+// pushed to the client once ready.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
-  const token = await mintSseToken(shop);
-  return { token };
+  await authenticate.admin(request);
+  return {};
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -138,21 +134,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SettingsPage() {
-  const { token } = useLoaderData<typeof loader>();
-
-  const cachedData = useSettingsStore((s) => s.data);
-  const cachedKey = useSettingsStore((s) => s.lastKey);
-  const lastFetchedAt = useSettingsStore((s) => s.lastFetchedAt);
-  const setSSEState = useSettingsStore((s) => s.setSSEState);
-  useCachedSSEData<SettingsData>(
-    "",
-    () => `/api/settings-stream?token=${encodeURIComponent(token)}`,
-    "settings",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
-  );
+  useSSECacheStore<SettingsData, SettingsStore>(useSettingsStore, "", () => `/api/settings-stream`, "settings");
 
   // Gate on the store, not a local hook result — see the rule established
   // in dashboard-store.ts.

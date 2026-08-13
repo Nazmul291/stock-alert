@@ -5,10 +5,9 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { mintSseToken } from "../lib/sse-token.server";
 import type { BackInStockData } from "../lib/back-in-stock-data.server";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
-import { useBackInStockStore } from "../stores/back-in-stock-store";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
+import { useBackInStockStore, type BackInStockStore } from "../stores/back-in-stock-store";
 import { BackInStockStatCards } from "../components/back-in-stock/BackInStockStatCards";
 import { BackInStockProductGroups } from "../components/back-in-stock/BackInStockProductGroups";
 import { BackInStockSubscriberList } from "../components/back-in-stock/BackInStockSubscriberList";
@@ -19,13 +18,11 @@ import { BackInStockSubscriberList } from "../components/back-in-stock/BackInSto
 // app/lib/back-in-stock-data.server.ts, not here — see app._index.tsx's loader
 // comment for why a plain exported function can't stay in a route file.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
+  await authenticate.admin(request);
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1") || 1);
-  const token = await mintSseToken(shop);
 
-  return { page, token };
+  return { page };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -54,23 +51,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function BackInStockPage() {
-  const { page, token } = useLoaderData<typeof loader>();
+  const { page } = useLoaderData<typeof loader>();
 
   const setLoaderData = useBackInStockStore((s) => s.setLoaderData);
   useEffect(() => { setLoaderData({ page }); }, [page, setLoaderData]);
 
-  const cachedData = useBackInStockStore((s) => s.data);
-  const cachedKey = useBackInStockStore((s) => s.lastKey);
-  const lastFetchedAt = useBackInStockStore((s) => s.lastFetchedAt);
-  const setSSEState = useBackInStockStore((s) => s.setSSEState);
-  useCachedSSEData<BackInStockData>(
+  useSSECacheStore<BackInStockData, BackInStockStore>(
+    useBackInStockStore,
     `${page}`,
-    () => `/api/back-in-stock-stream?token=${encodeURIComponent(token)}&page=${page}`,
+    () => `/api/back-in-stock-stream?page=${page}`,
     "back-in-stock",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
   );
 
   const storeError = useBackInStockStore((s) => s.error);

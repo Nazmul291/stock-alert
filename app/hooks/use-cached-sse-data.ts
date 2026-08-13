@@ -11,13 +11,14 @@ import { useLiveEventsStore } from "../stores/live-events-store";
 // zero network/DB calls.
 //
 // `key` is deliberately a caller-supplied identity string, NOT the literal
-// fetch URL: every one of these routes embeds a freshly-minted, short-lived
-// auth token in the URL, and that token rotates on every page mount (each
-// page's loader reruns per navigation). Comparing raw URLs would treat that
-// token rotation as "the dataset changed" and refetch on every single visit
-// — exactly the redundant-call problem this hook exists to eliminate. `key`
-// should describe only what's actually being requested (e.g. "" for a
-// param-less page, or `${search}|${filter}|${after}` for a paginated one).
+// fetch URL: the URL passed to buildUrl() gets a fresh cache-busting query
+// param appended on every single fetch attempt (see the `bustedUrl` useMemo
+// below), specifically so it's never reused byte-for-byte across attempts.
+// Comparing raw URLs would treat that per-attempt uniqueness as "the dataset
+// changed" and refetch on every single visit — exactly the redundant-call
+// problem this hook exists to eliminate. `key` should describe only what's
+// actually being requested (e.g. "" for a param-less page, or
+// `${search}|${filter}|${after}` for a paginated one).
 //
 // `lastFetchedAt` is stamped (via the `fetchedAt` useMemo below) at the
 // moment a fetch is decided on, before it actually starts — not after it
@@ -44,14 +45,13 @@ export function useCachedSSEData<T>(
   const isStale = cachedData === null || key !== cachedKey || liveVersion > lastFetchedAt;
 
   const url = isStale ? buildUrl() : null;
-  // Cache-busted in addition to the token already making each request
-  // unique-ish: an intermediate cache (e.g. a CDN/proxy in front of the app)
-  // can end up storing and replaying a response for a given URL regardless
-  // of Cache-Control headers, and since this URL is deliberately reused
-  // across every refetch within a page mount (see the `key` note above),
-  // that would keep re-serving one mount's very first response forever.
-  // Appending a fresh, unique query param per fetch attempt makes that
-  // structurally impossible, whatever the cache's actual behavior is.
+  // Cache-busted because an intermediate cache (e.g. a CDN/proxy in front of
+  // the app) can end up storing and replaying a response for a given URL
+  // regardless of Cache-Control headers, and buildUrl() otherwise returns
+  // the exact same URL for every refetch within a page mount (see the `key`
+  // note above) — that would keep re-serving one mount's very first response
+  // forever. Appending a fresh, unique query param per fetch attempt makes
+  // that structurally impossible, whatever the cache's actual behavior is.
   // Computed together with fetchedAt (not two separate useMemo calls) so
   // they always describe the exact same fetch attempt.
   //

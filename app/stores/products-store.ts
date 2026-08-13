@@ -3,6 +3,7 @@ import type { ProductsData } from "../lib/products-data.server";
 import type { ProductRow, OptimisticPatch, VariantStatusRow } from "../components/products/ProductEditModal";
 import { rollupVariantStatuses } from "../components/products/ProductEditModal";
 import { assertClientOnly } from "./assert-client-only";
+import { createSSECacheSlice, type SSECacheSlice } from "./sse-cache-slice";
 
 // Recomputes a product row's rolled-up fields from its (already-updated)
 // variants array — shared by patchProduct (edit-modal saves) and
@@ -103,18 +104,12 @@ function applyInventoryDeltaToProduct(p: ProductRow, delta: InventoryDelta): Pro
   return rollupFromVariants(p, variants);
 }
 
-type ProductsStore = {
+export type ProductsStore = SSECacheSlice<ProductsData> & {
   search: string;
   filter: string;
   after: string | null;
   prev: string;
-  data: ProductsData | null;
-  error: string | null;
-  retry: (() => void) | null;
-  lastFetchedAt: number;
-  lastKey: string | null;
   setLoaderData: (fields: { search: string; filter: string; after: string | null; prev: string }) => void;
-  setSSEState: (state: { data: ProductsData | null; error: string | null; retry: () => void; lastFetchedAt: number; lastKey: string | null }) => void;
   // Applies a just-saved edit-modal patch directly onto the store's copy of
   // the product, so ProductsTable (which reads `products` straight from
   // here) reflects the change immediately — there's no separate
@@ -127,23 +122,15 @@ type ProductsStore = {
   applyInventoryDelta: (delta: InventoryDelta) => void;
 };
 
-export const useProductsStore = create<ProductsStore>((set, get) => ({
+export const useProductsStore = create<ProductsStore>()((set, get, api) => ({
+  ...createSSECacheSlice<ProductsData, ProductsStore>("useProductsStore")(set, get, api),
   search: "",
   filter: "all",
   after: null,
   prev: "",
-  data: null,
-  error: null,
-  retry: null,
-  lastFetchedAt: 0,
-  lastKey: null,
   setLoaderData: (fields) => {
     assertClientOnly("useProductsStore", "setLoaderData");
     set(fields);
-  },
-  setSSEState: (state) => {
-    assertClientOnly("useProductsStore", "setSSEState");
-    set(state);
   },
   applyOptimisticPatch: (productId, patch) => {
     assertClientOnly("useProductsStore", "applyOptimisticPatch");

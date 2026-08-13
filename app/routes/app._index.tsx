@@ -2,17 +2,16 @@ import { useEffect, useState } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useActionData, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { mintSseToken } from "../lib/sse-token.server";
 import { getCachedSettings, getCachedShopEmail } from "../lib/shop-cache.server";
 import { getWizardProgress } from "../lib/wizard-progress.server";
 import { requestPlanSubscription } from "../lib/billing-request.server";
 import type { PlanKey } from "../lib/billing-plans";
 import type { DashboardData } from "../lib/dashboard-data.server";
-import { useDashboardStore } from "../stores/dashboard-store";
+import { useDashboardStore, type DashboardStore } from "../stores/dashboard-store";
 import { useWizardProgressStore } from "../stores/wizard-progress-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { SetupChecklist } from "../components/dashboard/SetupChecklist";
@@ -31,10 +30,10 @@ import { OnboardingStepIndicator } from "../components/onboarding/OnboardingStep
 import { PlanSelectionStep } from "../components/billing/PlanSelectionStep";
 
 // Only the auth check blocks the response — dashboard data is fetched entirely
-// in the background by api.dashboard-stream.ts, identified by a short-lived
-// token (EventSource can't carry the session-token auth header), and pushed to
-// the client over SSE the moment it's ready. loadDashboardData itself lives in
-// app/lib/dashboard-data.server.ts (not here) — React Router only strips
+// in the background by api.dashboard-stream.ts (authenticated the same way as
+// this loader, via App Bridge's automatic session-token fetch header) and
+// pushed to the client the moment it's ready. loadDashboardData itself lives
+// in app/lib/dashboard-data.server.ts (not here) — React Router only strips
 // server-only code from `loader`/`action`/`headers`/`middleware`, so any other
 // export from a route file (like a plain helper function) gets pulled into the
 // client bundle too, dragging in server-only modules like db.server with it.
@@ -54,8 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // that's the steady-state case (every dashboard load after setup).
   const needsOnboardingData = !progress.onboardingDone;
 
-  const [token, settings, ownerEmail] = await Promise.all([
-    mintSseToken(shop),
+  const [settings, ownerEmail] = await Promise.all([
     needsOnboardingData ? getCachedSettings(shop) : Promise.resolve(null),
     needsOnboardingData ? getCachedShopEmail(shop) : Promise.resolve(null),
   ]);
@@ -75,7 +73,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     : null;
 
-  return { shop, token, progress, shopInfo, existingSettings };
+  return { shop, progress, shopInfo, existingSettings };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -142,7 +140,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Dashboard() {
-  const { shop, token, progress: loaderProgress, shopInfo, existingSettings } = useLoaderData<typeof loader>();
+  const { shop, progress: loaderProgress, shopInfo, existingSettings } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
   // Hydrate the shared store from this route's own loader data on every
@@ -203,7 +201,7 @@ export default function Dashboard() {
     );
   }
 
-  return <DashboardShell shop={shop} token={token} />;
+  return <DashboardShell shop={shop} />;
 }
 
 // Split out from Dashboard() so its dashboard-data SSE connection (which
@@ -211,23 +209,11 @@ export default function Dashboard() {
 // actually done — Dashboard()'s early-return branches above never mount
 // this, so a merchant still on the terms/onboarding/plan steps costs
 // nothing on the dashboard-stream endpoint.
-function DashboardShell({ shop, token }: { shop: string; token: string }) {
+function DashboardShell({ shop }: { shop: string }) {
   const setLoaderData = useDashboardStore((s) => s.setLoaderData);
   useEffect(() => { setLoaderData({ shop }); }, [shop, setLoaderData]);
 
-  const cachedData = useDashboardStore((s) => s.data);
-  const cachedKey = useDashboardStore((s) => s.lastKey);
-  const lastFetchedAt = useDashboardStore((s) => s.lastFetchedAt);
-  const setSSEState = useDashboardStore((s) => s.setSSEState);
-  useCachedSSEData<DashboardData>(
-    "",
-    () => `/api/dashboard-stream?token=${encodeURIComponent(token)}`,
-    "dashboard",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
-  );
+  useSSECacheStore<DashboardData, DashboardStore>(useDashboardStore, "", () => `/api/dashboard-stream`, "dashboard");
 
   const retry = useDashboardStore((s) => s.retry);
   const storeError = useDashboardStore((s) => s.error);

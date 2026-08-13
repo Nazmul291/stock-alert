@@ -4,14 +4,13 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
-import { mintSseToken } from "../lib/sse-token.server";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { canUseFeature } from "../lib/plan-limits";
 import { createSupplier } from "../lib/supplier.server";
 import { createPurchaseOrder } from "../lib/purchase-order.server";
 import { PRODUCT_INVENTORY_QUERY, INVENTORY_ITEM_UPDATE_MUTATION, METAFIELDS_SET_MUTATION, METAFIELDS_DELETE_MUTATION } from "../lib/graphql";
 import type { ProductDetailData } from "../lib/product-detail.server";
-import { useProductDetailStore } from "../stores/product-detail-store";
+import { useProductDetailStore, type ProductDetailStore } from "../stores/product-detail-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { ProductDetailHeader } from "../components/products/ProductDetailHeader";
 import { ProductConfigureCard } from "../components/products/ProductConfigureCard";
@@ -20,19 +19,19 @@ import { ProductPurchaseOrdersList } from "../components/products/ProductPurchas
 import { ProductHistoryTimeline } from "../components/products/ProductHistoryTimeline";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
 
-// Only mints a token and hands off to api.product-detail-stream.ts for the
-// actual DB/Shopify-API work — matches every other page in this app
-// (Products list, Dashboard, Settings, etc.), instead of blocking the
-// document response on getProductDetail directly. See product-detail-store.ts.
+// Only the auth check + plan lookup block the response — hands off to
+// api.product-detail-stream.ts (authenticated the same way as this loader,
+// via App Bridge's automatic session-token fetch header) for the actual
+// DB/Shopify-API work, matching every other page in this app (Products list,
+// Dashboard, Settings, etc.) instead of blocking the document response on
+// getProductDetail directly. See product-detail-store.ts.
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const shop = session.shop;
-  const storeSession = await getCachedSession(shop);
+  const storeSession = await getCachedSession(session.shop);
   const plan = storeSession?.plan ?? "basic";
   const productId = params.productId as string;
-  const token = await mintSseToken(shop);
 
-  return { productId, plan, token };
+  return { productId, plan };
 };
 
 type InventoryItemUpdateResponse = {
@@ -297,20 +296,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function ProductDetailPage() {
-  const { productId, plan, token } = useLoaderData<typeof loader>();
+  const { productId, plan } = useLoaderData<typeof loader>();
 
-  const cachedData = useProductDetailStore((s) => s.data);
-  const cachedKey = useProductDetailStore((s) => s.lastKey);
-  const lastFetchedAt = useProductDetailStore((s) => s.lastFetchedAt);
-  const setSSEState = useProductDetailStore((s) => s.setSSEState);
-  useCachedSSEData<ProductDetailData>(
+  useSSECacheStore<ProductDetailData, ProductDetailStore>(
+    useProductDetailStore,
     productId,
-    () => `/api/product-detail-stream?token=${encodeURIComponent(token)}&productId=${encodeURIComponent(productId)}`,
+    () => `/api/product-detail-stream?productId=${encodeURIComponent(productId)}`,
     "product-detail",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
   );
 
   const storeError = useProductDetailStore((s) => s.error);

@@ -1,31 +1,31 @@
 import { randomUUID } from "crypto";
 import { redis } from "./redis.server";
 
-// EventSource can't send an Authorization header, so SSE routes can't reuse
-// Shopify's normal session-token auth. A token minted during the page's
-// already-authenticated loader call lets the SSE route trust the shop
-// without exposing a raw, guessable shop domain as the auth check. Also reused
-// for third-party OAuth handoffs (e.g. Slack "Connect" links) that break out of
-// the embedded iframe to a plain top-level navigation — same problem, same fix
-// (those callers pass their own short ttlSeconds explicitly).
+// EventSource can't send an Authorization header, so routes that genuinely
+// stream multiple events over a real EventSource connection can't reuse
+// Shopify's normal session-token auth the way a plain fetch()-based route
+// can (see sse.server.ts's authenticatedSingleShotJSON for that path). A
+// token minted during the page's already-authenticated loader call lets
+// those routes — api.live-stream.ts, via api.live-token.ts — trust the shop
+// without exposing a raw, guessable shop domain as the auth check.
 //
-// This default (used by dashboard/products/etc.'s page loaders) has to
-// outlive the page, not just the initial load: useCachedSSEData reuses the
-// one token minted at mount for every background refetch a live event
-// triggers for as long as the user stays on that page, and silently drops a
-// refetch whose token has expired rather than surfacing an error (see its
-// comments) — so a too-short TTL here means live updates (e.g. a product
-// sync's dashboard refresh) quietly stop working for anyone who's had the
-// page open longer than this, with no visible sign anything's wrong.
-const TTL_SECONDS = 30 * 60;
-
+// Also reused for third-party OAuth handoffs (Slack/Asana "Connect" links,
+// in slack-oauth.server.ts/asana-oauth.server.ts) that break out of the
+// embedded iframe to a plain top-level navigation — same problem (no
+// same-origin fetch to attach a session-token header to), same fix.
+//
+// Every current caller passes its own ttlSeconds explicitly (15min for the
+// live-stream token, 10min for OAuth handoffs), so there's deliberately no
+// default here — a silently-reused default TTL is exactly the kind of thing
+// that goes stale unnoticed once a new caller's actual lifetime need differs
+// from it.
 const memCache = new Map<string, { shop: string; expiresAt: number }>();
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of memCache) if (now > v.expiresAt) memCache.delete(k);
 }, 30_000).unref?.();
 
-export async function mintSseToken(shop: string, ttlSeconds: number = TTL_SECONDS): Promise<string> {
+export async function mintSseToken(shop: string, ttlSeconds: number): Promise<string> {
   const token = randomUUID();
   const key = `sse-token:${token}`;
   if (redis) {

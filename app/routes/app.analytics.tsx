@@ -1,12 +1,10 @@
 import type { LoaderFunctionArgs, HeadersFunction } from "react-router";
-import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { mintSseToken } from "../lib/sse-token.server";
 import type { AnalyticsData } from "../lib/analytics-data.server";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
-import { useAnalyticsStore } from "../stores/analytics-store";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
+import { useAnalyticsStore, type AnalyticsStore } from "../stores/analytics-store";
 import { AnalyticsStatCards } from "../components/analytics/AnalyticsStatCards";
 import { AlertTypeBreakdown } from "../components/analytics/AlertTypeBreakdown";
 import { ChannelBreakdown } from "../components/analytics/ChannelBreakdown";
@@ -17,33 +15,16 @@ import { CoreLimitedEditionBreakdown } from "../components/analytics/CoreLimited
 import { DeadStockSection } from "../components/analytics/DeadStockSection";
 
 // Only the auth check blocks the response — the analytics query runs entirely
-// in the background via api.analytics-stream.ts and is pushed to the client
-// over SSE once it resolves. loadAnalyticsData itself lives in
-// app/lib/analytics-data.server.ts, not here — see app._index.tsx's loader
-// comment for why a plain exported function can't stay in a route file.
+// in the background via api.analytics-stream.ts (authenticated the same way
+// as this loader, via App Bridge's automatic session-token fetch header) and
+// is pushed to the client once it resolves.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
-  const token = await mintSseToken(shop);
-  return { token };
+  await authenticate.admin(request);
+  return {};
 };
 
 export default function AnalyticsPage() {
-  const { token } = useLoaderData<typeof loader>();
-
-  const cachedData = useAnalyticsStore((s) => s.data);
-  const cachedKey = useAnalyticsStore((s) => s.lastKey);
-  const lastFetchedAt = useAnalyticsStore((s) => s.lastFetchedAt);
-  const setSSEState = useAnalyticsStore((s) => s.setSSEState);
-  useCachedSSEData<AnalyticsData>(
-    "",
-    () => `/api/analytics-stream?token=${encodeURIComponent(token)}`,
-    "analytics",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
-  );
+  useSSECacheStore<AnalyticsData, AnalyticsStore>(useAnalyticsStore, "", () => `/api/analytics-stream`, "analytics");
 
   // Gate on the store, not a local hook result — see the rule established
   // in dashboard-store.ts.

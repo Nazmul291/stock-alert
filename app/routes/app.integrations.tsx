@@ -10,12 +10,11 @@ import { revokeSlackToken, mintSlackOAuthState } from "../lib/slack-oauth.server
 import { mintAsanaOAuthState } from "../lib/asana-oauth.server";
 import { sendWhatsAppTemplate } from "../lib/whatsapp.server";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { mintSseToken } from "../lib/sse-token.server";
 import type { IntegrationsData } from "../lib/integrations-data.server";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { useLiveEventsStore } from "../stores/live-events-store";
 import { TestResultBanner, type TestResult } from "../components/IntegrationControls";
-import { useIntegrationsStore } from "../stores/integrations-store";
+import { useIntegrationsStore, type IntegrationsStore } from "../stores/integrations-store";
 import { EmailIntegrationSection } from "../components/integrations/EmailIntegrationSection";
 import { SlackIntegrationSection } from "../components/integrations/SlackIntegrationSection";
 import { WhatsAppIntegrationSection } from "../components/integrations/WhatsAppIntegrationSection";
@@ -28,22 +27,22 @@ import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
 import { canUseFeature } from "../lib/plan-limits";
 import { EMAIL_RE } from "../lib/validation";
 
-// Only the auth check blocks the response — integrations data loads entirely in
-// the background via api.integrations-stream.ts and is pushed to the client
-// over SSE once ready. loadIntegrationsData itself lives in
-// app/lib/integrations-data.server.ts, not here — see app._index.tsx's loader
-// comment for why a plain exported function can't stay in a route file.
+// Only the auth check blocks the response — integrations data loads entirely
+// in the background via api.integrations-stream.ts (authenticated the same
+// way as this loader, via App Bridge's automatic session-token fetch header)
+// and is pushed to the client once ready.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  const token = await mintSseToken(shop);
-  // Longer-lived token for the "Connect to Slack" link, encoding `host`
-  // alongside `shop` — see slack-oauth.server.ts for why both are needed at
-  // the end of the OAuth round-trip.
+  // Longer-lived token for the "Connect to Slack"/"Connect to Asana" links,
+  // encoding `host` alongside `shop` — those break out of the embedded iframe
+  // to a plain top-level navigation for the OAuth round-trip, which can't
+  // carry a session-token header, so they still need their own token — see
+  // slack-oauth.server.ts for why both shop and host are needed there.
   const host = new URL(request.url).searchParams.get("host") ?? "";
   const slackConnectToken = await mintSlackOAuthState({ shop, host });
   const asanaConnectToken = await mintAsanaOAuthState({ shop, host });
-  return { token, slackConnectToken, asanaConnectToken };
+  return { slackConnectToken, asanaConnectToken };
 };
 
 // Recomputed after every mutation intent below (each one only touches its own
@@ -361,7 +360,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function IntegrationsPage() {
-  const { token, slackConnectToken, asanaConnectToken } = useLoaderData<typeof loader>();
+  const { slackConnectToken, asanaConnectToken } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const slackError = searchParams.get("slack_error") === "1";
   const asanaError = searchParams.get("asana_error") === "1";
@@ -369,19 +368,7 @@ export default function IntegrationsPage() {
   const setLoaderData = useIntegrationsStore((s) => s.setLoaderData);
   useEffect(() => { setLoaderData({ slackConnectToken, asanaConnectToken }); }, [slackConnectToken, asanaConnectToken, setLoaderData]);
 
-  const cachedData = useIntegrationsStore((s) => s.data);
-  const cachedKey = useIntegrationsStore((s) => s.lastKey);
-  const lastFetchedAt = useIntegrationsStore((s) => s.lastFetchedAt);
-  const setSSEState = useIntegrationsStore((s) => s.setSSEState);
-  useCachedSSEData<IntegrationsData>(
-    "",
-    () => `/api/integrations-stream?token=${encodeURIComponent(token)}`,
-    "integrations",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
-  );
+  useSSECacheStore<IntegrationsData, IntegrationsStore>(useIntegrationsStore, "", () => `/api/integrations-stream`, "integrations");
 
   // Gate on the store, not a local hook result — see the rule established
   // in dashboard-store.ts.

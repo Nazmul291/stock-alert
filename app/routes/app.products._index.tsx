@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSubmit, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -17,9 +17,8 @@ import { ProductsToolbar } from "../components/products/ProductsToolbar";
 import { ProductsTable } from "../components/products/ProductsTable";
 import { ProductsBulkActionBar } from "../components/products/ProductsBulkActionBar";
 import { ProductsPagination } from "../components/products/ProductsPagination";
-import { mintSseToken } from "../lib/sse-token.server";
 import type { ProductsData } from "../lib/products-data.server";
-import { useProductsStore } from "../stores/products-store";
+import { useProductsStore, type ProductsStore } from "../stores/products-store";
 import type { InventoryStatus } from "@prisma/client";
 
 type AdminClient = Awaited<ReturnType<typeof authenticate.admin>>["admin"];
@@ -167,13 +166,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const prev = url.searchParams.get("prev") ?? "";
   const filter = url.searchParams.get("filter") ?? "all";
 
-  // This is the actual page render. The Shopify product fetch + DB lookups run
-  // entirely in the background via api.products-stream.ts (which re-derives its
-  // own admin client from the shop via unauthenticated.admin, since EventSource
-  // can't carry this request's session-token auth) and stream to the client
-  // over SSE once ready.
-  const token = await mintSseToken(shop);
-  return { search, filter, after, prev, token };
+  // This is the actual page render — the Shopify product fetch + DB lookups
+  // run in the background via api.products-stream.ts and stream back to the
+  // client once ready, instead of blocking this document response on them.
+  return { search, filter, after, prev };
 };
 
 
@@ -427,24 +423,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function ProductsPage() {
-  const { search, filter, after, prev, token } = useLoaderData<typeof loader>() as {
-    search: string; filter: string; after: string | null; prev: string; token: string;
+  const { search, filter, after, prev } = useLoaderData<typeof loader>() as {
+    search: string; filter: string; after: string | null; prev: string;
   };
   const setLoaderData = useProductsStore((s) => s.setLoaderData);
   useEffect(() => { setLoaderData({ search, filter, after, prev }); }, [search, filter, after, prev, setLoaderData]);
 
-  const cachedData = useProductsStore((s) => s.data);
-  const cachedKey = useProductsStore((s) => s.lastKey);
-  const lastFetchedAt = useProductsStore((s) => s.lastFetchedAt);
-  const setSSEState = useProductsStore((s) => s.setSSEState);
-  useCachedSSEData<ProductsData>(
+  useSSECacheStore<ProductsData, ProductsStore>(
+    useProductsStore,
     `${search}|${filter}|${after ?? ""}`,
-    () => `/api/products-stream?token=${encodeURIComponent(token)}&search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
+    () => `/api/products-stream?search=${encodeURIComponent(search)}&filter=${encodeURIComponent(filter)}${after ? `&after=${encodeURIComponent(after)}` : ""}`,
     "products",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
   );
 
   // Gate on the store, not a local hook result — see the rule established

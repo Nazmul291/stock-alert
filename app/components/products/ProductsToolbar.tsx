@@ -6,7 +6,7 @@ const FILTER_TABS = [
   { key: "all",           label: "All Products" },
   { key: "out_of_stock",  label: "Out of Stock" },
   { key: "low_stock",     label: "Low Stock" },
-  { key: "tracked",       label: "Tracked" },
+  { key: "dead_stock",    label: "Dead Stock" },
   { key: "not_tracked",   label: "Not Tracked" },
 ];
 
@@ -19,6 +19,8 @@ export function ProductsToolbar({ onExportCsv, exporting }: {
   const prev = useProductsStore((s) => s.prev);
   const plan = useProductsStore((s) => s.data?.plan) ?? "basic";
   const canManagePurchaseOrders = canUseFeature(plan, "purchaseOrders");
+  const canDeadStock = canUseFeature(plan, "deadStockAlerts");
+  const filterTabs = FILTER_TABS.filter((tab) => tab.key !== "dead_stock" || canDeadStock);
   const buildUrl = (params: Record<string, string | null>) => buildProductsUrl({ search, filter, prev }, params);
 
   return (
@@ -45,7 +47,7 @@ export function ProductsToolbar({ onExportCsv, exporting }: {
 
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8, marginBottom: 0 }}>
         <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e5e7eb", flex: 1 }}>
-          {FILTER_TABS.map((tab) => (
+          {filterTabs.map((tab) => (
             <Link
               key={tab.key}
               to={buildUrl({ filter: tab.key === "all" ? null : tab.key, after: null, prev: null })}

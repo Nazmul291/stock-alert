@@ -5,10 +5,9 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { SSEErrorRetry } from "../components/Skeleton";
-import { mintSseToken } from "../lib/sse-token.server";
 import type { AlertsData } from "../lib/alert-history-data.server";
-import { useCachedSSEData } from "../hooks/use-cached-sse-data";
-import { useAlertHistoryStore } from "../stores/alert-history-store";
+import { useSSECacheStore } from "../hooks/use-sse-cache-store";
+import { useAlertHistoryStore, type AlertHistoryStore } from "../stores/alert-history-store";
 import { AlertHistoryToolbar } from "../components/alert-history/AlertHistoryToolbar";
 import { AlertsTable } from "../components/alert-history/AlertsTable";
 
@@ -20,16 +19,14 @@ import { AlertsTable } from "../components/alert-history/AlertsTable";
 // see app._index.tsx's loader comment for why a plain exported function can't
 // stay in a route file.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
+  await authenticate.admin(request);
   const url = new URL(request.url);
 
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1") || 1);
   const typeFilter = url.searchParams.get("type") ?? "all";
   const productSearch = url.searchParams.get("product") ?? "";
-  const token = await mintSseToken(shop);
 
-  return { page, typeFilter, productSearch, token };
+  return { page, typeFilter, productSearch };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -53,23 +50,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function AlertHistoryPage() {
-  const { typeFilter, productSearch, page, token } = useLoaderData<typeof loader>();
+  const { typeFilter, productSearch, page } = useLoaderData<typeof loader>();
 
   const setLoaderData = useAlertHistoryStore((s) => s.setLoaderData);
   useEffect(() => { setLoaderData({ page, typeFilter, productSearch }); }, [page, typeFilter, productSearch, setLoaderData]);
 
-  const cachedData = useAlertHistoryStore((s) => s.data);
-  const cachedKey = useAlertHistoryStore((s) => s.lastKey);
-  const lastFetchedAt = useAlertHistoryStore((s) => s.lastFetchedAt);
-  const setSSEState = useAlertHistoryStore((s) => s.setSSEState);
-  useCachedSSEData<AlertsData>(
+  useSSECacheStore<AlertsData, AlertHistoryStore>(
+    useAlertHistoryStore,
     `${page}|${typeFilter}|${productSearch}`,
-    () => `/api/alert-history-stream?token=${encodeURIComponent(token)}&page=${page}&type=${encodeURIComponent(typeFilter)}&product=${encodeURIComponent(productSearch)}`,
+    () => `/api/alert-history-stream?page=${page}&type=${encodeURIComponent(typeFilter)}&product=${encodeURIComponent(productSearch)}`,
     "alerts",
-    cachedData,
-    cachedKey,
-    lastFetchedAt,
-    setSSEState,
   );
 
   const storeError = useAlertHistoryStore((s) => s.error);

@@ -12,8 +12,10 @@ Real-time inventory monitoring & back-in-stock automation for Shopify
 | **Multi-Channel Alerts** | Email, WhatsApp, one-click Slack Connect (Pro), and outbound webhooks (Zapier/Make/ERP, Pro) — plus daily/weekly digest emails |
 | **Automation & Marketing** | Native Shopify Flow triggers (low stock, out of stock, restock) for everyone; Klaviyo integration (Pro) — store alerts plus per-customer back-in-stock events for real marketing flows; Asana integration (Pro) — auto-create tasks the moment a product goes low or out of stock |
 | **Back-in-Stock Widget** | No-code "Notify Me" form on the storefront, auto-emails customers the second stock returns |
-| **Analytics** | 30-day trends, alert breakdowns, top at-risk products, stock health overview |
-| **White-Label Emails** | Custom logo, brand color, sender name on all alert emails (Pro) |
+| **Analytics** | 30-day trends, alert breakdowns, top at-risk products, stock health overview; dead-stock alerts and Core vs. Limited-Edition report sections (Enterprise) |
+| **White-Label Emails** | Custom logo, brand color, sender name on all alert emails (Pro+) |
+| **Priority Support** | Faster response times on Pro and Enterprise |
 | **Built for Scale** | Per-product thresholds, collection/tag filtering, bulk actions, CSV export |
+| **Suppliers & Purchase Orders** | Manage suppliers, auto-suggested PO line items from tracked inventory, and reorder points by vendor lead time (Enterprise) |
 
-**Pricing:** Basic $3.99/mo (1,000 products, email + Shopify Flow) · Pro $9.99/mo (10,000 products, adds Slack Connect, Klaviyo, outbound webhooks, branding) — **30-day free trial on both.**
+**Pricing:** Basic $3.99/mo (1,000 products, email + Shopify Flow) · Pro $9.99/mo (10,000 products, adds Slack Connect, Klaviyo, outbound webhooks, branding) · Enterprise $19.99/mo (unlimited products, adds suppliers, purchase orders, dead-stock alerts) — **7-day free trial on all plans.**
