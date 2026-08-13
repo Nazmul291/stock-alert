@@ -3,6 +3,7 @@ import { useFetcher, Link } from "react-router";
 import type { ProductDetailVariantForPo } from "../../lib/product-detail.server";
 import { useLiveEventsStore } from "../../stores/live-events-store";
 import { useProductDetailStore } from "../../stores/product-detail-store";
+import { SkeletonBlock } from "../Skeleton";
 
 type SupplierOption = { id: string; name: string };
 type CreatedPoLine = {
@@ -309,6 +310,21 @@ export function ProductCreatePoCard({
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+// Shown instead of the real card while product-detail data is still
+// loading — same reasoning as ProductConfigureCardSkeleton: this form's
+// per-variant quantity/cost inputs are seeded from `variants`/`suppliers`
+// only once, on mount, so it can't be mounted early with placeholder props.
+export function ProductCreatePoCardSkeleton() {
+  return (
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+      <SkeletonBlock width={180} height={16} />
+      <SkeletonBlock width="100%" height={34} borderRadius={6} />
+      <SkeletonBlock width="100%" height={80} borderRadius={8} />
+      <SkeletonBlock width={140} height={34} borderRadius={6} />
     </div>
   );
 }

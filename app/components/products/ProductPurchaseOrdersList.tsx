@@ -54,10 +54,34 @@ function PendingPoRow({ po, suppliers, productTitle }: { po: ProductPurchaseOrde
   );
 }
 
-export function ProductPurchaseOrdersList({ purchaseOrders, suppliers, productTitle }: { purchaseOrders: ProductPurchaseOrderRow[]; suppliers: { id: string; name: string }[]; productTitle: string }) {
+// Skeleton row rendered instead of PendingPoRow while loading — a plain,
+// non-interactive row (no modal, no live-events subscription) so there's
+// nothing real for the placeholder "Edit" action to open.
+function PendingPoSkeletonRow({ id }: { id: string }) {
+  return (
+    <tr key={id} style={{ borderBottom: "1px solid #f9fafb" }}>
+      <td style={{ padding: "8px" }}><span className="skeleton-text">#0000</span></td>
+      <td style={{ padding: "8px" }}><span className="skeleton-text" style={{ padding: "2px 8px", borderRadius: 12 }}>Status</span></td>
+      <td style={{ padding: "8px" }}><span className="skeleton-text">Supplier name</span></td>
+      <td style={{ padding: "8px" }}><span className="skeleton-text">00</span></td>
+      <td style={{ padding: "8px" }}><span className="skeleton-text">00</span></td>
+      <td style={{ padding: "8px" }}><span className="skeleton-text">Jan 1, 2026</span></td>
+      <td style={{ padding: "8px" }}><span className="skeleton-text">Edit</span></td>
+    </tr>
+  );
+}
+
+const PLACEHOLDER_ROW_IDS = ["skeleton-0", "skeleton-1"];
+
+export function ProductPurchaseOrdersList({ purchaseOrders, suppliers, productTitle, loading = false }: {
+  purchaseOrders: ProductPurchaseOrderRow[];
+  suppliers: { id: string; name: string }[];
+  productTitle: string;
+  loading?: boolean;
+}) {
   const pending = purchaseOrders.filter((po) => PENDING_STATUSES.has(po.status));
 
-  if (pending.length === 0) {
+  if (!loading && pending.length === 0) {
     return <p style={{ fontSize: 13, color: "#9ca3af" }}>No pending purchase orders for this product.</p>;
   }
 
@@ -72,7 +96,9 @@ export function ProductPurchaseOrdersList({ purchaseOrders, suppliers, productTi
           </tr>
         </thead>
         <tbody>
-          {pending.map((po) => <PendingPoRow key={po.id} po={po} suppliers={suppliers} productTitle={productTitle} />)}
+          {loading
+            ? PLACEHOLDER_ROW_IDS.map((id) => <PendingPoSkeletonRow key={id} id={id} />)
+            : pending.map((po) => <PendingPoRow key={po.id} po={po} suppliers={suppliers} productTitle={productTitle} />)}
         </tbody>
       </table>
     </div>

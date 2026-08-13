@@ -16,7 +16,25 @@ const PO_EVENT_LABEL: Record<string, string> = {
   received: "Items received",
 };
 
-export function ProductHistoryTimeline({ history }: { history: ProductHistoryEntry[] }) {
+const PLACEHOLDER_ENTRY_IDS = ["skeleton-0", "skeleton-1", "skeleton-2"];
+
+export function ProductHistoryTimeline({ history, loading = false }: { history: ProductHistoryEntry[]; loading?: boolean }) {
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {PLACEHOLDER_ENTRY_IDS.map((id) => (
+          <div key={id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: "10px 14px" }}>
+            <div>
+              <p className="skeleton-text" style={{ margin: 0, fontWeight: 600, fontSize: 13 }}>Event title</p>
+              <p className="skeleton-text" style={{ margin: "2px 0 0", fontSize: 12 }}>Event detail</p>
+            </div>
+            <span className="skeleton-text" style={{ fontSize: 12, padding: "2px 8px", borderRadius: 12 }}>Jan 1, 12:00 pm</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   if (history.length === 0) {
     return <p style={{ fontSize: 13, color: "#9ca3af" }}>No activity yet — stock alerts and purchase order events for this product will show up here.</p>;
   }

@@ -4,6 +4,7 @@ import type { ProductRow } from "./ProductEditModal";
 import type { ProductDetailConfigure } from "../../lib/product-detail.server";
 import { UnsavedChangesBar } from "../UnsavedChangesBar";
 import { useLiveEventsStore } from "../../stores/live-events-store";
+import { SkeletonBlock } from "../Skeleton";
 
 type SaveResult = { success: true; message: string } | { error: string };
 
@@ -285,6 +286,25 @@ export function ProductConfigureCard({
       {isDirty && (
         <UnsavedChangesBar saving={saving} onDiscard={handleDiscard} onSave={handleSave} />
       )}
+    </div>
+  );
+}
+
+// Shown in the aside slot instead of the real card while product-detail data
+// is still loading. Unlike the rest of this page's skeletons, this can't be
+// the real ProductConfigureCard with placeholder props — its form state
+// (tracked/monitoring/etc.) is seeded from `product`/`configure` only once,
+// on mount, via useState's initial value, so mounting it early with fake
+// data would leave it stuck showing that fake state even after real data
+// arrives. A shape-only placeholder (SkeletonBlock, no real markup) avoids
+// that; the route swaps it for the real card once data lands.
+export function ProductConfigureCardSkeleton() {
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+      <SkeletonBlock width={140} height={16} />
+      {Array.from({ length: 4 }, (_, i) => (
+        <SkeletonBlock key={i} width="100%" height={52} borderRadius={8} />
+      ))}
     </div>
   );
 }
