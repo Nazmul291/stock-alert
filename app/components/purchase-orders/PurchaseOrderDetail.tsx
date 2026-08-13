@@ -6,11 +6,30 @@ export type PurchaseOrderDetailData = {
   poNumber: number;
   status: "draft" | "ordered" | "partially_received" | "received" | "cancelled";
   totalCost: number | null;
+  referenceNumber: string | null;
+  supplierNote: string | null;
+  terms: string | null;
+  tags: string[];
   sentToSupplierAt: string | null;
   orderedAt: string | null;
   receivedAt: string | null;
   createdAt: string;
-  supplier: { id: string; name: string; email: string | null };
+  supplier: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    contactName: string | null;
+    website: string | null;
+    address1: string | null;
+    address2: string | null;
+    city: string | null;
+    province: string | null;
+    zip: string | null;
+    country: string | null;
+    paymentTerms: string | null;
+    currency: string | null;
+  };
   lineItems: {
     id: string;
     variantId: string;
@@ -65,6 +84,10 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   const [receiveLocationEdits, setReceiveLocationEdits] = useState<Record<string, string>>(
     () => Object.fromEntries(po.lineItems.map((li) => [li.id, li.locations.length === 1 ? li.locations[0].id : ""])),
   );
+  const [referenceNumber, setReferenceNumber] = useState(po.referenceNumber ?? "");
+  const [supplierNote, setSupplierNote] = useState(po.supplierNote ?? "");
+  const [terms, setTerms] = useState(po.terms ?? "");
+  const [tagsInput, setTagsInput] = useState(po.tags.join(", "));
 
   useEffect(() => {
     if (actionFetcher.state === "idle" && actionFetcher.data?.success) {
@@ -103,6 +126,76 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
         <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
           <strong>Supplier:</strong> {po.supplier.name} {po.supplier.email ? `(${po.supplier.email})` : "— no email on file"}
         </p>
+        {po.supplier.contactName && (
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#374151" }}>
+            <strong>Contact:</strong> {po.supplier.contactName}{po.supplier.phone ? ` · ${po.supplier.phone}` : ""}
+          </p>
+        )}
+        {(po.supplier.address1 || po.supplier.city || po.supplier.country) && (
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#374151" }}>
+            <strong>Address:</strong> {[po.supplier.address1, po.supplier.address2, po.supplier.city, po.supplier.province, po.supplier.zip, po.supplier.country].filter(Boolean).join(", ")}
+          </p>
+        )}
+        {po.supplier.website && (
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#374151" }}>
+            <strong>Website:</strong> <a href={po.supplier.website} target="_blank" rel="noreferrer">{po.supplier.website}</a>
+          </p>
+        )}
+        {(po.supplier.paymentTerms || po.supplier.currency) && (
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#374151" }}>
+            {po.supplier.paymentTerms && <><strong>Payment terms:</strong> {po.supplier.paymentTerms}</>}
+            {po.supplier.paymentTerms && po.supplier.currency ? " · " : ""}
+            {po.supplier.currency && <><strong>Currency:</strong> {po.supplier.currency}</>}
+          </p>
+        )}
+      </div>
+
+      <div style={{ marginBottom: 16, padding: "12px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+        <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 600, color: "#111827" }}>Purchase order details</p>
+        {isDraft ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Reference number</label>
+              <input
+                type="text" maxLength={255} value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)}
+                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13, boxSizing: "border-box" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Note to supplier</label>
+              <textarea
+                rows={2} maxLength={5000} value={supplierNote} onChange={(e) => setSupplierNote(e.target.value)}
+                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13, boxSizing: "border-box", resize: "vertical" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Terms</label>
+                <input
+                  type="text" value={terms} onChange={(e) => setTerms(e.target.value)}
+                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13, boxSizing: "border-box" }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Tags</label>
+                <input
+                  type="text" placeholder="Comma separated" value={tagsInput} onChange={(e) => setTagsInput(e.target.value)}
+                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13, boxSizing: "border-box" }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {po.referenceNumber && <p style={{ margin: "0 0 4px", fontSize: 13, color: "#374151" }}><strong>Reference:</strong> {po.referenceNumber}</p>}
+            {po.supplierNote && <p style={{ margin: "0 0 4px", fontSize: 13, color: "#374151" }}><strong>Note to supplier:</strong> {po.supplierNote}</p>}
+            {po.terms && <p style={{ margin: "0 0 4px", fontSize: 13, color: "#374151" }}><strong>Terms:</strong> {po.terms}</p>}
+            {po.tags.length > 0 && <p style={{ margin: 0, fontSize: 13, color: "#374151" }}><strong>Tags:</strong> {po.tags.join(", ")}</p>}
+            {!po.referenceNumber && !po.supplierNote && !po.terms && po.tags.length === 0 && (
+              <p style={{ margin: 0, fontSize: 13, color: "#9ca3af" }}>No additional details.</p>
+            )}
+          </>
+        )}
       </div>
 
       <div style={{ overflowX: "auto", marginBottom: 16 }}>
@@ -202,7 +295,18 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
                 quantityOrdered: Math.max(0, parseInt(lineEdits[li.id]?.quantityOrdered ?? "0") || 0),
                 unitCost: lineEdits[li.id]?.unitCost.trim() ? parseFloat(lineEdits[li.id].unitCost) : null,
               }));
-              editFetcher.submit({ intent: "update_line_items", lineItems: JSON.stringify(lineItems) }, { method: "post" });
+              const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
+              editFetcher.submit(
+                {
+                  intent: "update_line_items",
+                  lineItems: JSON.stringify(lineItems),
+                  referenceNumber,
+                  supplierNote,
+                  terms,
+                  tags: JSON.stringify(tags),
+                },
+                { method: "post" },
+              );
             }}
             style={btnStyle(busy, "#111827", "#fff")}
           >

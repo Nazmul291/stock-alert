@@ -229,6 +229,26 @@ model Supplier {
   phone        String?  @db.VarChar(30)
   leadTimeDays Int?     @map("lead_time_days")
   notes        String?
+  // Individual contact person at the supplier — distinct from `name`, which
+  // is the company/supplier's own name (shown everywhere else in the app —
+  // PO emails, lists, etc.).
+  contactName  String?  @map("contact_name") @db.VarChar(255)
+  website      String?  @db.VarChar(255)
+  address1     String?  @db.VarChar(255)
+  address2     String?  @db.VarChar(255)
+  city         String?  @db.VarChar(255)
+  province     String?  @db.VarChar(255)
+  zip          String?  @db.VarChar(30)
+  country      String?  @db.VarChar(255)
+  // Free text (e.g. "Net 30", "Due on receipt") rather than Shopify's fixed
+  // due-date/schedule system — this app has no invoicing/payment-scheduling
+  // of its own, so this is purely informational, shown on the PO/email for
+  // the merchant's own reference.
+  paymentTerms String?  @map("payment_terms") @db.VarChar(100)
+  // ISO 4217 code (e.g. "USD"). Falls back to "$" wherever displayed if
+  // unset — see email-templates.ts — since every existing PurchaseOrder
+  // predates this field and has no currency of its own to fall back to.
+  currency     String?  @db.VarChar(10)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -248,6 +268,15 @@ model PurchaseOrder {
   status                PurchaseOrderStatus @default(draft)
   totalCost             Float?              @map("total_cost")
   generatedFromForecast Boolean             @default(true) @map("generated_from_forecast")
+  // Merchant-facing fields mirroring Shopify's own native "Create purchase
+  // order" screen — all purely informational (this app has no invoicing of
+  // its own). `terms` defaults from the supplier's own paymentTerms at
+  // creation time if left blank, same as Shopify's "auto populate the
+  // payment information" note on the supplier form.
+  referenceNumber       String?             @map("reference_number") @db.VarChar(255)
+  supplierNote          String?             @map("supplier_note")
+  terms                 String?             @db.VarChar(100)
+  tags                  String[]            @default([])
   sentToSupplierAt      DateTime?           @map("sent_to_supplier_at") @db.Timestamptz
   orderedAt             DateTime?           @map("ordered_at") @db.Timestamptz
   receivedAt            DateTime?           @map("received_at") @db.Timestamptz

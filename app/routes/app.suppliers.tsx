@@ -43,6 +43,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     phone: s.phone,
     leadTimeDays: s.leadTimeDays,
     notes: s.notes,
+    contactName: s.contactName,
+    website: s.website,
+    address1: s.address1,
+    address2: s.address2,
+    city: s.city,
+    province: s.province,
+    zip: s.zip,
+    country: s.country,
+    paymentTerms: s.paymentTerms,
+    currency: s.currency,
     productCount: countBySupplier.get(s.id) ?? 0,
   }));
 
@@ -68,6 +78,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     phone: (form.get("phone") as string) ?? "",
     notes: (form.get("notes") as string) ?? "",
     leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
+    contactName: (form.get("contactName") as string) ?? "",
+    website: (form.get("website") as string) ?? "",
+    address1: (form.get("address1") as string) ?? "",
+    address2: (form.get("address2") as string) ?? "",
+    city: (form.get("city") as string) ?? "",
+    province: (form.get("province") as string) ?? "",
+    zip: (form.get("zip") as string) ?? "",
+    country: (form.get("country") as string) ?? "",
+    paymentTerms: (form.get("paymentTerms") as string) ?? "",
+    currency: (form.get("currency") as string) ?? "",
   };
 
   if (intent === "create_supplier") {

@@ -255,7 +255,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const result = await createSupplier(shop, {
       name: (form.get("name") as string) ?? "",
       email: (form.get("email") as string) ?? "",
+      phone: (form.get("phone") as string) ?? "",
       leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
+      contactName: (form.get("contactName") as string) ?? "",
+      website: (form.get("website") as string) ?? "",
+      address1: (form.get("address1") as string) ?? "",
+      address2: (form.get("address2") as string) ?? "",
+      city: (form.get("city") as string) ?? "",
+      province: (form.get("province") as string) ?? "",
+      zip: (form.get("zip") as string) ?? "",
+      country: (form.get("country") as string) ?? "",
+      paymentTerms: (form.get("paymentTerms") as string) ?? "",
+      currency: (form.get("currency") as string) ?? "",
     });
     return { ...result, intent };
   }

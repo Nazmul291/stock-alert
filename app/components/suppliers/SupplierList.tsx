@@ -7,6 +7,16 @@ export type SupplierRow = {
   phone: string | null;
   leadTimeDays: number | null;
   notes: string | null;
+  contactName: string | null;
+  website: string | null;
+  address1: string | null;
+  address2: string | null;
+  city: string | null;
+  province: string | null;
+  zip: string | null;
+  country: string | null;
+  paymentTerms: string | null;
+  currency: string | null;
   productCount: number;
 };
 
@@ -32,7 +42,7 @@ export function SupplierList({ suppliers, onEdit }: { suppliers: SupplierRow[]; 
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
         <thead>
           <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
-            {["Name", "Email", "Phone", "Lead time", "Products", "Actions"].map((label) => (
+            {["Name", "Contact", "Email", "Phone", "Location", "Lead time", "Products", "Actions"].map((label) => (
               <th key={label} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "#374151", whiteSpace: "nowrap" }}>
                 {label}
               </th>
@@ -43,8 +53,12 @@ export function SupplierList({ suppliers, onEdit }: { suppliers: SupplierRow[]; 
           {suppliers.map((s) => (
             <tr key={s.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
               <td style={{ padding: "10px 12px", fontWeight: 500 }}>{s.name}</td>
+              <td style={{ padding: "10px 12px", color: "#374151" }}>{s.contactName ?? "—"}</td>
               <td style={{ padding: "10px 12px", color: "#374151" }}>{s.email ?? "—"}</td>
               <td style={{ padding: "10px 12px", color: "#374151" }}>{s.phone ?? "—"}</td>
+              <td style={{ padding: "10px 12px", color: "#374151" }}>
+                {[s.city, s.country].filter(Boolean).join(", ") || "—"}
+              </td>
               <td style={{ padding: "10px 12px", color: "#374151" }}>
                 {s.leadTimeDays != null ? `${s.leadTimeDays} days` : "Store default"}
               </td>

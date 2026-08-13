@@ -1,3 +1,44 @@
+// Derives a readable plain-text alternative from an email's HTML body.
+// Every transporter.sendMail() call in notifications.ts was HTML-only
+// (no multipart/alternative text part) — on its own a real, if minor, spam
+// signal: legitimate transactional mail almost always ships both parts, and
+// spam-filter training data over-represents HTML-only mail. Doesn't need to
+// be a pixel-perfect rendering, just a genuine text equivalent for clients
+// that fall back to it and for that multipart signal to be present at all.
+export function htmlToPlainText(html: string): string {
+  return html
+    // <head> (title, meta tags) is document metadata, not body content —
+    // shell()'s <title>Stock Alert</title> would otherwise duplicate the
+    // real "Stock Alert" brand text that also appears in the visible body.
+    .replace(/<head[\s\S]*?<\/head>/gi, '')
+    // HTML comments first — shell()'s MSO conditional comment
+    // (`<!--[if mso]><o:PixelsPerInch>96</o:PixelsPerInch>...`) has its inner
+    // tags stripped by the generic tag-removal pass below, but that would
+    // leave its *text* content ("96") behind as if it were real body text.
+    .replace(/<!--[\s\S]*?-->/g, '')
+    // shell()'s hidden inbox-preview div (display:none) — its whole point is
+    // to be invisible, including here; stripping only the wrapping tag
+    // instead of the block would leak the preview text + its zero-width-space
+    // padding straight into the visible plain-text body.
+    .replace(/<div[^>]*display:\s*none[^>]*>[\s\S]*?<\/div>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|table|h[1-6]|section)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&zwnj;/g, '')
+    .replace(/&middot;/g, '·')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export interface EmailTemplateData {
   storeName: string;
   shopDomain: string;
@@ -457,9 +498,36 @@ export interface PurchaseOrderEmailData {
   storeName: string;
   lines: PurchaseOrderEmailLine[];
   totalCost: number | null;
+  // Supplier's own currency — purely informational (this app has no
+  // invoicing of its own), null for every PO created before this field
+  // existed on Supplier.
+  currency?: string | null;
+  // This order's own terms/reference/note — terms defaults from the
+  // supplier's paymentTerms at creation time but can be overridden per PO,
+  // so this (not supplier.paymentTerms) is the value that actually shipped
+  // on this specific order.
+  terms?: string | null;
+  referenceNumber?: string | null;
+  supplierNote?: string | null;
+}
+
+// Common currency codes only — good enough for the merchants this app
+// targets. Falls back to the code itself (e.g. "kr 12.00" for an
+// unrecognized currency) rather than guessing at a symbol.
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', CAD: '$', AUD: '$', NZD: '$', SGD: '$', HKD: '$', MXN: '$',
+  EUR: '€', GBP: '£', JPY: '¥', CNY: '¥', INR: '₹', KRW: '₩', BRL: 'R$', ZAR: 'R',
+};
+
+function currencyPrefix(currency: string | null | undefined): string {
+  if (!currency) return '$';
+  return CURRENCY_SYMBOLS[currency.toUpperCase()] ?? `${currency.toUpperCase()} `;
 }
 
 export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, brand: BrandConfig = {}): { subject: string; html: string } {
+  const symbol = currencyPrefix(data.currency);
+  const money = (amount: number) => `${symbol}${amount.toFixed(2)}`;
+
   const lineRow = (l: PurchaseOrderEmailLine) => `
     <tr>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
@@ -467,8 +535,8 @@ export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, bran
         ${l.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(l.sku)}</div>` : ''}
       </td>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;color:#111827;">${l.quantityOrdered}</td>
-      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;color:#111827;">${l.unitCost != null ? `$${l.unitCost.toFixed(2)}` : '—'}</td>
-      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;font-weight:600;color:#111827;">${l.unitCost != null ? `$${(l.unitCost * l.quantityOrdered).toFixed(2)}` : '—'}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;color:#111827;">${l.unitCost != null ? money(l.unitCost) : '—'}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;font-weight:600;color:#111827;">${l.unitCost != null ? money(l.unitCost * l.quantityOrdered) : '—'}</td>
     </tr>`;
 
   const rows = data.lines.map(lineRow).join('');
@@ -478,6 +546,9 @@ export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, bran
     ${header('📋', `Purchase Order #${data.poNumber}`, `From ${data.storeName}`, brand)}
     <tr>
       <td style="padding:24px 32px 0;">
+        ${data.referenceNumber ? `<p style="margin:0 0 8px;font-size:13px;color:#6b7280;">Reference: <strong style="color:#111827;">${esc(data.referenceNumber)}</strong></p>` : ''}
+        ${data.terms ? `<p style="margin:0 0 8px;font-size:13px;color:#6b7280;">Terms: <strong style="color:#111827;">${esc(data.terms)}</strong></p>` : ''}
+        ${data.supplierNote ? `<p style="margin:0 0 16px;font-size:13px;color:#111827;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;">${esc(data.supplierNote)}</p>` : ''}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:20px;">
           <tr style="background:#f9fafb;">
             <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Product</th>
@@ -488,7 +559,7 @@ export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, bran
           ${rows}
         </table>
         <p style="margin:0 0 4px;text-align:right;font-size:16px;font-weight:700;color:#111827;">
-          Total: ${data.totalCost != null ? `$${data.totalCost.toFixed(2)}` : '—'}
+          Total: ${data.totalCost != null ? money(data.totalCost) : '—'}
         </p>
         ${missingCostCount > 0 ? `<p style="margin:0 0 24px;text-align:right;font-size:12px;color:#92400e;">Excludes ${missingCostCount} item${missingCostCount !== 1 ? 's' : ''} with no unit cost set — this total is incomplete.</p>` : '<div style="margin-bottom:24px;"></div>'}
       </td>
