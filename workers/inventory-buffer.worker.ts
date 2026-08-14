@@ -114,10 +114,12 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
 }
 
 // ── Digest cron ──────────────────────────────────────────────────────────────
-// Fires once per day at 8am UTC.  The handler checks each shop's plan and
-// digest frequency to decide whether to actually send.
-await boss.schedule(DIGEST_QUEUE_NAME, "0 8 * * *", {});
-console.log("[Worker] Digest cron scheduled — fires daily at 08:00 UTC");
+// Fires every hour, on the hour. Each shop picks its own send time via
+// digestTimezone (default UTC) — the handler checks, per shop, whether it's
+// currently 8am in *that* zone before sending, instead of every shop getting
+// the digest at a single fixed UTC hour regardless of where they are.
+await boss.schedule(DIGEST_QUEUE_NAME, "0 * * * *", {});
+console.log("[Worker] Digest cron scheduled — fires hourly, sends at each shop's local 8:00 AM");
 
 await boss.work<Record<string, never>>(DIGEST_QUEUE_NAME, async () => {
   await processDigests();
@@ -171,11 +173,29 @@ async function processVelocityRefresh(): Promise<void> {
   }
 }
 
+// Local hour (0-23) and whether it's currently Monday, both evaluated in
+// `timeZone` rather than the server's UTC clock — this is what lets each
+// shop's digest land at 8am *their* time despite the cron firing hourly on a
+// single shared schedule. Falls back to UTC if `timeZone` is somehow invalid
+// (shouldn't happen — digestTimezone is validated against DIGEST_TIMEZONES
+// when saved in app.settings.tsx) rather than throwing and skipping the shop.
+function localHourAndIsMonday(date: Date, timeZone: string): { hour: number; isMonday: boolean } {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone, hour: "numeric", hourCycle: "h23", weekday: "short",
+    }).formatToParts(date);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+    const isMonday = parts.find((p) => p.type === "weekday")?.value === "Mon";
+    return { hour, isMonday };
+  } catch {
+    return { hour: date.getUTCHours(), isMonday: date.getUTCDay() === 1 };
+  }
+}
+
 async function processDigests(): Promise<void> {
   const now = new Date();
-  const isMonday = now.getUTCDay() === 1;
 
-  console.log(`[Digest] Running check — ${now.toUTCString()} — isMonday: ${isMonday}`);
+  console.log(`[Digest] Running check — ${now.toUTCString()}`);
 
   const shops = await prisma.storeSettings.findMany({
     where: {
@@ -193,6 +213,8 @@ async function processDigests(): Promise<void> {
     const plan = settings.session?.plan ?? "basic";
     const isDaily = plan === "pro" && settings.digestFrequency === "daily";
 
+    const { hour, isMonday } = localHourAndIsMonday(now, settings.digestTimezone);
+    if (hour !== 8) continue; // not yet 8am in this shop's own timezone
     if (!isDaily && !isMonday) continue;
 
     // Skip if already sent in the last 20 hours (prevents double-fire on restart)

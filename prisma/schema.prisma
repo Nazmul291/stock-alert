@@ -73,6 +73,11 @@ model StoreSettings {
   autoRepublishEnabled Boolean   @default(false) @map("auto_republish_enabled")
   digestEnabled        Boolean   @default(true) @map("digest_enabled")
   digestFrequency      String    @default("weekly") @map("digest_frequency")
+  // IANA identifier (e.g. "America/New_York") — the worker's digest cron
+  // runs hourly and compares each shop's local hour against 8am in this
+  // zone, rather than firing once at a fixed UTC hour (see processDigests
+  // in inventory-buffer.worker.ts).
+  digestTimezone       String    @default("UTC") @map("digest_timezone") @db.VarChar(64)
   lastDigestSentAt     DateTime? @map("last_digest_sent_at") @db.Timestamptz
   // Email + Slack cadence only for low_stock/out_of_stock/restock alerts —
   // "instant" (today's behavior) or "daily" (one batched summary at 23:55 UTC,

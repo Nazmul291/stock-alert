@@ -6,6 +6,7 @@ type SettingsValues = {
   lowStockThreshold: number;
   digestEnabled: boolean;
   digestFrequency: string;
+  digestTimezone: string;
   brandLogoUrl: string;
   brandColor: string;
   brandSenderName: string;
@@ -43,6 +44,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           lowStockThreshold: settings.lowStockThreshold,
           digestEnabled: settings.digestEnabled,
           digestFrequency: settings.digestFrequency,
+          digestTimezone: settings.digestTimezone ?? "UTC",
           brandLogoUrl: settings.brandLogoUrl ?? "",
           brandColor: settings.brandColor ?? "#4f46e5",
           brandSenderName: settings.brandSenderName ?? "",
@@ -63,6 +65,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           lowStockThreshold: 5,
           digestEnabled: true,
           digestFrequency: "weekly",
+          digestTimezone: "UTC",
           brandLogoUrl: "",
           brandColor: "#4f46e5",
           brandSenderName: "",

@@ -1,13 +1,17 @@
 import { Toggle, fieldLabel, helpText } from "../IntegrationControls";
+import { DIGEST_TIMEZONES } from "../../lib/timezones";
 
 export function DigestEmailsSection({
-  digestEnabled, digestFrequency, canDailyDigest, onDigestEnabledChange, onDigestFrequencyChange,
+  digestEnabled, digestFrequency, digestTimezone, canDailyDigest,
+  onDigestEnabledChange, onDigestFrequencyChange, onDigestTimezoneChange,
 }: {
   digestEnabled: boolean;
   digestFrequency: string;
+  digestTimezone: string;
   canDailyDigest: boolean;
   onDigestEnabledChange: (v: boolean) => void;
   onDigestFrequencyChange: (v: string) => void;
+  onDigestTimezoneChange: (v: string) => void;
 }) {
   return (
     <div style={{ marginTop: 24 }}>
@@ -64,7 +68,22 @@ export function DigestEmailsSection({
                 </div>
               </>
             )}
-            <p style={helpText}>Digest is sent at 8:00 AM UTC.</p>
+
+            <label htmlFor="digestTimezone" style={{ ...fieldLabel, marginTop: 16 }}>Time zone</label>
+            <select
+              id="digestTimezone"
+              name="digestTimezone"
+              value={digestTimezone}
+              onChange={(e) => onDigestTimezoneChange(e.target.value)}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "9px 12px", fontSize: 14, color: "#374151", width: "fit-content", minWidth: 220 }}
+            >
+              {DIGEST_TIMEZONES.map((tz) => (
+                <option key={tz.value} value={tz.value}>{tz.label}</option>
+              ))}
+            </select>
+            <p style={helpText}>
+              Digest is sent at 8:00 AM in {DIGEST_TIMEZONES.find((tz) => tz.value === digestTimezone)?.label ?? digestTimezone}.
+            </p>
           </div>
         )}
       </s-section>
