@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
+import { StatusPill } from "../StatusPill";
+import { STATUS_STYLE } from "./PurchaseOrderList";
 
 export type PurchaseOrderDetailData = {
   id: string;
@@ -55,14 +57,6 @@ export type PurchaseOrderDetailData = {
 
 type ActionResult = { success: boolean; error?: string; intent?: string; message?: string };
 
-const STATUS_STYLE: Record<PurchaseOrderDetailData["status"], { bg: string; color: string; label: string }> = {
-  draft: { bg: "#f3f4f6", color: "#374151", label: "Draft" },
-  ordered: { bg: "#dbeafe", color: "#1e40af", label: "Ordered" },
-  partially_received: { bg: "#fef3c7", color: "#92400e", label: "Partially Received" },
-  received: { bg: "#d1fae5", color: "#065f46", label: "Received" },
-  cancelled: { bg: "#fee2e2", color: "#991b1b", label: "Cancelled" },
-};
-
 export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   const editFetcher = useFetcher<ActionResult>();
   const actionFetcher = useFetcher<ActionResult>();
@@ -111,7 +105,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   return (
     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <span style={{ background: s.bg, color: s.color, padding: "4px 10px", borderRadius: 12, fontSize: 13, fontWeight: 600 }}>{s.label}</span>
+        <StatusPill label={s.label} bg={s.bg} color={s.color} size="md" />
         {po.sentToSupplierAt && <span style={{ fontSize: 13, color: "#6b7280" }}>Sent to supplier {new Date(po.sentToSupplierAt).toLocaleDateString()}</span>}
         {po.receivedAt && <span style={{ fontSize: 13, color: "#6b7280" }}>Received {new Date(po.receivedAt).toLocaleDateString()}</span>}
       </div>

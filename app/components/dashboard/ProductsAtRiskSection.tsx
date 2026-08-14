@@ -1,5 +1,6 @@
 import { useShopAwareNavigate } from "../../lib/use-shop-aware-navigate";
 import { useDashboardStore } from "../../stores/dashboard-store";
+import { StatusPill } from "../StatusPill";
 
 // Shown in place of real rows while loading — always reserved (per the
 // section-level `loading ||` gate in app._index.tsx) since we don't yet know
@@ -24,12 +25,13 @@ export function ProductsAtRiskSection() {
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {rows.map((p) => {
           const isOut = p.inventoryStatus === "out_of_stock";
+          const href = `/app/products?filter=${isOut ? "out_of_stock" : "low_stock"}`;
           return (
             <div
               key={p.productId}
               role="button" tabIndex={0}
-              onClick={() => !loading && navigate("/app/products?filter=out_of_stock")}
-              onKeyDown={(e) => !loading && e.key === "Enter" && navigate("/app/products?filter=out_of_stock")}
+              onClick={() => !loading && navigate(href)}
+              onKeyDown={(e) => !loading && e.key === "Enter" && navigate(href)}
               style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: 6, padding: "10px 14px", cursor: loading ? "default" : "pointer",
                 // Neutral while loading — we don't actually know yet whether
@@ -39,24 +41,29 @@ export function ProductsAtRiskSection() {
                 border: `1px solid ${loading ? "#e5e7eb" : isOut ? "#fca5a5" : "#fde68a"}`,
               }}
             >
-              <div>
-                <span className={loading ? "skeleton-text" : undefined} style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{p.productTitle ?? "—"}</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <span
+                  className={loading ? "skeleton-text" : undefined}
+                  title={p.productTitle ?? undefined}
+                  style={{
+                    display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    fontWeight: 600, fontSize: 14, color: "#111827",
+                  }}
+                >
+                  {p.productTitle ?? "—"}
+                </span>
                 {p.sku && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>SKU: {p.sku}</div>}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <span className={loading ? "skeleton-text" : undefined} style={{ fontWeight: 700, fontSize: 18, color: loading ? "#6b7280" : isOut ? "#dc2626" : "#d97706" }}>
                   {p.currentQuantity}
                 </span>
-                <span
+                <StatusPill
                   className={loading ? "skeleton-text" : undefined}
-                  style={{
-                    fontSize: 11, padding: "2px 8px", borderRadius: 10, fontWeight: 600, whiteSpace: "nowrap",
-                    background: loading ? "#f3f4f6" : isOut ? "#fee2e2" : "#fef3c7",
-                    color: loading ? "#6b7280" : isOut ? "#991b1b" : "#92400e",
-                  }}
-                >
-                  {isOut ? "Out of Stock" : "Low Stock"}
-                </span>
+                  label={isOut ? "Out of Stock" : "Low Stock"}
+                  bg={loading ? "#f3f4f6" : isOut ? "#fee2e2" : "#fef3c7"}
+                  color={loading ? "#6b7280" : isOut ? "#991b1b" : "#92400e"}
+                />
               </div>
             </div>
           );

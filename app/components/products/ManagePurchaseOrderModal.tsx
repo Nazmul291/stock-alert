@@ -4,6 +4,7 @@ import { useFetcher } from "react-router";
 import { STATUS_STYLE } from "../purchase-orders/PurchaseOrderList";
 import type { ProductPurchaseOrderRow } from "../../lib/product-detail.server";
 import { useProductDetailStore } from "../../stores/product-detail-store";
+import { StatusPill } from "../StatusPill";
 
 type ActionResult = { success: boolean; error?: string; intent?: string };
 
@@ -153,7 +154,7 @@ export function ManagePurchaseOrderModal({
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: "#111827" }}>PO #{po.poNumber}</p>
-            <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 600 }}>{s.label}</span>
+            <StatusPill label={s.label} bg={s.bg} color={s.color} />
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 20, lineHeight: 1, padding: 4 }}>
             ✕

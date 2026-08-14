@@ -2,6 +2,7 @@ import type { ProductRow } from "./ProductEditModal";
 import { STATUS_STYLE } from "./ProductsTable";
 import { SalesVelocityBadge } from "./SalesVelocityBadge";
 import { StockOutBadge } from "./StockOutBadge";
+import { StatusPill } from "../StatusPill";
 
 export function ProductDetailHeader({ product, loading = false }: { product: ProductRow; loading?: boolean }) {
   const s = STATUS_STYLE[product.inventoryStatus ?? "not_tracked"] ?? STATUS_STYLE.not_tracked;
@@ -24,12 +25,13 @@ export function ProductDetailHeader({ product, loading = false }: { product: Pro
           <p className={loading ? "skeleton-text" : undefined} style={{ margin: 0, fontWeight: 700, fontSize: 18, color: "#111827" }}>{product.productTitle}</p>
           {product.sku && <p className={loading ? "skeleton-text" : undefined} style={{ margin: "2px 0 0", fontSize: 13, color: "#9ca3af" }}>SKU: {product.sku}</p>}
         </div>
-        <span
+        <StatusPill
           className={loading ? "skeleton-text" : undefined}
-          style={{ background: loading ? "#f3f4f6" : s.bg, color: loading ? "#6b7280" : s.color, padding: "4px 10px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}
-        >
-          {s.label}
-        </span>
+          label={s.label}
+          bg={loading ? "#f3f4f6" : s.bg}
+          color={loading ? "#6b7280" : s.color}
+          size="md"
+        />
       </div>
 
       {variants.length > 1 ? (
@@ -51,9 +53,7 @@ export function ProductDetailHeader({ product, loading = false }: { product: Pro
                     <td style={{ padding: "6px 8px", color: "#6b7280" }}>{v.sku ?? "—"}</td>
                     <td style={{ padding: "6px 8px", fontWeight: 600 }}>{v.currentQuantity}</td>
                     <td style={{ padding: "6px 8px" }}>
-                      <span style={{ background: vs.bg, color: vs.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                        {vs.label}
-                      </span>
+                      <StatusPill label={vs.label} bg={vs.bg} color={vs.color} />
                     </td>
                   </tr>
                 );

@@ -1,3 +1,5 @@
+import { StatusPill } from "../StatusPill";
+
 export function ReorderBadge({ days, leadTime }: { days: number | null; leadTime: number }) {
   if (days === null) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
   if (days === 0) return <span style={{ color: "#9ca3af", fontSize: 13 }}>—</span>;
@@ -5,11 +7,7 @@ export function ReorderBadge({ days, leadTime }: { days: number | null; leadTime
   const daysUntilReorder = days - leadTime;
 
   if (daysUntilReorder <= 0) {
-    return (
-      <span style={{ background: "#fee2e2", color: "#991b1b", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-        Reorder now!
-      </span>
-    );
+    return <StatusPill label="Reorder now!" bg="#fee2e2" color="#991b1b" style={{ fontWeight: 700 }} />;
   }
 
   const reorderDate = new Date();
@@ -18,14 +16,11 @@ export function ReorderBadge({ days, leadTime }: { days: number | null; leadTime
   const isUrgent = daysUntilReorder <= 3;
 
   return (
-    <span style={{
-      background: isUrgent ? "#fef3c7" : "#f9fafb",
-      color: isUrgent ? "#92400e" : "#374151",
-      border: `1px solid ${isUrgent ? "#fde68a" : "#e5e7eb"}`,
-      padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: isUrgent ? 600 : 400,
-      whiteSpace: "nowrap",
-    }}>
-      {label}
-    </span>
+    <StatusPill
+      label={label}
+      bg={isUrgent ? "#fef3c7" : "#f9fafb"}
+      color={isUrgent ? "#92400e" : "#374151"}
+      style={{ border: `1px solid ${isUrgent ? "#fde68a" : "#e5e7eb"}`, fontWeight: isUrgent ? 600 : 400 }}
+    />
   );
 }

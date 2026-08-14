@@ -1,5 +1,7 @@
 import { format } from "date-fns";
 import { useDashboardStore } from "../../stores/dashboard-store";
+import { StatusPill } from "../StatusPill";
+import { ALERT_STYLES } from "../alert-history/AlertsTable";
 
 // Shown in place of real rows while loading — we don't yet know whether
 // there are any alerts, so this assumes there are (matching the rest of the
@@ -41,18 +43,14 @@ export function RecentAlertsSection() {
                   {alert.alertType === "restock" && "Back in Stock"}
                 </div>
               </div>
-              <span
+              <StatusPill
                 className={loading ? "skeleton-text" : undefined}
-                style={{
-                  fontSize: 12, padding: "2px 8px", borderRadius: 12, fontWeight: 500,
-                  // Neutral while loading — the alert type isn't known yet,
-                  // so don't paint the badge with a specific type's color.
-                  background: loading ? "#f3f4f6" : alert.alertType === "out_of_stock" ? "#fee2e2" : alert.alertType === "low_stock" ? "#fef3c7" : "#d1fae5",
-                  color: loading ? "#6b7280" : alert.alertType === "out_of_stock" ? "#991b1b" : alert.alertType === "low_stock" ? "#92400e" : "#065f46",
-                }}
-              >
-                {format(new Date(alert.sentAt), "MMM d, h:mm a")}
-              </span>
+                label={format(new Date(alert.sentAt), "MMM d, h:mm a")}
+                // Neutral while loading — the alert type isn't known yet,
+                // so don't paint the badge with a specific type's color.
+                bg={loading ? "#f3f4f6" : (ALERT_STYLES[alert.alertType ?? ""]?.bg ?? "#f3f4f6")}
+                color={loading ? "#6b7280" : (ALERT_STYLES[alert.alertType ?? ""]?.color ?? "#374151")}
+              />
             </div>
           ))}
         </div>
