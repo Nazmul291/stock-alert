@@ -125,30 +125,34 @@ export function ProductConfigureCard({
             }} />
           </div>
         </label>
-      </div>
 
-      <div style={{ marginBottom: 12, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb", opacity: tracked ? 1 : 0.45 }}>
-        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: tracked ? "pointer" : "not-allowed" }}>
-          <div>
-            <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Monitoring</p>
-            <p style={{ margin: "2px 0 0", fontSize: 12, color: monitoring && tracked ? "#059669" : "#9ca3af" }}>
-              {!tracked ? "Enable Shopify Tracking first." : monitoring ? "Active — Stock Alert will send alerts for this product." : "Inactive — no alerts will be sent."}
-            </p>
-          </div>
-          <div
-            onClick={() => { if (tracked) { setMonitoring(!monitoring); markDirty(); } }}
-            style={{
-              width: 44, height: 24, borderRadius: 12, background: monitoring && tracked ? "#008060" : "#d1d5db",
-              position: "relative", flexShrink: 0, transition: "background .2s", cursor: tracked ? "pointer" : "not-allowed",
-            }}
-          >
-            <div style={{
-              position: "absolute", top: 2, left: monitoring && tracked ? 22 : 2,
-              width: 20, height: 20, borderRadius: "50%", background: "#fff",
-              transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-            }} />
-          </div>
-        </label>
+        {/* Same box as Shopify Tracking above, split by a divider instead of
+            its own bordered card — the two are directly related (Monitoring
+            is inert until Tracking is on), so nesting them separately just
+            added a redundant border. */}
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #e5e7eb", opacity: tracked ? 1 : 0.45 }}>
+          <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: tracked ? "pointer" : "not-allowed" }}>
+            <div>
+              <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Monitoring</p>
+              <p style={{ margin: "2px 0 0", fontSize: 12, color: monitoring && tracked ? "#059669" : "#9ca3af" }}>
+                {!tracked ? "Enable Shopify Tracking first." : monitoring ? "Active — Stock Alert will send alerts for this product." : "Inactive — no alerts will be sent."}
+              </p>
+            </div>
+            <div
+              onClick={() => { if (tracked) { setMonitoring(!monitoring); markDirty(); } }}
+              style={{
+                width: 44, height: 24, borderRadius: 12, background: monitoring && tracked ? "#008060" : "#d1d5db",
+                position: "relative", flexShrink: 0, transition: "background .2s", cursor: tracked ? "pointer" : "not-allowed",
+              }}
+            >
+              <div style={{
+                position: "absolute", top: 2, left: monitoring && tracked ? 22 : 2,
+                width: 20, height: 20, borderRadius: "50%", background: "#fff",
+                transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+              }} />
+            </div>
+          </label>
+        </div>
       </div>
 
       {tracked && (
@@ -236,7 +240,9 @@ export function ProductConfigureCard({
         </div>
       )}
 
-      <div style={{ marginBottom: 12, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+      {/* Both forecast-related inputs share one box, divided instead of
+          nested separately — same reasoning as Tracking/Monitoring above. */}
+      <div style={{ marginBottom: 16, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
         <label htmlFor="pdp-restock-date" style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
           Expected restock date
         </label>
@@ -250,37 +256,37 @@ export function ProductConfigureCard({
         <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
           When do you expect this product to be restocked? Shown on the Back in Stock page.
         </p>
-      </div>
 
-      <div style={{ marginBottom: 16, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-        <label htmlFor="pdp-manual-sales" style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
-          Daily sales override
-        </label>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            id="pdp-manual-sales"
-            type="number"
-            value={manualSales}
-            onChange={(e) => { setManualSales(e.target.value); markDirty(); }}
-            min={0}
-            step={0.1}
-            placeholder={product.manualDailySales == null ? "Auto" : ""}
-            style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
-          />
-          <span style={{ fontSize: 13, color: "#374151" }}>units / day</span>
-          {manualSales !== "" && (
-            <button
-              type="button"
-              onClick={() => { setManualSales(""); markDirty(); }}
-              style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
-            >
-              Clear
-            </button>
-          )}
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+          <label htmlFor="pdp-manual-sales" style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
+            Daily sales override
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              id="pdp-manual-sales"
+              type="number"
+              value={manualSales}
+              onChange={(e) => { setManualSales(e.target.value); markDirty(); }}
+              min={0}
+              step={0.1}
+              placeholder={product.manualDailySales == null ? "Auto" : ""}
+              style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
+            />
+            <span style={{ fontSize: 13, color: "#374151" }}>units / day</span>
+            {manualSales !== "" && (
+              <button
+                type="button"
+                onClick={() => { setManualSales(""); markDirty(); }}
+                style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
+            Override the auto-calculated rate for new products with no order history. Leave blank to use the average.
+          </p>
         </div>
-        <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
-          Override the auto-calculated rate for new products with no order history. Leave blank to use the average.
-        </p>
       </div>
 
       {isDirty && (
