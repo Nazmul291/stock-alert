@@ -6,6 +6,7 @@ type SettingsValues = {
   lowStockThreshold: number;
   digestEnabled: boolean;
   digestFrequency: string;
+  digestTimezone: string;
   brandLogoUrl: string;
   brandColor: string;
   brandSenderName: string;
@@ -43,6 +44,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           lowStockThreshold: settings.lowStockThreshold,
           digestEnabled: settings.digestEnabled,
           digestFrequency: settings.digestFrequency,
+          digestTimezone: settings.digestTimezone ?? "UTC",
           brandLogoUrl: settings.brandLogoUrl ?? "",
           brandColor: settings.brandColor ?? "#4f46e5",
           brandSenderName: settings.brandSenderName ?? "",
@@ -52,7 +54,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           monitoringTags: settings.monitoringTags ?? "",
           limitedEditionTag: settings.limitedEditionTag ?? "limited-edition",
           deadStockThresholdDays: settings.deadStockThresholdDays ?? 60,
-          alertDeliveryMode: settings.alertDeliveryMode ?? "instant",
+          alertDeliveryMode: settings.alertDeliveryMode ?? "daily",
           lowStockMuted: settings.lowStockMuted ?? false,
           outOfStockMuted: settings.outOfStockMuted ?? false,
           restockMuted: settings.restockMuted ?? false,
@@ -63,6 +65,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           lowStockThreshold: 5,
           digestEnabled: true,
           digestFrequency: "weekly",
+          digestTimezone: "UTC",
           brandLogoUrl: "",
           brandColor: "#4f46e5",
           brandSenderName: "",
@@ -72,7 +75,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           monitoringTags: "",
           limitedEditionTag: "limited-edition",
           deadStockThresholdDays: 60,
-          alertDeliveryMode: "instant",
+          alertDeliveryMode: "daily",
           lowStockMuted: false,
           outOfStockMuted: false,
           restockMuted: false,

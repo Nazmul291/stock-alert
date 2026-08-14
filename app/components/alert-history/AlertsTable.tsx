@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Link, useFetcher } from "react-router";
 import { format } from "date-fns";
 import { useAlertHistoryStore, buildAlertHistoryUrl } from "../../stores/alert-history-store";
+import { StatusPill } from "../StatusPill";
 
-const ALERT_STYLES: Record<string, { label: string; bg: string; color: string }> = {
+export const ALERT_STYLES: Record<string, { label: string; bg: string; color: string }> = {
   low_stock:    { label: "Low Stock",     bg: "#fef3c7", color: "#92400e" },
   out_of_stock: { label: "Out of Stock",  bg: "#fee2e2", color: "#991b1b" },
   restock:      { label: "Back in Stock", bg: "#d1fae5", color: "#065f46" },
@@ -84,9 +85,7 @@ export function AlertsTable() {
                       <span className={loading ? "skeleton-text" : undefined}>{alert.productTitle ?? "—"}</span>
                     </td>
                     <td style={{ padding: "10px 12px" }}>
-                      <span className={loading ? "skeleton-text" : undefined} style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                        {s.label}
-                      </span>
+                      <StatusPill className={loading ? "skeleton-text" : undefined} label={s.label} bg={s.bg} color={s.color} />
                     </td>
                     <td style={{ padding: "10px 12px", color: "#374151" }}>
                       <span className={loading ? "skeleton-text" : undefined}>{alert.quantityAtAlert !== null ? alert.quantityAtAlert : "—"}</span>

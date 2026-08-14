@@ -2,6 +2,7 @@
   "name": "stock-alert",
   "private": true,
   "scripts": {
+    "postinstall": "patch-package",
     "build": "react-router build",
     "dev": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' vite dev",
     "config:link": "shopify app config link",
@@ -69,6 +70,7 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^4.6.2",
     "graphql-config": "^5.1.1",
+    "patch-package": "^8.0.1",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "vite": "^6.3.6"

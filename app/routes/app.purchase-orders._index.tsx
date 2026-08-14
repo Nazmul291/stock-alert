@@ -7,47 +7,32 @@ import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { canUseFeature } from "../lib/plan-limits";
 import { createSupplier } from "../lib/supplier.server";
-import {
-  previewPurchaseOrders,
-  searchTrackedProducts,
-  createPurchaseOrder,
-  type SupplierPreview,
-  type ProductPickerRow,
-} from "../lib/purchase-order.server";
+import { createPurchaseOrder, getShopLocations } from "../lib/purchase-order.server";
 import { PurchaseOrderList, type PurchaseOrderRow } from "../components/purchase-orders/PurchaseOrderList";
 import { CreatePurchaseOrderModal } from "../components/purchase-orders/CreatePurchaseOrderModal";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
 
 const STATUS_FILTERS = ["all", "draft", "ordered", "partially_received", "received", "cancelled"] as const;
 
+// Recommendations and product search used to be served as ?intent=... query
+// params on this same loader, fetched via a plain fetch() from the modal.
+// That broke: a plain fetch() to a route that has a UI component (this one
+// does) gets treated as a normal document request and returns full
+// rendered HTML instead of JSON. That data now lives at its own resource
+// route instead — see api.purchase-order-picker-stream.ts, which has no
+// component and so always just returns its loader's data.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? null;
   const canManage = canUseFeature(plan, "purchaseOrders");
 
   const url = new URL(request.url);
-  const intent = url.searchParams.get("intent");
-
-  // Read-only lookups, loaded via fetcher.load — GET, not a mutation.
-  if (intent === "suggested_lines") {
-    if (!canManage) return { preview: [] as SupplierPreview[] };
-    const supplierId = url.searchParams.get("supplierId");
-    const preview = await previewPurchaseOrders(shop, supplierId ? [supplierId] : undefined);
-    return { preview };
-  }
-  if (intent === "search_products") {
-    if (!canManage) return { products: [] as ProductPickerRow[] };
-    const search = url.searchParams.get("search") ?? "";
-    const products = await searchTrackedProducts(shop, { search });
-    return { products };
-  }
-
   const statusParam = url.searchParams.get("status");
   const status = STATUS_FILTERS.includes(statusParam as (typeof STATUS_FILTERS)[number]) ? statusParam : "all";
 
-  const [orders, suppliers] = canManage
+  const [orders, suppliers, locations] = canManage
     ? await Promise.all([
         prisma.purchaseOrder.findMany({
           where: { shop, ...(status && status !== "all" ? { status: status as PurchaseOrderRow["status"] } : {}) },
@@ -55,8 +40,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           orderBy: { createdAt: "desc" },
         }),
         prisma.supplier.findMany({ where: { shop }, select: { id: true, name: true, paymentTerms: true }, orderBy: { name: "asc" } }),
+        getShopLocations(admin).catch(() => []),
       ])
-    : [[], []];
+    : [[], [], []];
 
   const rows: PurchaseOrderRow[] = orders.map((po) => ({
     id: po.id,
@@ -68,11 +54,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     createdAt: po.createdAt.toISOString(),
   }));
 
-  return { orders: rows, status: status ?? "all", canManage, suppliers };
+  return { orders: rows, status: status ?? "all", canManage, suppliers, locations };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? null;
@@ -107,17 +93,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "create_po") {
     const supplierId = form.get("supplierId") as string;
     if (!supplierId) return { success: false as const, error: "Select a supplier first." };
+    const locationId = ((form.get("locationId") as string) ?? "").trim() || null;
+    const locationName = ((form.get("locationName") as string) ?? "").trim() || null;
 
     try {
-      const lines = JSON.parse((form.get("lines") as string) ?? "[]") as { variantId: string; quantityOrdered: number; unitCost?: number | null }[];
-      const { purchaseOrderId } = await createPurchaseOrder(shop, supplierId, lines, undefined, {
+      const rawLines = JSON.parse((form.get("lines") as string) ?? "[]") as { variantId: string; quantityOrdered: number; unitCost?: number | null; sku?: string | null }[];
+      // One location for the whole PO, stamped onto every line — same model
+      // as the product-detail page's Create Purchase Order flow, passing
+      // `admin` through (previously undefined here) so location validation,
+      // Shopify cost-sync, and per-product pricing rules all apply on this
+      // page too, not just the product-detail one.
+      const lines = rawLines.map((l) => ({ ...l, locationId, locationName }));
+      const { purchaseOrderId, costSyncWarning } = await createPurchaseOrder(shop, supplierId, lines, admin, {
         referenceNumber: (form.get("referenceNumber") as string) ?? "",
         supplierNote: (form.get("supplierNote") as string) ?? "",
         terms: (form.get("terms") as string) ?? "",
         tags: JSON.parse((form.get("tags") as string) ?? "[]") as string[],
       });
       invalidateShopCache(shop);
-      return { success: true as const, intent, purchaseOrderId };
+      return { success: true as const, intent, purchaseOrderId, costSyncWarning };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create purchase order.";
       return { success: false as const, error: message };
@@ -161,7 +155,7 @@ export default function PurchaseOrdersPage() {
         <PurchaseOrderList orders={data.orders} activeStatus={data.status} />
       </s-section>
 
-      {showCreateModal && <CreatePurchaseOrderModal suppliers={data.suppliers} onClose={() => setShowCreateModal(false)} />}
+      {showCreateModal && <CreatePurchaseOrderModal suppliers={data.suppliers} locations={data.locations} onClose={() => setShowCreateModal(false)} />}
     </s-page>
   );
 }

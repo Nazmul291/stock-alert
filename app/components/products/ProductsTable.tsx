@@ -6,6 +6,7 @@ import { SalesVelocityBadge } from "./SalesVelocityBadge";
 import { ReorderBadge } from "./ReorderBadge";
 import { useProductsStore } from "../../stores/products-store";
 import { canUseFeature } from "../../lib/plan-limits";
+import { StatusPill } from "../StatusPill";
 
 export const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   in_stock: { bg: "#d1fae5", color: "#065f46", label: "In Stock" },
@@ -178,13 +179,9 @@ export function ProductsTable({
                 </td>
                 <td style={{ padding: "10px 12px", width: 90, minWidth: 90 }}>
                   {mixedVariants ? (
-                    <span className={loading ? "skeleton-text" : undefined} style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                      {p.variantsAtRiskCount} of {p.variantCount} low
-                    </span>
+                    <StatusPill className={loading ? "skeleton-text" : undefined} label={`${p.variantsAtRiskCount} of ${p.variantCount} low`} bg={s.bg} color={s.color} />
                   ) : (
-                    <span className={loading ? "skeleton-text" : undefined} style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                      {s.label}
-                    </span>
+                    <StatusPill className={loading ? "skeleton-text" : undefined} label={s.label} bg={s.bg} color={s.color} />
                   )}
                 </td>
                 <td style={{ padding: "10px 12px" }}>
@@ -253,9 +250,7 @@ export function ProductsTable({
                             <span style={{ fontWeight: 600, fontSize: 13, width: 50, textAlign: "right", color: v.inventoryStatus === "out_of_stock" ? "#dc2626" : v.inventoryStatus === "low_stock" ? "#d97706" : "#059669" }}>
                               {v.currentQuantity}
                             </span>
-                            <span style={{ background: vs.bg, color: vs.color, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", width: 90, textAlign: "center" }}>
-                              {vs.label}
-                            </span>
+                            <StatusPill label={vs.label} bg={vs.bg} color={vs.color} size="xs" style={{ width: 90, textAlign: "center" }} />
                           </div>
                         );
                       })}

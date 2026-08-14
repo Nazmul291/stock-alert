@@ -1,0 +1,13 @@
+diff --git a/node_modules/@nazmulcodes/shopify-admin-and-support-chat/dist/index.js b/node_modules/@nazmulcodes/shopify-admin-and-support-chat/dist/index.js
+index b079fb8..9a055d6 100644
+--- a/node_modules/@nazmulcodes/shopify-admin-and-support-chat/dist/index.js
++++ b/node_modules/@nazmulcodes/shopify-admin-and-support-chat/dist/index.js
+@@ -202,6 +202,8 @@ function ChatWidget({ shop, primaryColor = "#008060", title = "Support Chat" })
+               color: m.sender === "MERCHANT" ? "#fff" : "#202223",
+               fontSize: "13px",
+               lineHeight: 1.5,
++              whiteSpace: "pre-wrap",
++              wordBreak: "break-word",
+               border: m.sender === "BOT" ? "1px solid #c7d2fe" : "none"
+             }, children: m.text }),
+             /* @__PURE__ */ jsx("div", { style: { fontSize: "10px", color: "#8c9196", marginTop: "2px" }, children: fmt(m.sentAt) })

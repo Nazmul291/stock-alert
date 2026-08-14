@@ -4,6 +4,7 @@ import { STATUS_STYLE } from "../purchase-orders/PurchaseOrderList";
 import type { ProductPurchaseOrderRow } from "../../lib/product-detail.server";
 import { ManagePurchaseOrderModal } from "./ManagePurchaseOrderModal";
 import { useLiveEventsStore } from "../../stores/live-events-store";
+import { StatusPill } from "../StatusPill";
 
 // Completed purchase orders (received/cancelled) are already covered by the
 // History timeline below this list — this table is only for orders that
@@ -24,9 +25,7 @@ function PendingPoRow({ po, suppliers, productTitle }: { po: ProductPurchaseOrde
         <Link to={`/app/purchase-orders/${po.id}`} style={{ color: "#1e40af", fontWeight: 600 }}>#{po.poNumber}</Link>
       </td>
       <td style={{ padding: "8px" }}>
-        <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-          {s.label}
-        </span>
+        <StatusPill label={s.label} bg={s.bg} color={s.color} />
       </td>
       <td style={{ padding: "8px", color: "#374151" }}>{po.supplierName}</td>
       <td style={{ padding: "8px" }}>{po.quantityOrdered}</td>

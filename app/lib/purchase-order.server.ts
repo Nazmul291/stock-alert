@@ -1,7 +1,8 @@
 import { Prisma, type PurchaseOrderStatus } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
-import { setInventoryQuantities } from "./shopify-inventory.server";
+import { setInventoryQuantities, activateInventoryAtLocation, getVariantInventoryItemIds, updateInventoryItemCost, updateVariantPrice } from "./shopify-inventory.server";
+import { getPricingRuleConfigs, applyPricingRule } from "./pricing-rules.server";
 
 export type PreviewLine = {
   productId: string;
@@ -9,10 +10,14 @@ export type PreviewLine = {
   productTitle: string | null;
   variantTitle: string | null;
   sku: string | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
   currentQuantity: number;
   stockOutDays: number | null;
   avgDailySales: number | null;
   unitCost: number | null;
+  price: string | null;
+  compareAtPrice: string | null;
   suggestedQuantity: number;
 };
 
@@ -92,10 +97,14 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
       productTitle: row.productTitle,
       variantTitle: row.variantTitle,
       sku: row.sku,
+      imageUrl: row.imageUrl,
+      imageAlt: row.imageAlt,
       currentQuantity: row.currentQuantity,
       stockOutDays: row.stockOutDays,
       avgDailySales: row.avgDailySales,
       unitCost: row.unitCost,
+      price: null,
+      compareAtPrice: null,
       suggestedQuantity: suggestReorderQuantity(row.currentQuantity, row.avgDailySales, leadTimeDays),
     };
     const list = bySupplier.get(supplierId);
@@ -124,10 +133,14 @@ export type ProductPickerRow = {
   productTitle: string | null;
   variantTitle: string | null;
   sku: string | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
   currentQuantity: number;
   stockOutDays: number | null;
   avgDailySales: number | null;
   unitCost: number | null;
+  price: string | null;
+  compareAtPrice: string | null;
   supplierId: string | null;
   suggestedQuantity: number;
 };
@@ -168,10 +181,14 @@ export async function searchTrackedProducts(shop: string, opts: { search?: strin
     productTitle: row.productTitle,
     variantTitle: row.variantTitle,
     sku: row.sku,
+    imageUrl: row.imageUrl,
+    imageAlt: row.imageAlt,
     currentQuantity: row.currentQuantity,
     stockOutDays: row.stockOutDays,
     avgDailySales: row.avgDailySales,
     unitCost: row.unitCost,
+    price: null,
+    compareAtPrice: null,
     supplierId: row.supplierId,
     suggestedQuantity: suggestReorderQuantity(row.currentQuantity, row.avgDailySales, defaultLeadTime),
   }));
@@ -181,10 +198,15 @@ export type CreatePurchaseOrderLine = {
   variantId: string;
   quantityOrdered: number;
   unitCost?: number | null;
+  // Merchant-supplied override for a variant with no SKU tracked yet — falls
+  // back to InventoryTracking.sku (see resolvedLines below) when left blank,
+  // never the other way around, so this can't blank out a real synced SKU.
+  sku?: string | null;
   // Destination location for this line — only ever sent by the
-  // product-detail page's per-location Create Purchase Order flow. Omitted
-  // (or null) by the general Purchase Orders page, which has no location
-  // concept and keeps creating one location-less line per variant.
+  // product-detail page's Create Purchase Order flow, which asks for one
+  // location for the whole PO and stamps it onto every included line.
+  // Omitted (or null) by the general Purchase Orders page, which has no
+  // location concept and keeps creating one location-less line per variant.
   locationId?: string | null;
   locationName?: string | null;
 };
@@ -224,6 +246,9 @@ export type CreatedPurchaseOrder = {
   terms: string | null;
   tags: string[];
   lineItems: CreatedPurchaseOrderLine[];
+  // Non-fatal — the PO itself is already created by the time this is set,
+  // so a Shopify cost-sync hiccup surfaces as a warning, not a failure.
+  costSyncWarning: string | null;
 };
 
 // Merchant-facing fields mirroring Shopify's own native "Create purchase
@@ -235,6 +260,59 @@ export type CreatePurchaseOrderDetails = {
   terms?: string | null;
   tags?: string[];
 };
+
+// Pushes each line's unit cost to Shopify's own "Cost per item" field on the
+// variant, so placing a PO with a cost actually updates the product — not
+// just our own PurchaseOrderLineItem row. Also sets the variant's selling
+// price using that product's own pricing rule (see pricing-rules.server.ts
+// — a per-product opt-in, configured on the product detail page's Configure
+// card, not a store-wide default): once enabled, it's enforced on every PO
+// with a unit cost, unconditionally overwriting whatever price Shopify
+// currently has — not just when the price happens to be $0. Does nothing at
+// all for a product with no pricing rule enabled. Returns a human-readable
+// warning string (never throws) so a Shopify hiccup here doesn't undo the
+// already-committed PO; the caller surfaces it alongside the success result.
+async function syncLineCostsToShopify(
+  admin: AdminApiContext,
+  lineItems: { productId: bigint; variantId: bigint; unitCost: number | null; productTitle: string | null; sku: string | null }[],
+): Promise<string | null> {
+  const costedLines = lineItems.filter((li) => li.unitCost != null);
+  if (costedLines.length === 0) return null;
+
+  try {
+    const variantIds = costedLines.map((li) => li.variantId);
+    const productIds = [...new Set(costedLines.map((li) => li.productId))];
+    const [inventoryItemIds, pricingRules] = await Promise.all([
+      getVariantInventoryItemIds(admin, variantIds),
+      getPricingRuleConfigs(admin, productIds),
+    ]);
+    const failures: string[] = [];
+    for (const li of costedLines) {
+      const inventoryItemId = inventoryItemIds.get(li.variantId.toString());
+      const label = li.productTitle ?? li.sku ?? li.variantId.toString();
+      if (!inventoryItemId) {
+        failures.push(label);
+        continue;
+      }
+      const { userErrors } = await updateInventoryItemCost(admin, inventoryItemId, li.unitCost!);
+      if (userErrors.length > 0) {
+        failures.push(`${label} (${userErrors.join(", ")})`);
+        continue;
+      }
+
+      const rule = pricingRules.get(li.productId.toString());
+      if (rule?.enabled) {
+        const newPrice = applyPricingRule(rule, li.unitCost!);
+        const { userErrors: priceErrors } = await updateVariantPrice(admin, li.productId.toString(), li.variantId.toString(), newPrice);
+        if (priceErrors.length > 0) failures.push(`${label} price (${priceErrors.join(", ")})`);
+      }
+    }
+    if (failures.length === 0) return null;
+    return `Purchase order created, but Shopify wasn't fully updated for: ${failures.join("; ")}.`;
+  } catch (err) {
+    return `Purchase order created, but syncing cost/price to Shopify failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
 
 export async function createPurchaseOrder(
   shop: string,
@@ -267,14 +345,17 @@ export async function createPurchaseOrder(
   const rowsByVariantId = new Map(rows.map((r) => [r.variantId.toString(), r]));
 
   const linesWithLocation = positiveLines.filter((l) => l.locationId);
-  let validLocationsByVariant: Map<string, VariantLocationLevel[]> | null = null;
   if (linesWithLocation.length > 0) {
     if (!admin) throw new Error("Cannot assign a location without an active Shopify session.");
-    validLocationsByVariant = await getVariantLocationLevels(admin, variantIds);
+    // Validated against the shop's real locations, not each variant's
+    // already-activated ones — a PO is allowed to target a location a
+    // variant isn't stocked at yet; receivePurchaseOrderItems activates it
+    // in Shopify the first time stock is actually received there.
+    const shopLocations = await getShopLocations(admin);
+    const validLocationIds = new Set(shopLocations.map((loc) => loc.id));
     for (const l of linesWithLocation) {
-      const validLocations = validLocationsByVariant.get(l.variantId) ?? [];
-      if (!validLocations.some((loc) => loc.locationId === l.locationId)) {
-        throw new Error(`"${l.locationName ?? l.locationId}" is no longer a valid location for one of the selected products — refresh and try again.`);
+      if (!validLocationIds.has(l.locationId!)) {
+        throw new Error(`"${l.locationName ?? l.locationId}" is not a valid location for this store — refresh and try again.`);
       }
     }
   }
@@ -288,7 +369,7 @@ export async function createPurchaseOrder(
         variantId: BigInt(l.variantId),
         productTitle: row.productTitle,
         variantTitle: row.variantTitle,
-        sku: row.sku,
+        sku: l.sku?.trim() || row.sku,
         quantityOrdered: l.quantityOrdered,
         unitCost: l.unitCost ?? row.unitCost ?? null,
         locationId: l.locationId ?? null,
@@ -330,6 +411,14 @@ export async function createPurchaseOrder(
           include: { lineItems: true },
         });
       });
+
+      // Best-effort — the PO is already committed above, so a cost-sync
+      // failure here is reported back as a warning rather than rolling back
+      // or failing the whole creation. Only attempted for lines the merchant
+      // actually gave a cost for, and only when there's a live Shopify
+      // session to push it through.
+      const costSyncWarning = admin ? await syncLineCostsToShopify(admin, purchaseOrder.lineItems) : null;
+
       return {
         purchaseOrderId: purchaseOrder.id,
         poNumber: purchaseOrder.poNumber,
@@ -350,6 +439,7 @@ export async function createPurchaseOrder(
           locationId: li.locationId,
           locationName: li.locationName,
         })),
+        costSyncWarning,
       };
     } catch (err) {
       const isPoNumberCollision = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
@@ -435,6 +525,134 @@ export async function getVariantLocationLevels(
   return map;
 }
 
+export type ShopLocation = { id: string; name: string };
+
+const SHOP_LOCATIONS_QUERY = `
+  query getShopLocations {
+    locations(first: 50, sortKey: NAME) {
+      edges { node { id name } }
+    }
+  }
+`;
+
+// Every location in the shop, regardless of whether any given variant is
+// stocked there yet — getVariantLocationLevels only reports locations
+// Shopify already has inventory levels for, which hides locations a
+// merchant hasn't activated a product at but still wants to order stock for.
+export async function getShopLocations(admin: AdminApiContext): Promise<ShopLocation[]> {
+  const res = await admin.graphql(SHOP_LOCATIONS_QUERY);
+  const json: { data?: { locations?: { edges: Array<{ node: { id: string; name: string } }> } } } = await res.json();
+  return (json.data?.locations?.edges ?? []).map((e) => e.node);
+}
+
+// Feeds the product-detail Create Purchase Order card and the PO-receiving
+// location pickers: one entry per *shop* location for every variant (not
+// just locations that variant already has inventory tracked at), with
+// `available` filled in from real inventory levels where they exist, or 0
+// where the variant isn't activated there yet. This is what lets a merchant
+// target any of their locations as a PO's destination — receivePurchaseOrderItems
+// activates it in Shopify automatically the first time stock is received there.
+export async function getVariantLocationsForPicker(
+  admin: AdminApiContext,
+  variantIds: bigint[],
+): Promise<Map<string, VariantLocationLevel[]>> {
+  const map = new Map<string, VariantLocationLevel[]>();
+  if (variantIds.length === 0) return map;
+
+  const [shopLocations, activatedByVariant] = await Promise.all([
+    getShopLocations(admin),
+    getVariantLocationLevels(admin, variantIds),
+  ]);
+
+  for (const id of variantIds) {
+    const key = id.toString();
+    const activated = activatedByVariant.get(key) ?? [];
+    map.set(
+      key,
+      shopLocations.map((loc) => {
+        const match = activated.find((a) => a.locationId === loc.id);
+        return {
+          inventoryItemId: match?.inventoryItemId ?? "",
+          locationId: loc.id,
+          locationName: loc.name,
+          available: match?.available ?? 0,
+        };
+      }),
+    );
+  }
+  return map;
+}
+
+export type VariantPricing = { sku: string | null; price: string | null; compareAtPrice: string | null; unitCost: string | null };
+
+const VARIANT_PRICING_QUERY = `
+  query getVariantPricing($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        id
+        sku
+        price
+        compareAtPrice
+        inventoryItem {
+          unitCost { amount }
+        }
+      }
+    }
+  }
+`;
+
+// Feeds the Price column on the product-detail Create Purchase Order card —
+// merchants ordering stock want to see what the item actually sells for
+// (and whether it's currently marked down) alongside the cost they're
+// paying the supplier for it. unitCost is Shopify's own live "Cost per
+// item" — the same field syncLineCostsToShopify pushes to on every PO — so
+// it's used as the Unit Cost field's starting value too, instead of our own
+// InventoryTracking.unitCost column, which nothing ever writes to. sku is
+// fetched live for the same reason — InventoryTracking.sku is only as fresh
+// as the last product webhook, and a PO's SKU field should default to
+// whatever Shopify actually has right now, not a possibly-stale copy.
+export async function getVariantPricing(admin: AdminApiContext, variantIds: bigint[]): Promise<Map<string, VariantPricing>> {
+  const map = new Map<string, VariantPricing>();
+  if (variantIds.length === 0) return map;
+
+  const ids = variantIds.map((id) => `gid://shopify/ProductVariant/${id.toString()}`);
+  const res = await admin.graphql(VARIANT_PRICING_QUERY, { variables: { ids } });
+  const json: { data?: { nodes: Array<{ id?: string; sku?: string | null; price?: string | null; compareAtPrice?: string | null; inventoryItem?: { unitCost: { amount: string } | null } | null } | null> } } = await res.json();
+  for (const node of json.data?.nodes ?? []) {
+    if (!node?.id) continue;
+    const variantId = node.id.split("/").pop() as string;
+    map.set(variantId, { sku: node.sku ?? null, price: node.price ?? null, compareAtPrice: node.compareAtPrice ?? null, unitCost: node.inventoryItem?.unitCost?.amount ?? null });
+  }
+  return map;
+}
+
+// Overlays Shopify's live SKU, "Cost per item", selling price, and
+// compare-at price onto rows sourced from InventoryTracking (whose own
+// unitCost column nothing ever writes to — every PO with a cost pushes it to
+// Shopify instead, see syncLineCostsToShopify — and which never carried
+// price at all; sku is only as fresh as the last product webhook). Used by
+// both the product-detail page and the general Purchase Orders picker, so
+// their SKU, Unit Cost, and Price columns default to whatever Shopify
+// actually has right now instead of a possibly-stale synced copy.
+export async function withLiveUnitCost<T extends { variantId: string; sku: string | null; unitCost: number | null; price: string | null; compareAtPrice: string | null }>(
+  admin: AdminApiContext,
+  rows: T[],
+): Promise<T[]> {
+  if (rows.length === 0) return rows;
+  const pricing = await getVariantPricing(admin, rows.map((r) => BigInt(r.variantId))).catch(() => new Map<string, VariantPricing>());
+  return rows.map((r) => {
+    const live = pricing.get(r.variantId);
+    const liveCost = parseFloat(live?.unitCost ?? "");
+    return {
+      ...r,
+      sku: live?.sku ?? r.sku,
+      unitCost: isNaN(liveCost) ? r.unitCost : liveCost,
+      price: live?.price ?? r.price,
+      compareAtPrice: live?.compareAtPrice ?? r.compareAtPrice,
+    };
+  });
+}
+
 // Receives quantities against an ordered/partially_received PO. Pushes the
 // new absolute quantity to Shopify's location for each variant *before*
 // touching the DB — if that call fails, nothing is recorded as received.
@@ -445,11 +663,13 @@ export async function getVariantLocationLevels(
 // the resulting inventory_levels/update event.
 // A variant stocked at more than one location has no way to know which
 // location a shipment actually arrived at, so the caller (PurchaseOrderDetail's
-// location picker, fed by the loader's getVariantLocationLevels call) must
+// location picker, fed by the loader's getVariantLocationsForPicker call) must
 // supply locationId explicitly for those — this only guesses "the" location
-// when there's exactly one to guess. Previously this threw for any
-// multi-location variant rather than silently picking one (e.g. "whichever
-// location Shopify returns first"), which could credit the wrong warehouse.
+// when there's exactly one to guess. Never silently picks one out of several
+// (e.g. "whichever location Shopify returns first"), which could credit the
+// wrong warehouse. The chosen (or preset) location doesn't need to already
+// be stocked — it's activated in Shopify on the fly if it isn't yet, since
+// the picker now offers every shop location, not just ones already tracked.
 export async function receivePurchaseOrderItems(
   shop: string,
   purchaseOrderId: string,
@@ -485,30 +705,35 @@ export async function receivePurchaseOrderItems(
   const quantities: Array<{ inventoryItemId: string; locationId: string; quantity: number; changeFromQuantity: null }> = [];
   for (const { line, quantityReceived, locationId: receiptLocationId } of validReceipts) {
     const levels = levelsByVariant.get(line.variantId.toString()) ?? [];
-    if (levels.length === 0) {
-      throw new Error(`Could not find inventory location for ${line.productTitle ?? line.sku}.`);
-    }
+    // Preset locationId from creation time (the product-detail Create PO
+    // flow) wins over one picked now during receiving — same precedence as
+    // before this locationId could target an unactivated location.
+    const targetLocationId = line.locationId ?? receiptLocationId ?? null;
+    const existing = targetLocationId ? levels.find((l) => l.locationId === targetLocationId) : undefined;
 
     let level: VariantLocationLevel;
-    if (line.locationId) {
-      // This line already has a fixed destination from creation time (the
-      // product-detail page's per-location Create Purchase Order flow) — no
-      // need to ask the merchant to pick again, just confirm it's still valid.
-      const match = levels.find((l) => l.locationId === line.locationId);
-      if (!match) {
-        throw new Error(`${line.productTitle ?? line.sku}: the location this was ordered for ("${line.locationName ?? line.locationId}") is no longer valid — refresh and try again.`);
+    if (existing) {
+      level = existing;
+    } else if (targetLocationId) {
+      // Either this line was created for a location the variant wasn't
+      // activated at yet, or the merchant just picked one while receiving
+      // that it isn't stocked at — activate it in Shopify instead of
+      // failing (inventorySetQuantities requires activation first).
+      const inventoryItemId = levels[0]?.inventoryItemId;
+      if (!inventoryItemId) {
+        throw new Error(`Could not find inventory item for ${line.productTitle ?? line.sku}.`);
       }
-      level = match;
+      const { userErrors: activateErrors } = await activateInventoryAtLocation(admin, inventoryItemId, targetLocationId);
+      if (activateErrors.length > 0) {
+        throw new Error(`${line.productTitle ?? line.sku}: couldn't activate "${line.locationName ?? targetLocationId}" — ${activateErrors.join(", ")}`);
+      }
+      level = { inventoryItemId, locationId: targetLocationId, locationName: line.locationName ?? targetLocationId, available: 0 };
     } else if (levels.length === 1) {
       level = levels[0];
-    } else if (!receiptLocationId) {
-      throw new Error(`${line.productTitle ?? line.sku} is stocked at ${levels.length} locations — choose which location received this shipment.`);
+    } else if (levels.length === 0) {
+      throw new Error(`Could not find inventory location for ${line.productTitle ?? line.sku}.`);
     } else {
-      const match = levels.find((l) => l.locationId === receiptLocationId);
-      if (!match) {
-        throw new Error(`${line.productTitle ?? line.sku}: the selected location is no longer valid for this variant — refresh and try again.`);
-      }
-      level = match;
+      throw new Error(`${line.productTitle ?? line.sku} is stocked at ${levels.length} locations — choose which location received this shipment.`);
     }
 
     quantities.push({

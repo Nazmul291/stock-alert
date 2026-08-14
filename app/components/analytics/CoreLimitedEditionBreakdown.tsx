@@ -21,7 +21,12 @@ function MiniHealthBar({ label, health }: { label: string; health: typeof DEFAUL
     <div>
       <p style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>{label}</p>
       {total === 0 ? (
-        <p style={{ fontSize: 13, color: "#9ca3af" }}>No products in this group.</p>
+        // Occupies roughly the same vertical space as the bar+legend below
+        // instead of a bare sentence, so an empty group reads as "no data
+        // yet" rather than a half-rendered section next to a populated one.
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "18px 12px", borderRadius: 6, border: "1px dashed #e5e7eb" }}>
+          <span style={{ fontSize: 13, color: "#9ca3af" }}>No products in this group</span>
+        </div>
       ) : (
         <>
           <div style={{ display: "flex", height: 16, borderRadius: 6, overflow: "hidden", marginBottom: 10 }}>

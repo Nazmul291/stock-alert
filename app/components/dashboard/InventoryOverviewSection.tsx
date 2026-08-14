@@ -17,6 +17,10 @@ export function InventoryOverviewSection() {
 
   return (
     <s-section heading="Inventory Overview">
+      {/* Above the stat tiles, not below the chart — this is the one signal
+          that means the numbers below it might be wrong, so it needs to be
+          seen before the stats themselves, not discovered after. */}
+      <WebhookHealthBar />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 12, margin: "8px 0" }}>
         {[
           { label: "Tracked", value: stats.totalProducts, color: "#374151", href: stats.totalProducts > 0 ? "/app/products" : null, static: false },
@@ -57,7 +61,6 @@ export function InventoryOverviewSection() {
         })}
       </div>
       <AlertSparkline />
-      <WebhookHealthBar />
     </s-section>
   );
 }

@@ -1,4 +1,5 @@
 import { Link, useFetcher } from "react-router";
+import { StatusPill } from "../StatusPill";
 
 export type PurchaseOrderRow = {
   id: string;
@@ -85,9 +86,7 @@ export function PurchaseOrderList({ orders, activeStatus }: { orders: PurchaseOr
                     </td>
                     <td style={{ padding: "10px 12px", color: "#374151" }}>{po.supplierName}</td>
                     <td style={{ padding: "10px 12px" }}>
-                      <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
-                        {s.label}
-                      </span>
+                      <StatusPill label={s.label} bg={s.bg} color={s.color} />
                     </td>
                     <td style={{ padding: "10px 12px", color: "#374151" }}>{po.lineItemCount}</td>
                     <td style={{ padding: "10px 12px", color: "#374151" }}>{po.totalCost != null ? `$${po.totalCost.toFixed(2)}` : "—"}</td>

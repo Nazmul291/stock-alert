@@ -4,6 +4,21 @@ export const PRODUCT_METAFIELDS_QUERY = `
       customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { id value }
       autoHide: metafield(namespace: "stock_alert", key: "auto_hide") { id value }
       autoRepublish: metafield(namespace: "stock_alert", key: "auto_republish") { id value }
+      pricingRule: metafield(namespace: "stock_alert", key: "pricing_rule") { id value }
+    }
+  }
+`;
+
+// Batch lookup for syncLineCostsToShopify (purchase-order.server.ts), which
+// needs each PO line's own product's rule, not just the one product shown
+// on product-detail.server.ts's single-product query above.
+export const PRODUCTS_PRICING_RULES_QUERY = `
+  query getProductsPricingRules($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        metafield(namespace: "stock_alert", key: "pricing_rule") { value }
+      }
     }
   }
 `;

@@ -9,6 +9,7 @@ import { SSEErrorRetry } from "../components/Skeleton";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { canUseFeature } from "../lib/plan-limits";
+import { isValidDigestTimezone } from "../lib/timezones";
 import { useSettingsStore, type SettingsStore } from "../stores/settings-store";
 import { useLiveEventsStore } from "../stores/live-events-store";
 import { PlanCard } from "../components/settings/PlanCard";
@@ -63,6 +64,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const rawDigestFrequency = form.get("digestFrequency") as string;
+  const rawDigestTimezone = form.get("digestTimezone") as string;
   const rawAlertDeliveryMode = form.get("alertDeliveryMode") as string;
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
@@ -74,6 +76,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     lowStockThreshold: rawThreshold,
     digestEnabled: bool("digestEnabled"),
     digestFrequency: canUseFeature(plan, "dailyDigest") && rawDigestFrequency === "daily" ? "daily" : "weekly",
+    digestTimezone: isValidDigestTimezone(rawDigestTimezone) ? rawDigestTimezone : "UTC",
     alertDeliveryMode: rawAlertDeliveryMode === "daily" ? "daily" : "instant",
     lowStockMuted: bool("lowStockMuted"),
     outOfStockMuted: bool("outOfStockMuted"),
@@ -165,6 +168,7 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   lowStockThreshold: 5,
   digestEnabled: true,
   digestFrequency: "weekly",
+  digestTimezone: "UTC",
   brandLogoUrl: "",
   brandColor: "#4f46e5",
   brandSenderName: "",
@@ -174,7 +178,7 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   monitoringTags: "",
   limitedEditionTag: "limited-edition",
   deadStockThresholdDays: 60,
-  alertDeliveryMode: "instant",
+  alertDeliveryMode: "daily",
   lowStockMuted: false,
   outOfStockMuted: false,
   restockMuted: false,
@@ -196,6 +200,7 @@ function SettingsContent() {
   const [autoRepublishEnabled, setAutoRepublishEnabled] = useState(settings.autoRepublishEnabled);
   const [digestEnabled, setDigestEnabled] = useState(settings.digestEnabled);
   const [digestFrequency, setDigestFrequency] = useState(settings.digestFrequency);
+  const [digestTimezone, setDigestTimezone] = useState(settings.digestTimezone);
   const [brandLogoUrl, setBrandLogoUrl] = useState(settings.brandLogoUrl);
   const [brandColor, setBrandColor] = useState(settings.brandColor);
   const [brandSenderName, setBrandSenderName] = useState(settings.brandSenderName);
@@ -222,6 +227,7 @@ function SettingsContent() {
     setAutoRepublishEnabled(settings.autoRepublishEnabled);
     setDigestEnabled(settings.digestEnabled);
     setDigestFrequency(settings.digestFrequency);
+    setDigestTimezone(settings.digestTimezone);
     setBrandLogoUrl(settings.brandLogoUrl);
     setBrandColor(settings.brandColor);
     setBrandSenderName(settings.brandSenderName);
@@ -245,6 +251,7 @@ function SettingsContent() {
     setAutoRepublishEnabled(settings.autoRepublishEnabled);
     setDigestEnabled(settings.digestEnabled);
     setDigestFrequency(settings.digestFrequency);
+    setDigestTimezone(settings.digestTimezone);
     setBrandLogoUrl(settings.brandLogoUrl);
     setBrandColor(settings.brandColor);
     setBrandSenderName(settings.brandSenderName);
@@ -289,6 +296,7 @@ function SettingsContent() {
     fd.set("autoRepublishEnabled", autoRepublishEnabled ? "true" : "false");
     fd.set("digestEnabled", digestEnabled ? "true" : "false");
     fd.set("digestFrequency", digestFrequency);
+    fd.set("digestTimezone", digestTimezone);
     fd.set("monitoringFilter", monitoringFilter);
     fd.set("monitoringCollectionId", monitoringCollectionId);
     fd.set("monitoringTags", monitoringTags);
@@ -352,9 +360,11 @@ function SettingsContent() {
         <DigestEmailsSection
           digestEnabled={digestEnabled}
           digestFrequency={digestFrequency}
+          digestTimezone={digestTimezone}
           canDailyDigest={canDailyDigest}
           onDigestEnabledChange={(v) => { setDigestEnabled(v); markDirty(); }}
           onDigestFrequencyChange={(v) => { setDigestFrequency(v); markDirty(); }}
+          onDigestTimezoneChange={(v) => { setDigestTimezone(v); markDirty(); }}
         />
 
         <AlertDeliverySection

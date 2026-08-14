@@ -27,16 +27,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const detail = await getProductDetail(shop, productId, plan, admin);
     if (!detail) throw new Error("Product not found.");
 
+    // Every variant carries the same set of shop locations (only
+    // `available` differs per variant) — see getVariantLocationsForPicker —
+    // so any variant's list is the canonical one for this single, PO-wide
+    // choice, same reasoning as ProductCreatePoCard's own shopLocations.
+    const locations = (detail.variantsForPo[0]?.locations ?? []).map((l) => ({
+      locationId: l.locationId,
+      locationName: l.locationName,
+    }));
+
     return {
       entitled: detail.canManageSupplier,
       productTitle: detail.product.productTitle,
       suppliers: detail.suppliers,
+      locations,
       variants: detail.variantsForPo.map((v) => ({
         variantId: v.variantId,
         variantTitle: v.variantTitle,
         sku: v.sku,
         currentQuantity: v.currentQuantity,
         suggestedQuantity: v.suggestedQuantity,
+        unitCost: v.unitCost,
+        price: v.price,
+        compareAtPrice: v.compareAtPrice,
       })),
     };
   });

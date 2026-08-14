@@ -2,9 +2,16 @@ import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
 import type { ProductRow } from "./ProductEditModal";
 import type { ProductDetailConfigure } from "../../lib/product-detail.server";
+import type { PricingRuleType } from "../../lib/pricing-rules.server";
 import { UnsavedChangesBar } from "../UnsavedChangesBar";
 import { useLiveEventsStore } from "../../stores/live-events-store";
 import { SkeletonBlock } from "../Skeleton";
+
+const PRICING_RULE_TYPES: { value: PricingRuleType; label: string; suffix: string; help: string }[] = [
+  { value: "times", label: "Times", suffix: "×", help: "New price = unit cost × this factor." },
+  { value: "percentage", label: "Percentage", suffix: "%", help: "New price = unit cost plus this % of the cost." },
+  { value: "add", label: "Add", suffix: "$", help: "New price = unit cost plus this flat amount." },
+];
 
 type SaveResult = { success: true; message: string } | { error: string };
 
@@ -30,6 +37,9 @@ export function ProductConfigureCard({
     customThreshold: configure.customThreshold,
     restockDate: product.expectedRestockDate ?? "",
     manualSales: product.manualDailySales != null ? String(product.manualDailySales) : "",
+    pricingRuleEnabled: configure.pricingRuleEnabled,
+    pricingRuleType: configure.pricingRuleType,
+    pricingRuleValue: configure.pricingRuleValue,
   };
 
   const [tracked, setTracked] = useState(initial.tracked);
@@ -39,6 +49,9 @@ export function ProductConfigureCard({
   const [customThreshold, setCustomThreshold] = useState(initial.customThreshold);
   const [restockDate, setRestockDate] = useState(initial.restockDate);
   const [manualSales, setManualSales] = useState(initial.manualSales);
+  const [pricingRuleEnabled, setPricingRuleEnabled] = useState(initial.pricingRuleEnabled);
+  const [pricingRuleType, setPricingRuleType] = useState(initial.pricingRuleType);
+  const [pricingRuleValue, setPricingRuleValue] = useState(initial.pricingRuleValue);
   const [isDirty, setIsDirty] = useState(false);
   function markDirty() { setIsDirty(true); }
 
@@ -63,6 +76,9 @@ export function ProductConfigureCard({
     setCustomThreshold(initial.customThreshold);
     setRestockDate(initial.restockDate);
     setManualSales(initial.manualSales);
+    setPricingRuleEnabled(initial.pricingRuleEnabled);
+    setPricingRuleType(initial.pricingRuleType);
+    setPricingRuleValue(initial.pricingRuleValue);
     setIsDirty(false);
   }
 
@@ -78,6 +94,9 @@ export function ProductConfigureCard({
         customThresholdMetafieldId: configure.customThresholdMetafieldId ?? "",
         expectedRestockDate: restockDate,
         manualDailySales: manualSales,
+        pricingRuleEnabled: String(pricingRuleEnabled),
+        pricingRuleType,
+        pricingRuleValue,
       },
       { method: "post" },
     );
@@ -125,30 +144,103 @@ export function ProductConfigureCard({
             }} />
           </div>
         </label>
+
+        {/* Same box as Shopify Tracking above, split by a divider instead of
+            its own bordered card — the two are directly related (Monitoring
+            is inert until Tracking is on), so nesting them separately just
+            added a redundant border. */}
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #e5e7eb", opacity: tracked ? 1 : 0.45 }}>
+          <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: tracked ? "pointer" : "not-allowed" }}>
+            <div>
+              <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Monitoring</p>
+              <p style={{ margin: "2px 0 0", fontSize: 12, color: monitoring && tracked ? "#059669" : "#9ca3af" }}>
+                {!tracked ? "Enable Shopify Tracking first." : monitoring ? "Active — Stock Alert will send alerts for this product." : "Inactive — no alerts will be sent."}
+              </p>
+            </div>
+            <div
+              onClick={() => { if (tracked) { setMonitoring(!monitoring); markDirty(); } }}
+              style={{
+                width: 44, height: 24, borderRadius: 12, background: monitoring && tracked ? "#008060" : "#d1d5db",
+                position: "relative", flexShrink: 0, transition: "background .2s", cursor: tracked ? "pointer" : "not-allowed",
+              }}
+            >
+              <div style={{
+                position: "absolute", top: 2, left: monitoring && tracked ? 22 : 2,
+                width: 20, height: 20, borderRadius: "50%", background: "#fff",
+                transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+              }} />
+            </div>
+          </label>
+        </div>
       </div>
 
-      <div style={{ marginBottom: 12, padding: "12px 14px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb", opacity: tracked ? 1 : 0.45 }}>
-        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: tracked ? "pointer" : "not-allowed" }}>
+      {/* Per-product only — no store-wide default. Stored as its own
+          product metafield (pricing-rules.server.ts), not StoreSettings,
+          since it only ever needs to be read for the one product a PO line
+          belongs to (see syncLineCostsToShopify). Sits above Inventory
+          Settings since it's about purchase orders, not stock monitoring. */}
+      <div style={{ marginBottom: 12, padding: 14, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
           <div>
-            <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Monitoring</p>
-            <p style={{ margin: "2px 0 0", fontSize: 12, color: monitoring && tracked ? "#059669" : "#9ca3af" }}>
-              {!tracked ? "Enable Shopify Tracking first." : monitoring ? "Active — Stock Alert will send alerts for this product." : "Inactive — no alerts will be sent."}
+            <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: "#374151" }}>Pricing rule</p>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#9ca3af" }}>
+              Enforced on every purchase order that sets a unit cost for this product — overwrites the current Shopify price, whatever it is, the moment the order is created.
             </p>
           </div>
           <div
-            onClick={() => { if (tracked) { setMonitoring(!monitoring); markDirty(); } }}
+            onClick={() => { setPricingRuleEnabled((v) => !v); markDirty(); }}
             style={{
-              width: 44, height: 24, borderRadius: 12, background: monitoring && tracked ? "#008060" : "#d1d5db",
-              position: "relative", flexShrink: 0, transition: "background .2s", cursor: tracked ? "pointer" : "not-allowed",
+              width: 44, height: 24, borderRadius: 12, background: pricingRuleEnabled ? "#008060" : "#d1d5db",
+              position: "relative", flexShrink: 0, transition: "background .2s", cursor: "pointer", marginLeft: 12,
             }}
           >
             <div style={{
-              position: "absolute", top: 2, left: monitoring && tracked ? 22 : 2,
+              position: "absolute", top: 2, left: pricingRuleEnabled ? 22 : 2,
               width: 20, height: 20, borderRadius: "50%", background: "#fff",
               transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
             }} />
           </div>
         </label>
+
+        {pricingRuleEnabled && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #e5e7eb" }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              {PRICING_RULE_TYPES.map((t) => (
+                <label
+                  key={t.value}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                    padding: "6px 12px", borderRadius: 8, flex: 1, justifyContent: "center",
+                    border: `1.5px solid ${pricingRuleType === t.value ? "#4f46e5" : "#e5e7eb"}`,
+                    background: pricingRuleType === t.value ? "#eef2ff" : "#fff",
+                    fontSize: 13, fontWeight: 500, color: pricingRuleType === t.value ? "#4338ca" : "#374151",
+                  }}
+                >
+                  <input
+                    type="radio" name="pdp-pricing-rule-type" value={t.value}
+                    checked={pricingRuleType === t.value}
+                    onChange={() => { setPricingRuleType(t.value); markDirty(); }}
+                    style={{ display: "none" }}
+                  />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="number" min={0} step={0.01}
+                value={pricingRuleValue}
+                onChange={(e) => { setPricingRuleValue(e.target.value); markDirty(); }}
+                aria-label="Pricing rule value"
+                style={{ width: 100, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
+              />
+              <span style={{ fontSize: 13, color: "#374151" }}>{PRICING_RULE_TYPES.find((t) => t.value === pricingRuleType)?.suffix}</span>
+            </div>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
+              {PRICING_RULE_TYPES.find((t) => t.value === pricingRuleType)?.help}
+            </p>
+          </div>
+        )}
       </div>
 
       {tracked && (
@@ -236,7 +328,9 @@ export function ProductConfigureCard({
         </div>
       )}
 
-      <div style={{ marginBottom: 12, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+      {/* Both forecast-related inputs share one box, divided instead of
+          nested separately — same reasoning as Tracking/Monitoring above. */}
+      <div style={{ marginBottom: 16, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
         <label htmlFor="pdp-restock-date" style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
           Expected restock date
         </label>
@@ -250,37 +344,37 @@ export function ProductConfigureCard({
         <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
           When do you expect this product to be restocked? Shown on the Back in Stock page.
         </p>
-      </div>
 
-      <div style={{ marginBottom: 16, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-        <label htmlFor="pdp-manual-sales" style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
-          Daily sales override
-        </label>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            id="pdp-manual-sales"
-            type="number"
-            value={manualSales}
-            onChange={(e) => { setManualSales(e.target.value); markDirty(); }}
-            min={0}
-            step={0.1}
-            placeholder={product.manualDailySales == null ? "Auto" : ""}
-            style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
-          />
-          <span style={{ fontSize: 13, color: "#374151" }}>units / day</span>
-          {manualSales !== "" && (
-            <button
-              type="button"
-              onClick={() => { setManualSales(""); markDirty(); }}
-              style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
-            >
-              Clear
-            </button>
-          )}
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+          <label htmlFor="pdp-manual-sales" style={{ display: "block", fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 6 }}>
+            Daily sales override
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              id="pdp-manual-sales"
+              type="number"
+              value={manualSales}
+              onChange={(e) => { setManualSales(e.target.value); markDirty(); }}
+              min={0}
+              step={0.1}
+              placeholder={product.manualDailySales == null ? "Auto" : ""}
+              style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "5px 10px", fontSize: 13 }}
+            />
+            <span style={{ fontSize: 13, color: "#374151" }}>units / day</span>
+            {manualSales !== "" && (
+              <button
+                type="button"
+                onClick={() => { setManualSales(""); markDirty(); }}
+                style={{ fontSize: 12, color: "#6b7280", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
+            Override the auto-calculated rate for new products with no order history. Leave blank to use the average.
+          </p>
         </div>
-        <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
-          Override the auto-calculated rate for new products with no order history. Leave blank to use the average.
-        </p>
       </div>
 
       {isDirty && (

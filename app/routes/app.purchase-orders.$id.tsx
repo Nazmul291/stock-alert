@@ -6,7 +6,7 @@ import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { canUseFeature } from "../lib/plan-limits";
 import { sendPurchaseOrderEmail } from "../lib/notifications";
-import { receivePurchaseOrderItems, getVariantLocationLevels, type VariantLocationLevel, sanitizeQuantity, sanitizeUnitCost } from "../lib/purchase-order.server";
+import { receivePurchaseOrderItems, getVariantLocationsForPicker, type VariantLocationLevel, sanitizeQuantity, sanitizeUnitCost } from "../lib/purchase-order.server";
 import { PurchaseOrderDetail, type PurchaseOrderDetailData } from "../components/purchase-orders/PurchaseOrderDetail";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -30,7 +30,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Shopify call entirely for those.
   const canReceive = po.status === "ordered" || po.status === "partially_received";
   const locationsByVariant: Map<string, VariantLocationLevel[]> = canReceive
-    ? await getVariantLocationLevels(admin, po.lineItems.map((li) => li.variantId)).catch(() => new Map())
+    ? await getVariantLocationsForPicker(admin, po.lineItems.map((li) => li.variantId)).catch(() => new Map())
     : new Map();
 
   const data: PurchaseOrderDetailData = {

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
+import { StatusPill } from "../StatusPill";
+import { STATUS_STYLE } from "./PurchaseOrderList";
 
 export type PurchaseOrderDetailData = {
   id: string;
@@ -55,14 +57,6 @@ export type PurchaseOrderDetailData = {
 
 type ActionResult = { success: boolean; error?: string; intent?: string; message?: string };
 
-const STATUS_STYLE: Record<PurchaseOrderDetailData["status"], { bg: string; color: string; label: string }> = {
-  draft: { bg: "#f3f4f6", color: "#374151", label: "Draft" },
-  ordered: { bg: "#dbeafe", color: "#1e40af", label: "Ordered" },
-  partially_received: { bg: "#fef3c7", color: "#92400e", label: "Partially Received" },
-  received: { bg: "#d1fae5", color: "#065f46", label: "Received" },
-  cancelled: { bg: "#fee2e2", color: "#991b1b", label: "Cancelled" },
-};
-
 export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   const editFetcher = useFetcher<ActionResult>();
   const actionFetcher = useFetcher<ActionResult>();
@@ -70,7 +64,10 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
 
   const isDraft = po.status === "draft";
   const canReceive = po.status === "ordered" || po.status === "partially_received";
-  const canSend = po.status === "draft" || po.status === "ordered";
+  // Draft sending now goes through "Order Now" below (save + order + email
+  // in one step, matching ManagePurchaseOrderModal on the product page) —
+  // this is only for resending once a PO is already past draft.
+  const canSend = po.status === "ordered";
   const canCancel = po.status !== "received" && po.status !== "cancelled";
 
   const [lineEdits, setLineEdits] = useState<Record<string, { quantityOrdered: string; unitCost: string }>>(
@@ -99,6 +96,32 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   const s = STATUS_STYLE[po.status];
   const busy = editFetcher.state !== "idle" || actionFetcher.state !== "idle";
   const missingCostCount = po.lineItems.filter((li) => li.unitCost == null).length;
+  const hasValidLine = Object.values(lineEdits).some((e) => (parseInt(e.quantityOrdered) || 0) > 0);
+  const lastActionIntent = actionFetcher.data?.intent;
+
+  function currentLineItems() {
+    return po.lineItems.map((li) => ({
+      id: li.id,
+      quantityOrdered: Math.max(0, parseInt(lineEdits[li.id]?.quantityOrdered ?? "0") || 0),
+      unitCost: lineEdits[li.id]?.unitCost.trim() ? parseFloat(lineEdits[li.id].unitCost) : null,
+    }));
+  }
+  function currentTags() {
+    return tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
+  }
+  function orderNow() {
+    actionFetcher.submit(
+      {
+        intent: "order_now",
+        lineItems: JSON.stringify(currentLineItems()),
+        referenceNumber,
+        supplierNote,
+        terms,
+        tags: JSON.stringify(currentTags()),
+      },
+      { method: "post" },
+    );
+  }
   // Blocks submission client-side when a multi-location variant has a
   // pending receive quantity but no location chosen yet — the server
   // enforces this too (receivePurchaseOrderItems), this just avoids a
@@ -111,7 +134,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   return (
     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <span style={{ background: s.bg, color: s.color, padding: "4px 10px", borderRadius: 12, fontSize: 13, fontWeight: 600 }}>{s.label}</span>
+        <StatusPill label={s.label} bg={s.bg} color={s.color} size="md" />
         {po.sentToSupplierAt && <span style={{ fontSize: 13, color: "#6b7280" }}>Sent to supplier {new Date(po.sentToSupplierAt).toLocaleDateString()}</span>}
         {po.receivedAt && <span style={{ fontSize: 13, color: "#6b7280" }}>Received {new Date(po.receivedAt).toLocaleDateString()}</span>}
       </div>
@@ -290,36 +313,30 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
           <button
             type="button" disabled={busy}
             onClick={() => {
-              const lineItems = po.lineItems.map((li) => ({
-                id: li.id,
-                quantityOrdered: Math.max(0, parseInt(lineEdits[li.id]?.quantityOrdered ?? "0") || 0),
-                unitCost: lineEdits[li.id]?.unitCost.trim() ? parseFloat(lineEdits[li.id].unitCost) : null,
-              }));
-              const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
               editFetcher.submit(
                 {
                   intent: "update_line_items",
-                  lineItems: JSON.stringify(lineItems),
+                  lineItems: JSON.stringify(currentLineItems()),
                   referenceNumber,
                   supplierNote,
                   terms,
-                  tags: JSON.stringify(tags),
+                  tags: JSON.stringify(currentTags()),
                 },
                 { method: "post" },
               );
             }}
-            style={btnStyle(busy, "#111827", "#fff")}
+            style={btnStyle(busy, "#fff", "#374151", "1px solid #d1d5db")}
           >
-            Save Changes
+            {editFetcher.state !== "idle" ? "Saving…" : "Save Changes"}
           </button>
         )}
         {isDraft && (
           <button
-            type="button" disabled={busy}
-            onClick={() => actionFetcher.submit({ intent: "mark_ordered" }, { method: "post" })}
-            style={btnStyle(busy, "#059669", "#fff")}
+            type="button" onClick={orderNow} disabled={busy || !hasValidLine}
+            title={!hasValidLine ? "Set a quantity greater than zero on at least one item." : undefined}
+            style={btnStyle(busy || !hasValidLine, "#111827", "#fff")}
           >
-            Mark as Ordered
+            {busy && lastActionIntent === "order_now" ? "Ordering…" : "Order Now"}
           </button>
         )}
         {canSend && (
