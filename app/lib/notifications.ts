@@ -21,6 +21,7 @@ import { sendKlaviyoEvent } from './klaviyo.server';
 import { sendWhatsAppTemplate } from './whatsapp.server';
 import { publishEvent } from './broadcast.server';
 import { getValidAsanaAccessToken, createAsanaTask, createAsanaSubtask, AsanaApiError } from './asana.server';
+import { realVariantTitle } from './variant-display';
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
@@ -917,7 +918,7 @@ export async function sendAlertBatchSlack(webhookUrl: string, data: AlertBatchEm
   const listSection = (label: string, events: AlertBatchEvent[]): string | null => {
     if (events.length === 0) return null;
     const lines = events.slice(0, 10).map((e) => {
-      const suffix = e.variantTitle ? ` — ${e.variantTitle}` : '';
+      const suffix = realVariantTitle(e.variantTitle) ? ` — ${realVariantTitle(e.variantTitle)}` : '';
       const qty = e.quantityAtAlert != null ? ` (${e.quantityAtAlert} units)` : '';
       return `• ${e.productTitle ?? 'Unknown'}${suffix}${qty}`;
     });

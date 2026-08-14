@@ -25,7 +25,10 @@ export function ProductsAtRiskSection() {
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {rows.map((p) => {
           const isOut = p.inventoryStatus === "out_of_stock";
-          const href = `/app/products?filter=${isOut ? "out_of_stock" : "low_stock"}`;
+          // Straight to this product's own detail page — not the filtered
+          // list — since the merchant already knows which product they
+          // clicked; sending them to a list just makes them find it again.
+          const href = `/app/products/${p.productId}`;
           return (
             <div
               key={p.productId}

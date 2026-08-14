@@ -59,22 +59,22 @@ export function AlertDeliverySection({
         </p>
 
         <div style={{ marginTop: 16 }}>
-          <p style={fieldLabel}>Mute specific alerts</p>
+          <p style={fieldLabel}>Choose which alerts to receive</p>
           <Toggle
             label="Low stock alerts"
-            description="Mute Email and Slack for low-stock alerts."
+            description="Send Email and Slack alerts when stock runs low."
             checked={!lowStockMuted}
             onChange={(v) => onLowStockMutedChange(!v)}
           />
           <Toggle
             label="Out of stock alerts"
-            description="Mute Email and Slack for out-of-stock alerts."
+            description="Send Email and Slack alerts when a product sells out."
             checked={!outOfStockMuted}
             onChange={(v) => onOutOfStockMutedChange(!v)}
           />
           <Toggle
             label="Back in stock alerts"
-            description="Mute Email and Slack for restock alerts."
+            description="Send Email and Slack alerts when a product is back in stock."
             checked={!restockMuted}
             onChange={(v) => onRestockMutedChange(!v)}
           />

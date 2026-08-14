@@ -83,7 +83,7 @@ model StoreSettings {
   // "instant" (today's behavior) or "daily" (one batched summary at 23:55 UTC,
   // see processAlertBatches). In-app history, WhatsApp, Klaviyo, Asana, and
   // Shopify Flow are unaffected by this and always fire immediately.
-  alertDeliveryMode      String    @default("instant") @map("alert_delivery_mode")
+  alertDeliveryMode      String    @default("daily") @map("alert_delivery_mode")
   lastAlertBatchSentAt   DateTime? @map("last_alert_batch_sent_at") @db.Timestamptz
   // Per-event-type mute — Email + Slack only, same scoping as above.
   lowStockMuted          Boolean   @default(false) @map("low_stock_muted")

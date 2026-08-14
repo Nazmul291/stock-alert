@@ -37,7 +37,12 @@ export const action = ({ request }: ActionFunctionArgs) =>
         data: { supplierId },
       });
       invalidateShopCache(shop);
-      return { success: true as const, ...po };
+      // Built server-side because the extension sandbox has no access to
+      // the app's own API key — the "View Purchase Order" button on the
+      // success screen just uses this directly, same admin deep-link
+      // pattern as the email templates' CTA buttons.
+      const purchaseOrderUrl = `https://admin.shopify.com/store/${shop.replace(".myshopify.com", "")}/apps/${process.env.SHOPIFY_API_KEY}/app/purchase-orders/${po.purchaseOrderId}`;
+      return { success: true as const, ...po, purchaseOrderUrl };
     } catch (err) {
       return { success: false as const, error: err instanceof Error ? err.message : "Failed to create purchase order." };
     }

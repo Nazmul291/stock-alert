@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendRestockAlert, sendBackInStockNotifications } from "../lib/notifications";
+import { realVariantTitle } from "../lib/variant-display";
 import {
   getBoss,
   QUEUE_NAME,
@@ -343,7 +344,10 @@ async function processInventoryUpdate(
     sku: existingTracking.sku ?? null,
     imageUrl: productImageUrl,
     variantId,
-    variantTitle: existingTracking.variantTitle ?? null,
+    // Feeds every downstream alert channel (email, Slack, WhatsApp, Asana,
+    // AlertHistory) for low_stock/out_of_stock/restock alike — see
+    // realVariantTitle for why "Default Title" is never a real variant name.
+    variantTitle: realVariantTitle(existingTracking.variantTitle),
   };
 
   console.log(

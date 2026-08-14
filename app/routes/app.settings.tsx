@@ -178,7 +178,7 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   monitoringTags: "",
   limitedEditionTag: "limited-edition",
   deadStockThresholdDays: 60,
-  alertDeliveryMode: "instant",
+  alertDeliveryMode: "daily",
   lowStockMuted: false,
   outOfStockMuted: false,
   restockMuted: false,

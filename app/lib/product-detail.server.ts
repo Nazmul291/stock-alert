@@ -2,9 +2,11 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { getCachedSettings } from "./shop-cache.server";
 import { canUseFeature } from "./plan-limits";
-import { suggestReorderQuantity, getVariantLocationLevels, type VariantLocationLevel } from "./purchase-order.server";
+import { suggestReorderQuantity, getVariantLocationsForPicker, getVariantPricing, type VariantLocationLevel, type VariantPricing } from "./purchase-order.server";
+import { parsePricingRuleConfig, type PricingRuleType } from "./pricing-rules.server";
 import { buildTrackedProductRow } from "./products-data.server";
 import { PRODUCT_INVENTORY_QUERY, PRODUCT_METAFIELDS_QUERY } from "./graphql";
+import { realVariantTitle } from "./variant-display";
 import type { ProductRow, VariantStatusRow } from "../components/products/ProductEditModal";
 import type { PurchaseOrderStatus } from "@prisma/client";
 
@@ -15,9 +17,16 @@ export type ProductDetailVariantForPo = {
   currentQuantity: number;
   suggestedQuantity: number;
   unitCost: number | null;
-  // Empty when the product has a single location (or the live Shopify lookup
-  // failed) — the Create Purchase Order card falls back to one quantity
-  // field per variant in that case, same as before this field existed.
+  // Live from Shopify (see getVariantPricing) — null only if that lookup
+  // failed, in which case the Create Purchase Order card's Price column is
+  // just left blank for that variant.
+  price: string | null;
+  compareAtPrice: string | null;
+  // One entry per *shop* location (not just ones this variant already has
+  // inventory tracked at) so the Create Purchase Order card can target any
+  // location as a destination — see getVariantLocationsForPicker. Empty only
+  // if the live Shopify lookup itself failed, in which case the card falls
+  // back to one plain quantity field per variant with no location choice.
   locations: { locationId: string; locationName: string; available: number }[];
 };
 
@@ -79,6 +88,11 @@ export type ProductDetailConfigure = {
   autoRepublish: boolean | null;
   customThreshold: string;
   customThresholdMetafieldId: string | null;
+  // Per-product only — see pricing-rules.server.ts. No global/store default;
+  // a product with no metafield set just has pricingRuleEnabled: false.
+  pricingRuleEnabled: boolean;
+  pricingRuleType: PricingRuleType;
+  pricingRuleValue: string;
 };
 
 export type ProductDetailData = {
@@ -164,6 +178,7 @@ export async function getProductDetail(shop: string, productId: string, plan: st
             customThreshold: { id: string; value: string } | null;
             autoHide: { id: string; value: string } | null;
             autoRepublish: { id: string; value: string } | null;
+            pricingRule: { id: string; value: string } | null;
           } | null;
         };
       } | null>,
@@ -206,37 +221,56 @@ export async function getProductDetail(shop: string, productId: string, plan: st
   }
 
   const p = metafields?.data?.product;
+  const pricingRule = parsePricingRuleConfig(p?.pricingRule?.value);
   const configure: ProductDetailConfigure = {
     customThreshold: p?.customThreshold?.value ?? "",
     customThresholdMetafieldId: p?.customThreshold?.id ?? null,
     autoHide: p?.autoHide?.value !== undefined ? p.autoHide?.value === "true" : null,
     autoRepublish: p?.autoRepublish?.value !== undefined ? p.autoRepublish?.value === "true" : null,
+    pricingRuleEnabled: pricingRule.enabled,
+    pricingRuleType: pricingRule.type,
+    pricingRuleValue: String(pricingRule.value),
   };
 
   const defaultLeadTime = settings?.supplierLeadTimeDays ?? 7;
-  // Best-effort — a Shopify API hiccup here shouldn't break the whole page,
-  // it just means the Create Purchase Order card falls back to one combined
-  // quantity field per variant instead of one per location (same defensive
-  // pattern app.purchase-orders.$id.tsx uses around this same call). Skipped
-  // entirely on plans that can't manage suppliers/POs — this data is never
-  // rendered there (the section shows SuppliersUpsellCard instead), so
-  // there's no reason to pay for the extra Shopify API round trip.
-  const locationsByVariant = canManageSupplier && rows.length > 0
-    ? await getVariantLocationLevels(admin, rows.map((r) => r.variantId)).catch(() => new Map<string, VariantLocationLevel[]>())
-    : new Map<string, VariantLocationLevel[]>();
-  const variantsForPo: ProductDetailVariantForPo[] = rows.map((r) => ({
-    variantId: r.variantId.toString(),
-    variantTitle: r.variantTitle,
-    sku: r.sku,
-    currentQuantity: r.currentQuantity,
-    suggestedQuantity: suggestReorderQuantity(r.currentQuantity, r.manualDailySales ?? r.avgDailySales, defaultLeadTime),
-    unitCost: r.unitCost,
-    locations: (locationsByVariant.get(r.variantId.toString()) ?? []).map((l) => ({
-      locationId: l.locationId,
-      locationName: l.locationName,
-      available: l.available,
-    })),
-  }));
+  // Both best-effort and run in parallel — a Shopify API hiccup on either
+  // shouldn't break the whole page (locations falls back to one plain
+  // quantity field per variant with no location choice; pricing just leaves
+  // the Price column blank). Skipped entirely on plans that can't manage
+  // suppliers/POs — this data is never rendered there (the section shows
+  // SuppliersUpsellCard instead), so there's no reason to pay for the extra
+  // Shopify API round trips.
+  const [locationsByVariant, pricingByVariant] = canManageSupplier && rows.length > 0
+    ? await Promise.all([
+        getVariantLocationsForPicker(admin, rows.map((r) => r.variantId)).catch(() => new Map<string, VariantLocationLevel[]>()),
+        getVariantPricing(admin, rows.map((r) => r.variantId)).catch(() => new Map<string, VariantPricing>()),
+      ])
+    : [new Map<string, VariantLocationLevel[]>(), new Map<string, VariantPricing>()];
+  const variantsForPo: ProductDetailVariantForPo[] = rows.map((r) => {
+    // Shopify's own "Cost per item" is preferred over our InventoryTracking.unitCost
+    // column, which nothing ever writes to — every PO with a cost pushes it
+    // to Shopify (syncLineCostsToShopify), so Shopify's copy is the one
+    // that's actually kept current, and the Create Purchase Order card's
+    // Unit Cost field should default to it rather than going blank again.
+    const liveUnitCost = parseFloat(pricingByVariant.get(r.variantId.toString())?.unitCost ?? "");
+    return {
+      variantId: r.variantId.toString(),
+      variantTitle: r.variantTitle,
+      // Same live-Shopify-first pattern as unitCost/price below —
+      // InventoryTracking.sku is only as fresh as the last product webhook.
+      sku: pricingByVariant.get(r.variantId.toString())?.sku ?? r.sku,
+      currentQuantity: r.currentQuantity,
+      suggestedQuantity: suggestReorderQuantity(r.currentQuantity, r.manualDailySales ?? r.avgDailySales, defaultLeadTime),
+      unitCost: !isNaN(liveUnitCost) ? liveUnitCost : r.unitCost,
+      price: pricingByVariant.get(r.variantId.toString())?.price ?? null,
+      compareAtPrice: pricingByVariant.get(r.variantId.toString())?.compareAtPrice ?? null,
+      locations: (locationsByVariant.get(r.variantId.toString()) ?? []).map((l) => ({
+        locationId: l.locationId,
+        locationName: l.locationName,
+        available: l.available,
+      })),
+    };
+  });
 
   const [alerts, lineItems] = await Promise.all([
     prisma.alertHistory.findMany({
@@ -275,7 +309,7 @@ export async function getProductDetail(shop: string, productId: string, plan: st
     const po = items[0].purchaseOrder;
     const quantityOrdered = items.reduce((sum, i) => sum + i.quantityOrdered, 0);
     const quantityReceived = items.reduce((sum, i) => sum + i.quantityReceived, 0);
-    const variantTitle = items.map((i) => i.variantTitle).filter(Boolean).join(", ") || null;
+    const variantTitle = items.map((i) => realVariantTitle(i.variantTitle)).filter(Boolean).join(", ") || null;
     const base = {
       poId,
       poNumber: po.poNumber,

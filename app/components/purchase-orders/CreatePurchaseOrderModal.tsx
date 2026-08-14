@@ -1,21 +1,53 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useFetcher, useNavigate } from "react-router";
-import type { SupplierPreview, ProductPickerRow } from "../../lib/purchase-order.server";
+import { ProductPickerModal } from "./ProductPickerModal";
+import { Thumbnail } from "./Thumbnail";
 
 const NEW_SUPPLIER = "__new__";
-const MIN_SEARCH_LENGTH = 2;
 
-type LineState = { productTitle: string | null; variantTitle: string | null; sku: string | null; quantityOrdered: string; unitCost: string };
+export type LineState = {
+  productTitle: string | null;
+  variantTitle: string | null;
+  sku: string | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  currentQuantity: number;
+  price: string | null;
+  compareAtPrice: string | null;
+  quantityOrdered: string;
+  unitCost: string;
+};
+export type CandidateRow = {
+  productId: string;
+  variantId: string;
+  productTitle: string | null;
+  variantTitle: string | null;
+  sku: string | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  currentQuantity: number;
+  suggestedQuantity: number;
+  unitCost: number | null;
+  price: string | null;
+  compareAtPrice: string | null;
+};
 
 type SupplierOption = { id: string; name: string; paymentTerms: string | null };
+type LocationOption = { id: string; name: string };
 
 type CreateSupplierResult = { success: boolean; error?: string; id?: string; name?: string };
-type CreatePOResult = { success: boolean; error?: string; purchaseOrderId?: string };
+type CreatePOResult = { success: boolean; error?: string; purchaseOrderId?: string; costSyncWarning?: string | null };
 
-export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: SupplierOption[]; onClose: () => void }) {
+function formatMoney(n: number): string {
+  return n.toFixed(2);
+}
+
+export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { suppliers: SupplierOption[]; locations: LocationOption[]; onClose: () => void }) {
   const navigate = useNavigate();
   const [supplierList, setSupplierList] = useState(suppliers);
   const [supplierId, setSupplierId] = useState("");
+  const [locationId, setLocationId] = useState(locations[0]?.id ?? "");
   const [showNewSupplierForm, setShowNewSupplierForm] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState("");
   const [newSupplierContactName, setNewSupplierContactName] = useState("");
@@ -36,18 +68,10 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
   const [supplierNote, setSupplierNote] = useState("");
   const [terms, setTerms] = useState("");
   const [tagsInput, setTagsInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [showResults, setShowResults] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const supplierFetcher = useFetcher<CreateSupplierResult>();
-  const suggestFetcher = useFetcher<{ preview: SupplierPreview[] }>();
-  const searchFetcher = useFetcher<{ products: ProductPickerRow[] }>();
   const createFetcher = useFetcher<CreatePOResult>();
-
-  function loadSuggestions(id: string) {
-    suggestFetcher.load(`/app/purchase-orders?intent=suggested_lines&supplierId=${encodeURIComponent(id)}`);
-  }
 
   function handleSupplierChange(value: string) {
     if (value === NEW_SUPPLIER) {
@@ -56,16 +80,13 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
     }
     setSupplierId(value);
     setShowNewSupplierForm(false);
-    if (value) {
-      loadSuggestions(value);
-      // Auto-populates from the supplier's own payment terms, same as
-      // Shopify's own supplier form promises ("This will auto populate the
-      // payment information on the purchase order.") — only when the
-      // merchant hasn't already typed something of their own in here.
-      if (!terms.trim()) {
-        const picked = supplierList.find((s) => s.id === value);
-        if (picked?.paymentTerms) setTerms(picked.paymentTerms);
-      }
+    // Auto-populates from the supplier's own payment terms, same as
+    // Shopify's own supplier form promises ("This will auto populate the
+    // payment information on the purchase order.") — only when the
+    // merchant hasn't already typed something of their own in here.
+    if (value && !terms.trim()) {
+      const picked = supplierList.find((s) => s.id === value);
+      if (picked?.paymentTerms) setTerms(picked.paymentTerms);
     }
   }
 
@@ -119,29 +140,11 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
       setShowNewSupplierForm(false);
       if (!terms.trim() && newSupplier.paymentTerms) setTerms(newSupplier.paymentTerms);
       resetNewSupplierForm();
-      loadSuggestions(newSupplier.id);
+      // No explicit reload — setSupplierId above already changes suggestUrl,
+      // which useSSEData picks up on its own.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierFetcher.state, supplierFetcher.data]);
-
-  // Suggestions replace the line-item list wholesale when the supplier
-  // changes (they're a starting point, not merged with whatever was there
-  // for a different supplier) — quantity/cost stay fully editable/removable.
-  useEffect(() => {
-    const preview = suggestFetcher.data?.preview?.[0];
-    const next: Record<string, LineState> = {};
-    for (const line of preview?.lines ?? []) {
-      next[line.variantId] = {
-        productTitle: line.productTitle,
-        variantTitle: line.variantTitle,
-        sku: line.sku,
-        quantityOrdered: String(Math.max(line.suggestedQuantity, 0)),
-        unitCost: line.unitCost != null ? String(line.unitCost) : "",
-      };
-    }
-    setLines(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestFetcher.data]);
 
   useEffect(() => {
     if (createFetcher.state === "idle" && createFetcher.data?.success && createFetcher.data.purchaseOrderId) {
@@ -149,42 +152,38 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
     }
   }, [createFetcher.state, createFetcher.data, navigate]);
 
-  // Live search-as-you-type (debounced), once a supplier is selected and the
-  // merchant has typed at least MIN_SEARCH_LENGTH characters. Below that,
-  // no request fires at all — on a catalog with thousands of products,
-  // dumping an arbitrary alphabetical page on focus isn't a useful starting
-  // point and just adds load for no benefit; the hint text below guides the
-  // merchant to type instead.
-  useEffect(() => {
-    if (!supplierId || search.trim().length < MIN_SEARCH_LENGTH) return;
-    const handle = setTimeout(() => {
-      searchFetcher.load(`/app/purchase-orders?intent=search_products&search=${encodeURIComponent(search.trim())}`);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, 250);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, supplierId]);
-
-  // Delayed so a click on a result row (which blurs the input) still
-  // registers before the dropdown unmounts.
-  function handleSearchBlur() {
-    setTimeout(() => setShowResults(false), 150);
+  function toggleLine(row: CandidateRow) {
+    setLines((prev) => {
+      if (prev[row.variantId]) {
+        const next = { ...prev };
+        delete next[row.variantId];
+        return next;
+      }
+      return {
+        ...prev,
+        [row.variantId]: {
+          productTitle: row.productTitle,
+          variantTitle: row.variantTitle,
+          sku: row.sku,
+          imageUrl: row.imageUrl,
+          imageAlt: row.imageAlt,
+          currentQuantity: row.currentQuantity,
+          price: row.price,
+          compareAtPrice: row.compareAtPrice,
+          // Left empty rather than forced to 1 when there's no suggested
+          // quantity to seed it with — same as ProductCreatePoCard's own
+          // default — so an empty field visibly still needs the merchant's
+          // input instead of silently ordering 1 of something they only
+          // meant to review.
+          quantityOrdered: row.suggestedQuantity > 0 ? String(row.suggestedQuantity) : "",
+          unitCost: row.unitCost != null ? String(row.unitCost) : "",
+        },
+      };
+    });
   }
 
-  function addLine(row: ProductPickerRow) {
-    setLines((prev) => ({
-      ...prev,
-      [row.variantId]: {
-        productTitle: row.productTitle,
-        variantTitle: row.variantTitle,
-        sku: row.sku,
-        quantityOrdered: String(prev[row.variantId] ? parseInt(prev[row.variantId].quantityOrdered) || 0 : Math.max(row.suggestedQuantity, 1)),
-        unitCost: row.unitCost != null ? String(row.unitCost) : "",
-      },
-    }));
-    setSearch("");
-    setShowResults(false);
-    searchInputRef.current?.focus();
+  function updateLine(variantId: string, patch: Partial<LineState>) {
+    setLines((prev) => (prev[variantId] ? { ...prev, [variantId]: { ...prev[variantId], ...patch } } : prev));
   }
 
   function removeLine(variantId: string) {
@@ -195,22 +194,19 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
     });
   }
 
-  function updateLine(variantId: string, patch: Partial<LineState>) {
-    setLines((prev) => ({ ...prev, [variantId]: { ...prev[variantId], ...patch } }));
-  }
-
   const lineEntries = Object.entries(lines);
   const hasValidLine = lineEntries.some(([, l]) => (parseInt(l.quantityOrdered) || 0) > 0);
   const creating = createFetcher.state !== "idle";
-  const canSubmit = !!supplierId && hasValidLine && !creating;
-  const availableResults = (searchFetcher.data?.products ?? []).filter((row) => !lines[row.variantId]);
+  const canSubmit = !!supplierId && !!locationId && hasValidLine && !creating;
 
   function handleCreate() {
+    const chosenLocation = locations.find((l) => l.id === locationId) ?? null;
     const submitLines = lineEntries
       .map(([variantId, l]) => ({
         variantId,
         quantityOrdered: parseInt(l.quantityOrdered) || 0,
         unitCost: l.unitCost.trim() !== "" && !isNaN(parseFloat(l.unitCost)) ? parseFloat(l.unitCost) : null,
+        sku: l.sku,
       }))
       .filter((l) => l.quantityOrdered > 0);
     const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
@@ -218,6 +214,8 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
       {
         intent: "create_po",
         supplierId,
+        locationId: chosenLocation?.id ?? "",
+        locationName: chosenLocation?.name ?? "",
         lines: JSON.stringify(submitLines),
         referenceNumber,
         supplierNote,
@@ -228,12 +226,16 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
     );
   }
 
-  return (
+  // Portal to <body>, not rendered inline inside <s-page> — matches
+  // ManagePurchaseOrderModal's existing pattern. Font is set explicitly
+  // because the portal escapes <s-page>'s DOM subtree, where the admin's
+  // Inter font is actually applied.
+  return createPortal(
     <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 720, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", overflow: "hidden" }}>
+      <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 820, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", overflow: "hidden" }}>
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: "#111827" }}>Create Purchase Order</p>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 20, lineHeight: 1, padding: 4 }}>
@@ -247,242 +249,267 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
               {createFetcher.data.error}
             </div>
           )}
+          {createFetcher.data?.success && createFetcher.data.costSyncWarning && (
+            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", marginBottom: 16, color: "#92400e", fontSize: 13 }}>
+              {createFetcher.data.costSyncWarning}
+            </div>
+          )}
 
-          <div style={{ marginBottom: 20 }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Supplier</label>
-            <select
-              value={showNewSupplierForm ? NEW_SUPPLIER : supplierId}
-              onChange={(e) => handleSupplierChange(e.target.value)}
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13 }}
-            >
-              <option value="">Select a supplier…</option>
-              {supplierList.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-              <option value={NEW_SUPPLIER}>+ New Supplier…</option>
-            </select>
-
-            {showNewSupplierForm && (
-              <div style={{ marginTop: 10, padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                {supplierFetcher.data && !supplierFetcher.data.success && (
-                  <p style={{ margin: "0 0 8px", fontSize: 12, color: "#991b1b" }}>{supplierFetcher.data.error}</p>
-                )}
-                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <input
-                    type="text" placeholder="Company *" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)}
-                    style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="text" placeholder="Contact name" value={newSupplierContactName} onChange={(e) => setNewSupplierContactName(e.target.value)}
-                    style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <input
-                    type="email" required placeholder="Email *" value={newSupplierEmail} onChange={(e) => setNewSupplierEmail(e.target.value)}
-                    style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="tel" required placeholder="Phone *" value={newSupplierPhone} onChange={(e) => setNewSupplierPhone(e.target.value)}
-                    style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="url" placeholder="Website" value={newSupplierWebsite} onChange={(e) => setNewSupplierWebsite(e.target.value)}
-                    style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <input
-                    type="text" placeholder="Address" value={newSupplierAddress1} onChange={(e) => setNewSupplierAddress1(e.target.value)}
-                    style={{ flex: "1 1 220px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="text" placeholder="Apartment, suite, etc" value={newSupplierAddress2} onChange={(e) => setNewSupplierAddress2(e.target.value)}
-                    style={{ flex: "1 1 180px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <input
-                    type="text" placeholder="City" value={newSupplierCity} onChange={(e) => setNewSupplierCity(e.target.value)}
-                    style={{ flex: "1 1 130px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="text" placeholder="State/Province" value={newSupplierProvince} onChange={(e) => setNewSupplierProvince(e.target.value)}
-                    style={{ flex: "1 1 130px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="text" placeholder="ZIP code" value={newSupplierZip} onChange={(e) => setNewSupplierZip(e.target.value)}
-                    style={{ flex: "1 1 110px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="text" placeholder="Country/region" value={newSupplierCountry} onChange={(e) => setNewSupplierCountry(e.target.value)}
-                    style={{ flex: "1 1 150px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <input
-                    type="text" placeholder="Payment terms (e.g. Net 30)" value={newSupplierPaymentTerms} onChange={(e) => setNewSupplierPaymentTerms(e.target.value)}
-                    style={{ flex: "1 1 180px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="text" maxLength={10} placeholder="Currency (e.g. USD)" value={newSupplierCurrency} onChange={(e) => setNewSupplierCurrency(e.target.value)}
-                    style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                  <input
-                    type="number" min={1} placeholder="Lead time (days)" value={newSupplierLeadTime} onChange={(e) => setNewSupplierLeadTime(e.target.value)}
-                    style={{ flex: "1 1 120px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                  />
-                </div>
-                <button
-                  type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() || supplierFetcher.state !== "idle"}
-                  style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() ? "not-allowed" : "pointer" }}
-                >
-                  {supplierFetcher.state !== "idle" ? "Creating…" : "Create Supplier"}
-                </button>
-              </div>
-            )}
+          {/* Supplier + Location side by side, always visible — same layout
+              as the product-detail page's Create Purchase Order card. */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Supplier</label>
+              <select
+                value={showNewSupplierForm ? NEW_SUPPLIER : supplierId}
+                onChange={(e) => handleSupplierChange(e.target.value)}
+                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
+              >
+                <option value="">Select a supplier…</option>
+                {supplierList.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+                <option value={NEW_SUPPLIER}>+ New Supplier…</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Location</label>
+              <select
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+                disabled={locations.length === 0}
+                style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
+              >
+                <option value="">Select a location…</option>
+                {locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>{loc.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {supplierId && (
-            <>
-              <div style={{ marginBottom: 16, position: "relative" }}>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Add products</label>
+          {showNewSupplierForm && (
+            <div style={{ marginBottom: 20, padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+              {supplierFetcher.data && !supplierFetcher.data.success && (
+                <p style={{ margin: "0 0 8px", fontSize: 12, color: "#991b1b" }}>{supplierFetcher.data.error}</p>
+              )}
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <input
-                  ref={searchInputRef}
-                  type="text"
-                  placeholder="Search by product name or SKU…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onFocus={() => setShowResults(true)}
-                  onBlur={handleSearchBlur}
-                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, boxSizing: "border-box" }}
+                  type="text" placeholder="Company *" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)}
+                  style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
                 />
-                {showResults && (
-                  <div style={{
-                    position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 10,
-                    background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.1)",
-                    maxHeight: 220, overflowY: "auto",
-                  }}>
-                    {search.trim().length < MIN_SEARCH_LENGTH ? (
-                      <p style={{ margin: 0, padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>
-                        Type at least {MIN_SEARCH_LENGTH} characters to search your products.
-                      </p>
-                    ) : searchFetcher.state === "loading" ? (
-                      <p style={{ margin: 0, padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>Searching…</p>
-                    ) : availableResults.length === 0 ? (
-                      <p style={{ margin: 0, padding: "10px 12px", fontSize: 13, color: "#9ca3af" }}>
-                        {`No products match "${search.trim()}".`}
-                      </p>
-                    ) : (
-                      availableResults.map((row) => (
-                        <button
-                          key={row.variantId}
-                          type="button"
-                          onClick={() => addLine(row)}
-                          style={{
-                            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%",
-                            textAlign: "left", padding: "8px 12px", border: "none", borderBottom: "1px solid #f3f4f6",
-                            background: "none", cursor: "pointer", fontSize: 13, color: "#111827",
-                          }}
-                        >
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {row.productTitle ?? "—"}{row.variantTitle && row.variantTitle !== "Default Title" ? ` — ${row.variantTitle}` : ""}
-                            {row.sku && <span style={{ color: "#9ca3af" }}> · {row.sku}</span>}
-                          </span>
-                          <span style={{ flexShrink: 0, fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>
-                            {row.currentQuantity} in stock
-                            {row.suggestedQuantity > 0 && <span style={{ marginLeft: 6, color: "#4338ca", fontWeight: 600 }}>Suggested {row.suggestedQuantity}</span>}
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
+                <input
+                  type="text" placeholder="Contact name" value={newSupplierContactName} onChange={(e) => setNewSupplierContactName(e.target.value)}
+                  style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
               </div>
-
-              <div>
-                <p style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>
-                  Line items {suggestFetcher.state === "loading" && "(loading suggestions…)"}
-                </p>
-                {lineEntries.length === 0 ? (
-                  <p style={{ fontSize: 13, color: "#9ca3af" }}>No line items yet — search above to add products.</p>
-                ) : (
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                        {["Product", "SKU", "Qty", "Unit Cost", ""].map((label) => (
-                          <th key={label} style={{ textAlign: "left", padding: "6px 8px", fontWeight: 600, color: "#6b7280", fontSize: 12 }}>{label}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lineEntries.map(([variantId, l]) => (
-                        <tr key={variantId} style={{ borderBottom: "1px solid #f9fafb" }}>
-                          <td style={{ padding: "6px 8px" }}>{l.productTitle ?? "—"}{l.variantTitle && l.variantTitle !== "Default Title" ? ` — ${l.variantTitle}` : ""}</td>
-                          <td style={{ padding: "6px 8px", color: "#6b7280" }}>{l.sku ?? "—"}</td>
-                          <td style={{ padding: "6px 8px" }}>
-                            <input
-                              type="number" min={0} value={l.quantityOrdered}
-                              onChange={(e) => updateLine(variantId, { quantityOrdered: e.target.value })}
-                              style={{ width: 64, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13 }}
-                            />
-                          </td>
-                          <td style={{ padding: "6px 8px" }}>
-                            <input
-                              type="number" min={0} step={0.01} value={l.unitCost}
-                              onChange={(e) => updateLine(variantId, { unitCost: e.target.value })}
-                              style={{ width: 80, border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13 }}
-                            />
-                          </td>
-                          <td style={{ padding: "6px 8px" }}>
-                            <button type="button" onClick={() => removeLine(variantId)} style={{ background: "none", border: "none", color: "#991b1b", cursor: "pointer", fontSize: 14 }}>
-                              ✕
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <input
+                  type="email" required placeholder="Email *" value={newSupplierEmail} onChange={(e) => setNewSupplierEmail(e.target.value)}
+                  style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="tel" required placeholder="Phone *" value={newSupplierPhone} onChange={(e) => setNewSupplierPhone(e.target.value)}
+                  style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="url" placeholder="Website" value={newSupplierWebsite} onChange={(e) => setNewSupplierWebsite(e.target.value)}
+                  style={{ flex: "1 1 160px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
               </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <input
+                  type="text" placeholder="Address" value={newSupplierAddress1} onChange={(e) => setNewSupplierAddress1(e.target.value)}
+                  style={{ flex: "1 1 220px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="text" placeholder="Apartment, suite, etc" value={newSupplierAddress2} onChange={(e) => setNewSupplierAddress2(e.target.value)}
+                  style={{ flex: "1 1 180px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <input
+                  type="text" placeholder="City" value={newSupplierCity} onChange={(e) => setNewSupplierCity(e.target.value)}
+                  style={{ flex: "1 1 130px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="text" placeholder="State/Province" value={newSupplierProvince} onChange={(e) => setNewSupplierProvince(e.target.value)}
+                  style={{ flex: "1 1 130px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="text" placeholder="ZIP code" value={newSupplierZip} onChange={(e) => setNewSupplierZip(e.target.value)}
+                  style={{ flex: "1 1 110px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="text" placeholder="Country/region" value={newSupplierCountry} onChange={(e) => setNewSupplierCountry(e.target.value)}
+                  style={{ flex: "1 1 150px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <input
+                  type="text" placeholder="Payment terms (e.g. Net 30)" value={newSupplierPaymentTerms} onChange={(e) => setNewSupplierPaymentTerms(e.target.value)}
+                  style={{ flex: "1 1 180px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="text" maxLength={10} placeholder="Currency (e.g. USD)" value={newSupplierCurrency} onChange={(e) => setNewSupplierCurrency(e.target.value)}
+                  style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+                <input
+                  type="number" min={1} placeholder="Lead time (days)" value={newSupplierLeadTime} onChange={(e) => setNewSupplierLeadTime(e.target.value)}
+                  style={{ flex: "1 1 120px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
+                />
+              </div>
+              <button
+                type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() || supplierFetcher.state !== "idle"}
+                style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() ? "not-allowed" : "pointer" }}
+              >
+                {supplierFetcher.state !== "idle" ? "Creating…" : "Create Supplier"}
+              </button>
+            </div>
+          )}
 
-              <div style={{ marginTop: 20 }}>
-                <p style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>Purchase order details</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div>
-                    <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Reference number</label>
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Products</label>
+            <div
+              role="button" tabIndex={0}
+              onClick={() => setPickerOpen(true)}
+              onKeyDown={(e) => e.key === "Enter" && setPickerOpen(true)}
+              style={{
+                width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 13, boxSizing: "border-box",
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", color: "#9ca3af",
+              }}
+            >
+              <span>Search or select products…</span>
+              <span style={{ color: "#9ca3af" }}>🔍</span>
+            </div>
+          </div>
+
+          {/* Same variant-table layout as the product-detail page's own
+              Create Purchase Order card (ProductCreatePoCard) — header row,
+              row structure, and input styling all mirror it, swapping its
+              checkbox for a thumbnail and adding a remove button and an
+              editable SKU field (selection itself happens in
+              ProductPickerModal, not here). Bounded height so a long
+              selection still can't push the PO detail fields below out of
+              view. */}
+          {lineEntries.length > 0 && (
+            <div style={{ border: "1px solid #f3f4f6", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f9fafb", borderBottom: "1px solid #f3f4f6", fontSize: 12, fontWeight: 600, color: "#6b7280" }}>
+                <span style={{ width: 24 }} />
+                <span style={{ flex: 1 }}>Product</span>
+                <span style={{ width: 80 }}>SKU</span>
+                <span style={{ width: 65, textAlign: "right" }}>Price</span>
+                <span style={{ width: 90, textAlign: "right" }}>Unit cost</span>
+                <span style={{ width: 70, textAlign: "right" }}>Quantity</span>
+                <span style={{ width: 16 }} />
+              </div>
+              <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                {lineEntries.map(([variantId, l]) => (
+                  <div key={variantId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f3f4f6" }}>
+                    <Thumbnail imageUrl={l.imageUrl} imageAlt={l.imageAlt} size={24} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
+                        {l.productTitle ?? "—"}{l.variantTitle && l.variantTitle !== "Default Title" ? ` — ${l.variantTitle}` : ""}
+                      </span>
+                      <div style={{ fontSize: 11, color: "#9ca3af" }}>
+                        {l.currentQuantity} in stock
+                      </div>
+                    </div>
                     <input
-                      type="text" maxLength={255} value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)}
-                      style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
+                      type="text" placeholder="Add SKU"
+                      value={l.sku ?? ""}
+                      onChange={(e) => updateLine(variantId, { sku: e.target.value || null })}
+                      aria-label={`SKU for ${l.productTitle ?? "product"}`}
+                      style={{ width: 80, boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 12 }}
                     />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Note to supplier</label>
-                    <textarea
-                      rows={2} maxLength={5000} value={supplierNote} onChange={(e) => setSupplierNote(e.target.value)}
-                      style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box", resize: "vertical" }}
+                    <div style={{ width: 65, textAlign: "right", flexShrink: 0 }}>
+                      {l.price != null && !isNaN(parseFloat(l.price)) && (
+                        <div style={{ fontSize: 13, color: "#374151" }}>{formatMoney(parseFloat(l.price))}</div>
+                      )}
+                      {l.compareAtPrice != null && !isNaN(parseFloat(l.compareAtPrice)) && (
+                        <div style={{ fontSize: 11, color: "#9ca3af", textDecoration: "line-through" }}>{formatMoney(parseFloat(l.compareAtPrice))}</div>
+                      )}
+                    </div>
+                    <input
+                      type="number" min={0} step={0.01}
+                      value={l.unitCost}
+                      onChange={(e) => updateLine(variantId, { unitCost: e.target.value })}
+                      aria-label={`Unit cost for ${l.productTitle ?? "product"}`}
+                      style={{ width: 90, boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13, textAlign: "right" }}
                     />
+                    <input
+                      type="number" min={0}
+                      value={l.quantityOrdered}
+                      onChange={(e) => updateLine(variantId, { quantityOrdered: e.target.value })}
+                      aria-label={`Quantity to order for ${l.productTitle ?? "product"}`}
+                      style={{ width: 70, boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 6, padding: "3px 8px", fontSize: 13, textAlign: "right" }}
+                    />
+                    <button
+                      type="button" onClick={() => removeLine(variantId)}
+                      aria-label={`Remove ${l.productTitle ?? "product"} from this order`}
+                      style={{ width: 16, background: "none", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 14, padding: 0, flexShrink: 0 }}
+                    >
+                      ✕
+                    </button>
                   </div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Terms</label>
-                      <input
-                        type="text" placeholder="e.g. Cash on delivery" value={terms} onChange={(e) => setTerms(e.target.value)}
-                        style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
-                      />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Tags</label>
-                      <input
-                        type="text" placeholder="Comma separated" value={tagsInput} onChange={(e) => setTagsInput(e.target.value)}
-                        style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
-                      />
-                    </div>
-                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {pickerOpen && (
+            <ProductPickerModal
+              supplierId={supplierId}
+              lines={lines}
+              onToggleLine={toggleLine}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+
+          <p style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6, marginTop: 20 }}>
+            {lineEntries.length} product{lineEntries.length !== 1 ? "s" : ""} selected
+            {lineEntries.length > 0 && (
+              <span style={{ marginLeft: 8, fontWeight: 400, color: "#9ca3af" }}>
+                Total: {formatMoney(lineEntries.reduce((sum, [, l]) => sum + (parseInt(l.quantityOrdered) || 0) * (parseFloat(l.unitCost) || 0), 0))}
+              </span>
+            )}
+          </p>
+
+          <div style={{ marginTop: 20 }}>
+            <p style={{ fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 6 }}>Purchase order details</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Reference number</label>
+                <input
+                  type="text" maxLength={255} value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)}
+                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Note to supplier</label>
+                <textarea
+                  rows={2} maxLength={5000} value={supplierNote} onChange={(e) => setSupplierNote(e.target.value)}
+                  style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box", resize: "vertical" }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Terms</label>
+                  <input
+                    type="text" placeholder="e.g. Cash on delivery" value={terms} onChange={(e) => setTerms(e.target.value)}
+                    style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Tags</label>
+                  <input
+                    type="text" placeholder="Comma separated" value={tagsInput} onChange={(e) => setTagsInput(e.target.value)}
+                    style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
+                  />
                 </div>
               </div>
-            </>
-          )}
+            </div>
+          </div>
         </div>
 
         <div style={{ padding: "14px 24px", borderTop: "1px solid #f3f4f6", display: "flex", justifyContent: "flex-end", gap: 10, flexShrink: 0 }}>
@@ -496,6 +523,7 @@ export function CreatePurchaseOrderModal({ suppliers, onClose }: { suppliers: Su
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

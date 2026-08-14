@@ -64,7 +64,10 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
 
   const isDraft = po.status === "draft";
   const canReceive = po.status === "ordered" || po.status === "partially_received";
-  const canSend = po.status === "draft" || po.status === "ordered";
+  // Draft sending now goes through "Order Now" below (save + order + email
+  // in one step, matching ManagePurchaseOrderModal on the product page) —
+  // this is only for resending once a PO is already past draft.
+  const canSend = po.status === "ordered";
   const canCancel = po.status !== "received" && po.status !== "cancelled";
 
   const [lineEdits, setLineEdits] = useState<Record<string, { quantityOrdered: string; unitCost: string }>>(
@@ -93,6 +96,32 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   const s = STATUS_STYLE[po.status];
   const busy = editFetcher.state !== "idle" || actionFetcher.state !== "idle";
   const missingCostCount = po.lineItems.filter((li) => li.unitCost == null).length;
+  const hasValidLine = Object.values(lineEdits).some((e) => (parseInt(e.quantityOrdered) || 0) > 0);
+  const lastActionIntent = actionFetcher.data?.intent;
+
+  function currentLineItems() {
+    return po.lineItems.map((li) => ({
+      id: li.id,
+      quantityOrdered: Math.max(0, parseInt(lineEdits[li.id]?.quantityOrdered ?? "0") || 0),
+      unitCost: lineEdits[li.id]?.unitCost.trim() ? parseFloat(lineEdits[li.id].unitCost) : null,
+    }));
+  }
+  function currentTags() {
+    return tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
+  }
+  function orderNow() {
+    actionFetcher.submit(
+      {
+        intent: "order_now",
+        lineItems: JSON.stringify(currentLineItems()),
+        referenceNumber,
+        supplierNote,
+        terms,
+        tags: JSON.stringify(currentTags()),
+      },
+      { method: "post" },
+    );
+  }
   // Blocks submission client-side when a multi-location variant has a
   // pending receive quantity but no location chosen yet — the server
   // enforces this too (receivePurchaseOrderItems), this just avoids a
@@ -284,36 +313,30 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
           <button
             type="button" disabled={busy}
             onClick={() => {
-              const lineItems = po.lineItems.map((li) => ({
-                id: li.id,
-                quantityOrdered: Math.max(0, parseInt(lineEdits[li.id]?.quantityOrdered ?? "0") || 0),
-                unitCost: lineEdits[li.id]?.unitCost.trim() ? parseFloat(lineEdits[li.id].unitCost) : null,
-              }));
-              const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
               editFetcher.submit(
                 {
                   intent: "update_line_items",
-                  lineItems: JSON.stringify(lineItems),
+                  lineItems: JSON.stringify(currentLineItems()),
                   referenceNumber,
                   supplierNote,
                   terms,
-                  tags: JSON.stringify(tags),
+                  tags: JSON.stringify(currentTags()),
                 },
                 { method: "post" },
               );
             }}
-            style={btnStyle(busy, "#111827", "#fff")}
+            style={btnStyle(busy, "#fff", "#374151", "1px solid #d1d5db")}
           >
-            Save Changes
+            {editFetcher.state !== "idle" ? "Saving…" : "Save Changes"}
           </button>
         )}
         {isDraft && (
           <button
-            type="button" disabled={busy}
-            onClick={() => actionFetcher.submit({ intent: "mark_ordered" }, { method: "post" })}
-            style={btnStyle(busy, "#059669", "#fff")}
+            type="button" onClick={orderNow} disabled={busy || !hasValidLine}
+            title={!hasValidLine ? "Set a quantity greater than zero on at least one item." : undefined}
+            style={btnStyle(busy || !hasValidLine, "#111827", "#fff")}
           >
-            Mark as Ordered
+            {busy && lastActionIntent === "order_now" ? "Ordering…" : "Order Now"}
           </button>
         )}
         {canSend && (

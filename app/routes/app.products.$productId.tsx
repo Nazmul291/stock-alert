@@ -128,7 +128,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           const errs = json.data?.inventoryItemUpdate?.userErrors ?? [];
           if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
         } catch (err) {
-          errors.push(`Inventory tracking enable failed for ${v.variantTitle ?? v.variantId}: ${err instanceof Error ? err.message : "Unknown"}`);
+          const label = v.variantTitle && v.variantTitle !== "Default Title" ? v.variantTitle : productTitle || v.variantId;
+          errors.push(`Inventory tracking enable failed for ${label}: ${err instanceof Error ? err.message : "Unknown"}`);
         }
       }
 
@@ -206,6 +207,35 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
     }
 
+    // A plain product metafield with no dependency on InventoryTracking rows
+    // (unlike auto_hide/auto_republish/custom_threshold below, which only
+    // mean anything alongside a tracked product) — saved unconditionally so
+    // it doesn't silently no-op if the product isn't tracked yet.
+    const pricingRuleEnabled = form.get("pricingRuleEnabled") === "true";
+    const rawPricingRuleType = form.get("pricingRuleType") as string;
+    const pricingRuleType = rawPricingRuleType === "percentage" || rawPricingRuleType === "add" ? rawPricingRuleType : "times";
+    const rawPricingRuleValue = parseFloat((form.get("pricingRuleValue") as string) ?? "");
+    const pricingRuleValue = !isNaN(rawPricingRuleValue) && rawPricingRuleValue >= 0 ? rawPricingRuleValue : 0;
+
+    try {
+      const res = await admin.graphql(METAFIELDS_SET_MUTATION, {
+        variables: {
+          metafields: [{
+            ownerId: `gid://shopify/Product/${productId}`,
+            namespace: "stock_alert",
+            key: "pricing_rule",
+            type: "json",
+            value: JSON.stringify({ enabled: pricingRuleEnabled, type: pricingRuleType, value: pricingRuleValue }),
+          }],
+        },
+      });
+      const json: MetafieldsSetResponse = await res.json();
+      const errs = json.data?.metafieldsSet?.userErrors ?? [];
+      if (errs.length > 0) errors.push(errs.map((e) => e.message).join(", "));
+    } catch (err) {
+      errors.push(`Pricing rule update failed: ${err instanceof Error ? err.message : "Unknown"}`);
+    }
+
     if (tracked) {
       const autoHide = form.get("autoHide") === "true";
       const autoRepublish = form.get("autoRepublish") === "true";
@@ -280,6 +310,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         variantId: string;
         quantityOrdered: number;
         unitCost?: number | null;
+        sku?: string | null;
         locationId?: string | null;
         locationName?: string | null;
       }[];

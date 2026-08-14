@@ -1,3 +1,5 @@
+import { realVariantTitle } from "./variant-display";
+
 // Derives a readable plain-text alternative from an email's HTML body.
 // Every transporter.sendMail() call in notifications.ts was HTML-only
 // (no multipart/alternative text part) — on its own a real, if minor, spam
@@ -63,7 +65,8 @@ function productAdminUrl(data: EmailTemplateData): string {
 // "Product — Variant" when the alert is for a specific variant, so subject
 // lines and preview text are unambiguous for multi-variant products.
 function displayTitle(data: EmailTemplateData): string {
-  return data.variantTitle ? `${data.productTitle} — ${data.variantTitle}` : data.productTitle;
+  const variant = realVariantTitle(data.variantTitle);
+  return variant ? `${data.productTitle} — ${variant}` : data.productTitle;
 }
 
 export interface BrandConfig {
@@ -140,6 +143,7 @@ function productCard(
   ctaLabel: string,
   brand: BrandConfig = {},
 ): string {
+  const variantTitle = realVariantTitle(data.variantTitle);
   return `
   <tr>
     <td style="padding:28px 32px 20px;">
@@ -159,13 +163,13 @@ function productCard(
         </tr>
       </table>
 
-      ${(data.variantTitle || data.sku) ? `
+      ${(variantTitle || data.sku) ? `
       <!-- Variant details -->
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-        ${data.variantTitle ? `
+        ${variantTitle ? `
         <tr>
           <td style="padding:9px 14px;background:#f9fafb;font-size:12px;font-weight:600;color:#6b7280;width:100px;border-bottom:${data.sku ? '1px solid #e5e7eb' : '0'};">Variant</td>
-          <td style="padding:9px 14px;font-size:13px;color:#111827;font-weight:600;border-left:1px solid #e5e7eb;border-bottom:${data.sku ? '1px solid #e5e7eb' : '0'};">${esc(data.variantTitle)}</td>
+          <td style="padding:9px 14px;font-size:13px;color:#111827;font-weight:600;border-left:1px solid #e5e7eb;border-bottom:${data.sku ? '1px solid #e5e7eb' : '0'};">${esc(variantTitle)}</td>
         </tr>` : ''}
         ${data.sku ? `
         <tr>
@@ -436,7 +440,7 @@ export function getAlertBatchEmailTemplate(data: AlertBatchEmailData, brand: Bra
   const eventRow = (e: AlertBatchEvent, badge: { text: string; bg: string; color: string }) => `
     <tr>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
-        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(e.productTitle ?? 'Unknown')}${e.variantTitle ? ` — ${esc(e.variantTitle)}` : ''}</div>
+        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(e.productTitle ?? 'Unknown')}${realVariantTitle(e.variantTitle) ? ` — ${esc(realVariantTitle(e.variantTitle)!)}` : ''}</div>
         ${e.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(e.sku)}</div>` : ''}
       </td>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;">
@@ -457,6 +461,38 @@ export function getAlertBatchEmailTemplate(data: AlertBatchEmailData, brand: Bra
       <div style="font-size:30px;font-weight:800;color:${color};line-height:1;">${count}</div>
     </td>`;
 
+  // Deep-links into this app's own Products page, pre-filtered to the tab
+  // matching that section — not Shopify's own admin — so clicking through
+  // from "3 out of stock" lands the merchant directly on the filtered list
+  // instead of the app's dashboard. Back in Stock has no dedicated tab (a
+  // restock isn't a persistent status the way low/out of stock are), so it
+  // points at "in_stock" — the closest match, since a just-restocked product
+  // now lives there. Each button only renders when that section has events.
+  const productsTabUrl = (filter: string) =>
+    `https://admin.shopify.com/store/${storeName}/apps/${process.env.SHOPIFY_API_KEY}/app/products?filter=${filter}`;
+
+  const ctaButton = (label: string, filter: string) => `
+    <tr>
+      <td style="padding-bottom:10px;">
+        <table role="presentation" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="border-radius:8px;${brandBg(brand.color)}">
+              <a href="${productsTabUrl(filter)}"
+                style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;line-height:1;">
+                ${esc(label)} &rarr;
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+
+  const ctaRows = [
+    data.outOfStock.length > 0 ? ctaButton('View Out of Stock Products', 'out_of_stock') : '',
+    data.lowStock.length > 0 ? ctaButton('View Low Stock Products', 'low_stock') : '',
+    data.restock.length > 0 ? ctaButton('View In-Stock Products', 'in_stock') : '',
+  ].join('');
+
   const body = `
     ${header('🔔', 'Daily Alert Summary', `${total} alert${total !== 1 ? 's' : ''} today — ${storeName}`, brand)}
     <tr>
@@ -468,12 +504,15 @@ export function getAlertBatchEmailTemplate(data: AlertBatchEmailData, brand: Bra
             ${summaryCell('Back in Stock', data.restock.length, BADGES.restock.color, true)}
           </tr>
         </table>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:24px;">
           <tr style="background:#f9fafb;">
             <th style="padding:10px 16px;text-align:left;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Product</th>
             <th style="padding:10px 16px;text-align:right;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #e5e7eb;">Event</th>
           </tr>
           ${rows}
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
+          ${ctaRows}
         </table>
       </td>
     </tr>`;
@@ -531,7 +570,7 @@ export function getPurchaseOrderEmailTemplate(data: PurchaseOrderEmailData, bran
   const lineRow = (l: PurchaseOrderEmailLine) => `
     <tr>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
-        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(l.productTitle ?? 'Unknown')}${l.variantTitle && l.variantTitle !== 'Default Title' ? ` — ${esc(l.variantTitle)}` : ''}</div>
+        <div style="font-weight:600;font-size:14px;color:#111827;">${esc(l.productTitle ?? 'Unknown')}${realVariantTitle(l.variantTitle) ? ` — ${esc(realVariantTitle(l.variantTitle)!)}` : ''}</div>
         ${l.sku ? `<div style="font-size:12px;color:#9ca3af;margin-top:1px;">SKU: ${esc(l.sku)}</div>` : ''}
       </td>
       <td style="padding:10px 16px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;font-size:14px;color:#111827;">${l.quantityOrdered}</td>
