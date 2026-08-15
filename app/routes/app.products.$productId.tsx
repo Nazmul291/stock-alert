@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useLoaderData } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -6,18 +7,19 @@ import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { canUseFeature } from "../lib/plan-limits";
-import { createSupplier } from "../lib/supplier.server";
-import { createPurchaseOrder } from "../lib/purchase-order.server";
 import { PRODUCT_INVENTORY_QUERY, INVENTORY_ITEM_UPDATE_MUTATION, METAFIELDS_SET_MUTATION, METAFIELDS_DELETE_MUTATION } from "../lib/graphql";
+import { syncInventoryItemMap, deleteInventoryItemMapForProducts } from "../lib/inventory-item-map.server";
 import type { ProductDetailData } from "../lib/product-detail.server";
 import { useProductDetailStore, type ProductDetailStore } from "../stores/product-detail-store";
+import { useLiveEventsStore } from "../stores/live-events-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { ProductDetailHeader } from "../components/products/ProductDetailHeader";
 import { ProductConfigureCard, ProductConfigureCardSkeleton } from "../components/products/ProductConfigureCard";
-import { ProductCreatePoCard, ProductCreatePoCardSkeleton } from "../components/products/ProductCreatePoCard";
 import { ProductPurchaseOrdersList } from "../components/products/ProductPurchaseOrdersList";
 import { ProductHistoryTimeline } from "../components/products/ProductHistoryTimeline";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
+import { CreatePurchaseOrderModal, type CandidateRow } from "../components/purchase-orders/CreatePurchaseOrderModal";
+import { DemandForecastSection } from "../components/products/DemandForecastSection";
 import type { ProductRow } from "../components/products/ProductEditModal";
 
 // Only the auth check + plan lookup block the response — hands off to
@@ -203,8 +205,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           });
         }
       }
+
+      // Mirror into inventory_item_map so the inventory webhook's guard reads
+      // the same monitoringEnabled the merchant just saved, and can resolve
+      // these variants without an Admin call.
+      await syncInventoryItemMap(
+        shop,
+        plan,
+        variantsFresh
+          .filter((v) => v.inventoryItemId)
+          .map((v) => ({
+            inventoryItemId: (v.inventoryItemId as string).split("/").pop() as string,
+            productId,
+            variantId: v.variantId,
+            monitoringEnabled,
+          })),
+      ).catch((err) => console.error("[ProductDetail] inventory_item_map sync failed:", err));
     } else if (existingRows.length > 0) {
       await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
+      await deleteInventoryItemMapForProducts(shop, [productId]).catch(() => {});
     }
 
     // A plain product metafield with no dependency on InventoryTracking rows
@@ -277,64 +296,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return { success: true as const, message: "Product settings saved." };
   }
 
-  if (!canUseFeature(plan, "purchaseOrders")) {
-    return { success: false as const, error: "Suppliers and purchase orders are an Enterprise plan feature." };
-  }
-
-  if (intent === "create_supplier") {
-    const result = await createSupplier(shop, {
-      name: (form.get("name") as string) ?? "",
-      email: (form.get("email") as string) ?? "",
-      phone: (form.get("phone") as string) ?? "",
-      leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
-      contactName: (form.get("contactName") as string) ?? "",
-      website: (form.get("website") as string) ?? "",
-      address1: (form.get("address1") as string) ?? "",
-      address2: (form.get("address2") as string) ?? "",
-      city: (form.get("city") as string) ?? "",
-      province: (form.get("province") as string) ?? "",
-      zip: (form.get("zip") as string) ?? "",
-      country: (form.get("country") as string) ?? "",
-      paymentTerms: (form.get("paymentTerms") as string) ?? "",
-      currency: (form.get("currency") as string) ?? "",
-    });
-    return { ...result, intent };
-  }
-
-  if (intent === "create_po") {
-    const supplierId = form.get("supplierId") as string;
-    if (!supplierId) return { success: false as const, error: "Select a supplier first." };
-
-    try {
-      const lines = JSON.parse((form.get("lines") as string) ?? "[]") as {
-        variantId: string;
-        quantityOrdered: number;
-        unitCost?: number | null;
-        sku?: string | null;
-        locationId?: string | null;
-        locationName?: string | null;
-      }[];
-      const po = await createPurchaseOrder(shop, supplierId, lines, admin);
-      // Ordering from a supplier for this product makes them the product's
-      // supplier of record going forward — assigns/updates every variant of
-      // this product, not just the ones on this PO's lines, so the product
-      // stays consistently tied to one supplier (mirrors how ProductRow's
-      // supplierId is read from a single representative variant).
-      await prisma.inventoryTracking.updateMany({
-        where: { shop, productId: BigInt(productId) },
-        data: { supplierId },
-      });
-      invalidateShopCache(shop);
-      // Returns the full created PO (not just its id) so the client can patch
-      // it straight into the page's store instead of waiting on a background
-      // SSE refetch to see the new pending PO show up — see ProductCreatePoCard.
-      return { success: true as const, intent, ...po };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to create purchase order.";
-      return { success: false as const, error: message };
-    }
-  }
-
+  // create_supplier / create_po now go through api.purchase-orders.create.ts
+  // (see purchase-order-actions-store.ts) instead of this route's own
+  // action — one canonical endpoint shared by the Purchase Orders page, the
+  // Products list, and this page, instead of three copies of the same logic.
   return { success: false as const, error: "Unknown action." };
 };
 
@@ -395,10 +360,12 @@ const PLACEHOLDER_PRODUCT: ProductRow = {
 // skeleton architecture (Products list, Dashboard, etc.): mask individual
 // dynamic values with `.skeleton-text` instead of swapping in a different
 // placeholder layout, so there's no layout shift once real data lands.
-// ProductConfigureCard/ProductCreatePoCard are the one exception — both
-// seed their form state from props only once, on mount (see each one's own
-// Skeleton export for why), so they're swapped for a shape-only skeleton
-// instead of being mounted early with placeholder data.
+// ProductConfigureCard is the one exception — it seeds its form state from
+// props only once, on mount (see its own Skeleton export for why), so it's
+// swapped for a shape-only skeleton instead of being mounted early with
+// placeholder data. The Create Purchase Order button doesn't have this
+// problem — it opens CreatePurchaseOrderModal, which isn't mounted at all
+// until `data` (and therefore its `preselect` rows) is actually ready.
 function ProductDetailContent({ plan }: { plan: string }) {
   const data = useProductDetailStore((s) => s.data);
   const loading = data === null;
@@ -412,8 +379,43 @@ function ProductDetailContent({ plan }: { plan: string }) {
   const product = data?.product ?? PLACEHOLDER_PRODUCT;
   const purchaseOrders = data?.purchaseOrders ?? [];
   const suppliers = data?.suppliers ?? [];
-  const variantsForPo = data?.variantsForPo ?? [];
   const history = data?.history ?? [];
+
+  const [showCreatePoModal, setShowCreatePoModal] = useState(false);
+  const addPurchaseOrder = useProductDetailStore((s) => s.addPurchaseOrder);
+  const bumpLiveEvents = useLiveEventsStore((s) => s.bump);
+
+  // Depends on `data` directly (a stable store reference), not the
+  // `product` local above — that falls back to a fresh `PLACEHOLDER_PRODUCT`
+  // on every render while `data` is null, which would otherwise recompute
+  // these on every render too. Only ever read once `data` is truthy anyway
+  // (see the modal's render guard below).
+  //
+  // Every variant of a product carries the same shop-location list (only
+  // `available` differs) — see getVariantLocationsForPicker — so any
+  // variant's is the canonical one for this PO-wide choice. Mapped into the
+  // modal's own {id,name} shape here rather than teaching it a second one.
+  const poLocations = useMemo(
+    () => (data?.variantsForPo[0]?.locations ?? []).map((l) => ({ id: l.locationId, name: l.locationName })),
+    [data],
+  );
+  const poRows: CandidateRow[] = useMemo(
+    () => (data?.variantsForPo ?? []).map((v) => ({
+      productId: data!.product.productId,
+      variantId: v.variantId,
+      productTitle: data!.product.productTitle,
+      variantTitle: v.variantTitle,
+      sku: v.sku,
+      imageUrl: data!.product.imageUrl,
+      imageAlt: data!.product.imageAlt,
+      currentQuantity: v.currentQuantity,
+      suggestedQuantity: v.suggestedQuantity,
+      unitCost: v.unitCost,
+      price: v.price,
+      compareAtPrice: v.compareAtPrice,
+    })),
+    [data],
+  );
 
   return (
     <>
@@ -422,19 +424,64 @@ function ProductDetailContent({ plan }: { plan: string }) {
         <ProductDetailHeader product={product} loading={loading} />
       </s-section>
 
+      {/* demandForecast is only ever non-null on plans that also have
+          purchaseOrders (both are Enterprise-only, see plan-limits.ts), so
+          the "Create Purchase Order" button below always has a mounted
+          modal to open — see the canManageSupplier branch underneath. */}
+      <DemandForecastSection
+        productId={product.productId}
+        demandForecast={data?.demandForecast ?? null}
+        onCreatePurchaseOrder={() => setShowCreatePoModal(true)}
+      />
+
       {canManageSupplier ? (
         <s-section heading="Purchase Orders">
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <ProductPurchaseOrdersList purchaseOrders={purchaseOrders} suppliers={suppliers} productTitle={product.productTitle} loading={loading} />
-            {data ? (
-              <ProductCreatePoCard
-                variants={variantsForPo}
-                suppliers={suppliers}
-                defaultSupplierId={product.supplierId ?? null}
-                productTitle={product.productTitle}
+            <div>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => setShowCreatePoModal(true)}
+                style={{
+                  padding: "8px 16px", borderRadius: 8, border: "none",
+                  background: loading ? "#9ca3af" : "#111827", color: "#fff",
+                  cursor: loading ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600,
+                }}
+              >
+                Create Purchase Order
+              </button>
+            </div>
+            {showCreatePoModal && data && (
+              <CreatePurchaseOrderModal
+                // This page's supplier list doesn't carry paymentTerms (see
+                // ProductDetailData) — the modal's "auto-fill terms from the
+                // supplier" feature just no-ops here, same as before this
+                // page had it at all.
+                suppliers={suppliers.map((s) => ({ ...s, paymentTerms: null }))}
+                locations={poLocations}
+                preselect={{ productId: product.productId, rows: poRows, defaultSupplierId: product.supplierId ?? null }}
+                onCreated={({ purchaseOrder, supplierId }) => {
+                  // Patches the new PO straight into this page's store so the
+                  // pending list above shows it immediately, instead of
+                  // waiting on the background SSE refetch the bump below
+                  // triggers (that refetch still happens and reconciles
+                  // this).
+                  addPurchaseOrder({
+                    id: purchaseOrder.purchaseOrderId,
+                    poNumber: purchaseOrder.poNumber,
+                    status: "draft",
+                    supplierId,
+                    supplierName: purchaseOrder.supplierName,
+                    quantityOrdered: purchaseOrder.lineItems.reduce((sum, li) => sum + li.quantityOrdered, 0),
+                    quantityReceived: 0,
+                    createdAt: purchaseOrder.createdAt,
+                    lineItems: purchaseOrder.lineItems.map((li) => ({ ...li, locations: [] })),
+                  });
+                  bumpLiveEvents(["product-detail"]);
+                }}
+                onClose={() => setShowCreatePoModal(false)}
               />
-            ) : (
-              <ProductCreatePoCardSkeleton />
             )}
           </div>
         </s-section>

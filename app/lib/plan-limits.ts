@@ -35,6 +35,7 @@ export const PLAN_LIMITS = {
       vendorGrouping: false,
       vendorLeadTimeReorderPoints: false,
       purchaseOrders: false,
+      demandForecast: false,
     },
   },
   basic: {
@@ -69,6 +70,7 @@ export const PLAN_LIMITS = {
       vendorGrouping: false,
       vendorLeadTimeReorderPoints: false,
       purchaseOrders: false,
+      demandForecast: false,
     },
   },
   pro: {
@@ -103,6 +105,7 @@ export const PLAN_LIMITS = {
       vendorGrouping: false,
       vendorLeadTimeReorderPoints: false,
       purchaseOrders: false,
+      demandForecast: false,
     },
   },
   // Purchasable tier — billing.request()/billing.check() wired in
@@ -121,6 +124,7 @@ export const PLAN_LIMITS = {
       'Dead stock alerts',
       'Suppliers & purchase order generation',
       'Reorder points by vendor lead time',
+      'Per-product demand forecast',
     ],
     restrictions: {
       slackNotifications: true,
@@ -138,6 +142,7 @@ export const PLAN_LIMITS = {
       vendorGrouping: true,
       vendorLeadTimeReorderPoints: true,
       purchaseOrders: true,
+      demandForecast: true,
     },
   },
 } as const;

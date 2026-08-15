@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "re
 import { useLoaderData, useActionData, useNavigation, useSubmit, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useSSECacheStore } from "../hooks/use-sse-cache-store";
+import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -11,12 +12,14 @@ import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { refreshShopVelocity } from "../lib/velocity.server";
 import { publishEvent } from "../lib/broadcast.server";
+import { syncInventoryItemMap, setInventoryItemMapMonitoring } from "../lib/inventory-item-map.server";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { ProductSyncButton } from "../components/products/ProductSyncButton";
 import { ProductsToolbar } from "../components/products/ProductsToolbar";
 import { ProductsTable } from "../components/products/ProductsTable";
 import { ProductsBulkActionBar } from "../components/products/ProductsBulkActionBar";
 import { ProductsPagination } from "../components/products/ProductsPagination";
+import { CreatePurchaseOrderModal } from "../components/purchase-orders/CreatePurchaseOrderModal";
 import type { ProductsData } from "../lib/products-data.server";
 import { useProductsStore, type ProductsStore } from "../stores/products-store";
 import type { InventoryStatus } from "@prisma/client";
@@ -39,7 +42,7 @@ type CollectionsResponse = GraphQLResponse<{
 type SyncProductVariantEdge = {
   node: {
     id: string; title: string; sku: string | null; inventoryQuantity: number | null;
-    inventoryItem: { tracked: boolean } | null;
+    inventoryItem: { id: string; tracked: boolean } | null;
   };
 };
 type SyncProductEdge = {
@@ -58,6 +61,10 @@ type SyncVariantRow = {
   productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
   sku: string | null; currentQuantity: number; inventoryStatus: "in_stock" | "low_stock" | "out_of_stock";
   imageUrl: string | null; imageAlt: string | null; tags: string | null;
+  // Feeds inventory_item_map alongside the inventory_tracking upsert below.
+  // Nullable because a variant with inventory tracking switched off in Shopify
+  // has no inventoryItem to map.
+  inventoryItemId: bigint | null;
 };
 
 const SYNC_PRODUCTS_GRAPHQL = `
@@ -72,7 +79,9 @@ const SYNC_PRODUCTS_GRAPHQL = `
             edges {
               node {
                 id title sku inventoryQuantity
-                inventoryItem { tracked }
+                # inventoryItem.id feeds inventory_item_map, which is what lets
+                # the inventory webhook resolve an event without an Admin call.
+                inventoryItem { id tracked }
               }
             }
           }
@@ -244,6 +253,9 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
             imageUrl,
             imageAlt,
             tags,
+            inventoryItemId: v.inventoryItem?.id
+              ? BigInt(v.inventoryItem.id.split("/").pop() as string)
+              : null,
           });
         }
       }
@@ -279,6 +291,22 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       const dbPct = 82 + Math.round(((i + chunk.length) / allVariants.length) * 16);
       await syncState.progress(shop, dbPct);
     }
+
+    // Mirror into inventory_item_map so the inventory webhook can resolve
+    // these variants without an Admin API call. Best-effort: a failure here
+    // only costs the webhook its fast path (it falls open to the worker), so
+    // it must never fail the sync itself.
+    await syncInventoryItemMap(
+      shop,
+      plan,
+      allVariants
+        .filter((v) => v.inventoryItemId !== null)
+        .map((v) => ({
+          inventoryItemId: v.inventoryItemId!,
+          productId: v.productId,
+          variantId: v.variantId,
+        })),
+    ).catch((err) => console.error("[Sync] inventory_item_map sync failed:", err));
 
     if (allVariants.length > 0) {
       const syncedVariantIds = allVariants.map((v) => v.variantId);
@@ -394,6 +422,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           data: { monitoringEnabled: false, inventoryStatus: "deactivated" },
         });
       }
+      // Mirror the flag so the inventory webhook's guard sees the same answer
+      // — otherwise it keeps enqueueing events for variants the merchant just
+      // switched off (or keeps dropping them after switching back on).
+      await setInventoryItemMapMonitoring(shop, { productIds: ids }, enabled).catch((err) =>
+        console.error("[Products] inventory_item_map monitoring sync failed:", err),
+      );
     }
     return { success: true, message: `Monitoring ${enabled ? "enabled" : "disabled"} for ${updatedCount} product(s).` };
   }
@@ -499,6 +533,16 @@ function ProductsPageContent() {
     URL.revokeObjectURL(a.href);
   }, [csvFetcher.data]);
 
+  // Suppliers + shop locations for the Create Purchase Order modal — fetched
+  // lazily (only once the modal is actually opened) via the same resource
+  // route/pattern the general Purchase Orders page's picker uses, instead of
+  // blocking this page's own loader (which deliberately stays cheap — see
+  // its comment — for merchants who never touch purchase orders here).
+  const [showCreatePoModal, setShowCreatePoModal] = useState(false);
+  const { data: createPoContext } = useSSEData<{ suppliers: { id: string; name: string; paymentTerms: string | null }[]; locations: { id: string; name: string }[] }>(
+    showCreatePoModal ? "/api/purchase-order-picker-stream?intent=context" : null,
+  );
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set());
   const toggleExpandProduct = (productId: string) => {
@@ -602,6 +646,8 @@ function ProductsPageContent() {
         <ProductsToolbar
           onExportCsv={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
           exporting={csvFetcher.state !== "idle"}
+          onCreatePurchaseOrder={() => setShowCreatePoModal(true)}
+          loadingPurchaseOrderContext={showCreatePoModal && !createPoContext}
         />
         <div style={{ marginBottom: 16 }} />
 
@@ -628,6 +674,19 @@ function ProductsPageContent() {
         <ProductsPagination />
       </s-section>
 
+      {/* Only mounted once suppliers/locations have actually loaded. The
+          modal itself now tolerates a late-arriving suppliers/locations
+          prop fine (derived state, not a mount-once snapshot) — this gate
+          is purely so the merchant never sees a flash of empty dropdowns
+          while the fetch above is still in flight, not a correctness
+          requirement anymore. */}
+      {showCreatePoModal && createPoContext && (
+        <CreatePurchaseOrderModal
+          suppliers={createPoContext.suppliers}
+          locations={createPoContext.locations}
+          onClose={() => setShowCreatePoModal(false)}
+        />
+      )}
     </>
   );
 }

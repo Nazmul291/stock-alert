@@ -7,8 +7,8 @@ import { getProductDetail } from "../lib/product-detail.server";
 // extensions/product-supplier-po) — tells it whether this shop can create
 // suppliers/POs at all, and if so, what to show: the shop's existing
 // suppliers and this product's tracked variants (with a suggested reorder
-// quantity each), same as ProductCreatePoCard on the full product-detail
-// page. Reuses getProductDetail wholesale rather than a bespoke query —
+// quantity each), same as the product-detail page's own Create Purchase
+// Order flow. Reuses getProductDetail wholesale rather than a bespoke query —
 // it's a little more work than strictly needed (also computes purchase
 // order history, metafields, etc. that this trims away below), but this is
 // an occasional action-modal open, not a hot path, and staying on one
@@ -30,7 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Every variant carries the same set of shop locations (only
     // `available` differs per variant) — see getVariantLocationsForPicker —
     // so any variant's list is the canonical one for this single, PO-wide
-    // choice, same reasoning as ProductCreatePoCard's own shopLocations.
+    // choice, same reasoning as the product-detail page's own poLocations.
     const locations = (detail.variantsForPo[0]?.locations ?? []).map((l) => ({
       locationId: l.locationId,
       locationName: l.locationName,

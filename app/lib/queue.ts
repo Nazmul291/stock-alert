@@ -1,12 +1,20 @@
 import { PgBoss } from "pg-boss";
 
 export const QUEUE_NAME = "inventory-buffer";
+export const INVENTORY_EVENT_QUEUE_NAME = "inventory-event";
 export const DIGEST_QUEUE_NAME = "digest-daily";
 export const VELOCITY_QUEUE_NAME = "velocity-daily";
 export const ALERT_BATCH_QUEUE_NAME = "alert-batch-daily";
 export const DEBOUNCE_SECONDS = 10;
 export const JOB_RETRY_LIMIT = 3;
 export const JOB_RETRY_DELAY = 60;
+// Window in which repeat inventory_levels/update events for the same
+// (shop, item, location) collapse into one job. Replaces the module-scope
+// requestCache Map the webhook used to dedup with — that only worked per-VM,
+// so it silently stopped deduping once web ran on more than one machine.
+// pg-boss applies this in Postgres via singletonKey, so it stays correct
+// however many web instances are running.
+export const WEBHOOK_DEDUP_SECONDS = 3;
 
 // ── Shared payload type ──────────────────────────────────────────────────────
 
@@ -58,6 +66,17 @@ export interface InventoryBufferJobData {
   eventKey: string;
 }
 
+// What the inventory webhook now enqueues instead of doing the work itself.
+// Deliberately tiny — just enough to identify the event. The worker resolves
+// the variant, re-reads settings and classifies, so nothing here can go stale
+// between enqueue and processing (unlike BufferPayload above, which freezes a
+// whole settings snapshot into the row).
+export interface InventoryEventJobData {
+  shop: string;
+  inventoryItemId: string;
+  locationId: string | null;
+}
+
 // ── pg-boss singleton (producer side — web process) ──────────────────────────
 // The worker process creates its own separate instance.
 
@@ -72,8 +91,11 @@ export async function getBoss(): Promise<PgBoss> {
     _initPromise = (async () => {
       const boss = new PgBoss(process.env.DATABASE_URL!);
       await boss.start();
-      // pg-boss v12 requires explicit queue creation before send/work
+      // pg-boss v12 requires explicit queue creation before send/work.
+      // The web process only ever *sends* to inventory-event (the webhook);
+      // the worker is what consumes it.
       await boss.createQueue(QUEUE_NAME);
+      await boss.createQueue(INVENTORY_EVENT_QUEUE_NAME);
       _boss = boss;
       return boss;
     })().catch((err) => {

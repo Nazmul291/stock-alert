@@ -24,17 +24,21 @@ import {
 } from "../app/lib/notifications.js";
 import {
   QUEUE_NAME,
+  INVENTORY_EVENT_QUEUE_NAME,
   DIGEST_QUEUE_NAME,
   VELOCITY_QUEUE_NAME,
   ALERT_BATCH_QUEUE_NAME,
   type BufferPayload,
   type InventoryBufferJobData,
+  type InventoryEventJobData,
 } from "../app/lib/queue.js";
 import type { AlertBatchEmailData, AlertBatchEvent } from "../app/lib/email-templates.js";
 import type { AlertType } from "@prisma/client";
 import { atRiskRepresentativeRows } from "../app/lib/inventory-rollup.server.js";
 import { refreshShopVelocity } from "../app/lib/velocity.server.js";
+import { processInventoryEvent } from "../app/lib/inventory-event.server.js";
 import { unauthenticated } from "../app/shopify.server.js";
+import { shouldSendDigestNow, shouldSendAlertBatchNow } from "../app/lib/notification-schedule.js";
 
 // ── pg-boss instance ──────────────────────────────────────────────────────────
 const boss = new PgBoss({ connectionString: process.env.DATABASE_URL! });
@@ -47,10 +51,11 @@ boss.on("error", (err) => {
 
 await boss.start();
 await boss.createQueue(QUEUE_NAME);
+await boss.createQueue(INVENTORY_EVENT_QUEUE_NAME);
 await boss.createQueue(DIGEST_QUEUE_NAME);
 await boss.createQueue(VELOCITY_QUEUE_NAME);
 await boss.createQueue(ALERT_BATCH_QUEUE_NAME);
-console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME);
+console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, INVENTORY_EVENT_QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────
 // pg-boss v12 WorkHandler always receives Job<T>[] — an array.
@@ -61,6 +66,23 @@ await boss.work<InventoryBufferJobData>(
   async (jobs: Job<InventoryBufferJobData>[]) => {
     for (const job of jobs) {
       await processJob(job);
+    }
+  },
+);
+
+// ── Inventory event handler ───────────────────────────────────────────────────
+// The webhook now only verifies, guards on inventory_item_map and enqueues here;
+// resolving the variant, classifying it, writing inventory_tracking and routing
+// into the debounce buffer all happen in this process. Because the job is
+// durable, a restart mid-flight retries the event rather than losing it — the
+// old fire-and-forget promise after the webhook's 200 had no such guarantee.
+await boss.work<InventoryEventJobData>(
+  INVENTORY_EVENT_QUEUE_NAME,
+  { localConcurrency: 5 },
+  async (jobs: Job<InventoryEventJobData>[]) => {
+    for (const job of jobs) {
+      console.log(`[Worker] Processing inventory event ${job.id} — ${job.data.shop} item ${job.data.inventoryItemId}`);
+      await processInventoryEvent(job.data);
     }
   },
 );
@@ -115,11 +137,12 @@ async function processJob(job: Job<InventoryBufferJobData>): Promise<void> {
 
 // ── Digest cron ──────────────────────────────────────────────────────────────
 // Fires every hour, on the hour. Each shop picks its own send time via
-// digestTimezone (default UTC) — the handler checks, per shop, whether it's
-// currently 8am in *that* zone before sending, instead of every shop getting
-// the digest at a single fixed UTC hour regardless of where they are.
+// digestHour/digestTimezone (default 8am UTC) — the handler checks, per shop,
+// whether it's currently their configured hour in *that* zone before
+// sending, instead of every shop getting the digest at a single fixed UTC
+// hour regardless of where they are.
 await boss.schedule(DIGEST_QUEUE_NAME, "0 * * * *", {});
-console.log("[Worker] Digest cron scheduled — fires hourly, sends at each shop's local 8:00 AM");
+console.log("[Worker] Digest cron scheduled — fires hourly, sends at each shop's configured local hour");
 
 await boss.work<Record<string, never>>(DIGEST_QUEUE_NAME, async () => {
   await processDigests();
@@ -139,13 +162,14 @@ await boss.work<Record<string, never>>(VELOCITY_QUEUE_NAME, async () => {
 });
 
 // ── Alert batch cron ───────────────────────────────────────────────────────────
-// Fires once per day at 23:55 UTC (end of day) — flushes the day's
-// Email/Slack-pending alert events for shops on alertDeliveryMode "daily".
-// Only ever touches Email and Slack: in-app history, WhatsApp, Klaviyo,
-// Asana, and Flow already fired instantly regardless of this setting (see
-// sendLowStockAlert et al.).
-await boss.schedule(ALERT_BATCH_QUEUE_NAME, "55 23 * * *", {});
-console.log("[Worker] Alert batch cron scheduled — fires daily at 23:55 UTC");
+// Fires every hour, on the hour — same pattern as the digest cron above.
+// Each shop picks its own flush hour via alertBatchHour/digestTimezone
+// (default 11pm UTC) instead of every shop flushing at one shared UTC
+// instant. Only ever touches Email and Slack: in-app history, WhatsApp,
+// Klaviyo, Asana, and Flow already fired instantly regardless of this
+// setting (see sendLowStockAlert et al.).
+await boss.schedule(ALERT_BATCH_QUEUE_NAME, "0 * * * *", {});
+console.log("[Worker] Alert batch cron scheduled — fires hourly, flushes at each shop's configured local hour");
 
 await boss.work<Record<string, never>>(ALERT_BATCH_QUEUE_NAME, async () => {
   await processAlertBatches();
@@ -173,25 +197,6 @@ async function processVelocityRefresh(): Promise<void> {
   }
 }
 
-// Local hour (0-23) and whether it's currently Monday, both evaluated in
-// `timeZone` rather than the server's UTC clock — this is what lets each
-// shop's digest land at 8am *their* time despite the cron firing hourly on a
-// single shared schedule. Falls back to UTC if `timeZone` is somehow invalid
-// (shouldn't happen — digestTimezone is validated against DIGEST_TIMEZONES
-// when saved in app.settings.tsx) rather than throwing and skipping the shop.
-function localHourAndIsMonday(date: Date, timeZone: string): { hour: number; isMonday: boolean } {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone, hour: "numeric", hourCycle: "h23", weekday: "short",
-    }).formatToParts(date);
-    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
-    const isMonday = parts.find((p) => p.type === "weekday")?.value === "Mon";
-    return { hour, isMonday };
-  } catch {
-    return { hour: date.getUTCHours(), isMonday: date.getUTCDay() === 1 };
-  }
-}
-
 async function processDigests(): Promise<void> {
   const now = new Date();
 
@@ -213,9 +218,7 @@ async function processDigests(): Promise<void> {
     const plan = settings.session?.plan ?? "basic";
     const isDaily = plan === "pro" && settings.digestFrequency === "daily";
 
-    const { hour, isMonday } = localHourAndIsMonday(now, settings.digestTimezone);
-    if (hour !== 8) continue; // not yet 8am in this shop's own timezone
-    if (!isDaily && !isMonday) continue;
+    if (!shouldSendDigestNow(settings, isDaily, now)) continue;
 
     // Skip if already sent in the last 20 hours (prevents double-fire on restart)
     if (settings.lastDigestSentAt) {
@@ -283,6 +286,8 @@ async function processAlertBatches(): Promise<void> {
 
   for (const settings of shops) {
     const shop = settings.shop;
+
+    if (!shouldSendAlertBatchNow(settings, now)) continue;
 
     // Skip if already flushed in the last 20 hours (restart-safety guard,
     // same pattern as processDigests above).

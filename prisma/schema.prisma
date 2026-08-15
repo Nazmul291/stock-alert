@@ -32,6 +32,7 @@ model Session {
 
   storeSettings          StoreSettings?
   inventoryTracking      InventoryTracking[]
+  inventoryItemMap       InventoryItemMap[]
   alertHistory           AlertHistory[]
   setupProgress          SetupProgress?
   backInStockSubscribers BackInStockSubscriber[]
@@ -73,17 +74,25 @@ model StoreSettings {
   autoRepublishEnabled Boolean   @default(false) @map("auto_republish_enabled")
   digestEnabled        Boolean   @default(true) @map("digest_enabled")
   digestFrequency      String    @default("weekly") @map("digest_frequency")
-  // IANA identifier (e.g. "America/New_York") — the worker's digest cron
-  // runs hourly and compares each shop's local hour against 8am in this
-  // zone, rather than firing once at a fixed UTC hour (see processDigests
-  // in inventory-buffer.worker.ts).
+  // IANA identifier (e.g. "America/New_York") — shared by both the digest and
+  // the alert-batch schedule below; the worker's crons run hourly and compare
+  // each shop's local hour against digestHour/alertBatchHour in this zone,
+  // rather than firing once at a fixed UTC hour (see shouldSendDigestNow /
+  // shouldSendAlertBatchNow in inventory-buffer.worker.ts).
   digestTimezone       String    @default("UTC") @map("digest_timezone") @db.VarChar(64)
+  // Local hour (0-23) the digest sends at. Day of week (0=Sun..6=Sat) only
+  // applies when digestFrequency="weekly".
+  digestHour           Int       @default(8) @map("digest_hour")
+  digestDayOfWeek      Int       @default(1) @map("digest_day_of_week")
   lastDigestSentAt     DateTime? @map("last_digest_sent_at") @db.Timestamptz
   // Email + Slack cadence only for low_stock/out_of_stock/restock alerts —
-  // "instant" (today's behavior) or "daily" (one batched summary at 23:55 UTC,
-  // see processAlertBatches). In-app history, WhatsApp, Klaviyo, Asana, and
-  // Shopify Flow are unaffected by this and always fire immediately.
+  // "instant" (today's behavior) or "daily" (one batched summary at
+  // alertBatchHour local time, see processAlertBatches). In-app history,
+  // WhatsApp, Klaviyo, Asana, and Shopify Flow are unaffected by this and
+  // always fire immediately.
   alertDeliveryMode      String    @default("daily") @map("alert_delivery_mode")
+  // Local hour (0-23, per digestTimezone) the daily batch flushes at.
+  alertBatchHour         Int       @default(23) @map("alert_batch_hour")
   lastAlertBatchSentAt   DateTime? @map("last_alert_batch_sent_at") @db.Timestamptz
   // Per-event-type mute — Email + Slack only, same scoping as above.
   lowStockMuted          Boolean   @default(false) @map("low_stock_muted")
@@ -192,6 +201,39 @@ model InventoryTracking {
   @@index([shop, inventoryStatus])
   @@index([shop, supplierId])
   @@map("inventory_tracking")
+}
+
+// Lets the inventory webhook answer "which variant is this, and does this shop
+// still care about it?" from one indexed read, instead of a Shopify Admin
+// GraphQL round trip on every inventory_levels/update event. Shopify's webhook
+// only carries inventory_item_id, and inventory_tracking is keyed by
+// (shop, variantId) with no inventoryItemId column — so without this table the
+// webhook *must* call the Admin API before it can even tell whether the variant
+// is tracked.
+//
+// monitoringEnabled and plan are denormalized copies, kept in sync by every
+// site that writes inventory_tracking or changes a shop's plan (see the
+// callers of syncInventoryItemMap in app/lib/inventory-item-map.server.ts).
+// A miss here is deliberately NOT treated as "untracked" — see the webhook's
+// fail-open guard, since a newly created product is mapped only after its
+// products/create webhook or the next sync pass lands.
+model InventoryItemMap {
+  // Shopify inventory item ids are globally unique, so this is the natural PK
+  // and gives the webhook its single-row lookup.
+  inventoryItemId   BigInt   @id @map("inventory_item_id")
+  shop              String
+  productId         BigInt   @map("product_id")
+  variantId         BigInt   @map("variant_id")
+  monitoringEnabled Boolean  @default(true) @map("monitoring_enabled")
+  plan              Plan?
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop])
+  @@index([shop, variantId])
+  @@map("inventory_item_map")
 }
 
 model AlertHistory {
