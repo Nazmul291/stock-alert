@@ -8,7 +8,8 @@ export type ProductDetailStore = SSECacheSlice<ProductDetailData> & {
   // Orders list reflects it immediately, instead of only relying on the
   // background SSE refetch that create_po's live-events bump triggers (that
   // refetch still happens and reconciles/corrects this, it just isn't the
-  // only way the new PO becomes visible) — see ProductCreatePoCard.
+  // only way the new PO becomes visible) — see app.products.$productId.tsx's
+  // onCreated wiring on CreatePurchaseOrderModal.
   addPurchaseOrder: (po: ProductPurchaseOrderRow) => void;
   // Patches an existing PO in place (status/supplier/line-item edits from
   // ManagePurchaseOrderModal's Save Changes/Order Now) so the pending list

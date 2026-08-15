@@ -83,8 +83,8 @@ function Extension() {
             json.variants.map((v) => [v.variantId, v.suggestedQuantity > 0 ? String(v.suggestedQuantity) : '']),
           ),
         );
-        // Same live-Shopify-first defaults as ProductCreatePoCard on the
-        // full product-detail page — unitCost/sku are already resolved
+        // Same live-Shopify-first defaults as the full product-detail
+        // page's own Create Purchase Order flow — unitCost/sku are already resolved
         // live-vs-tracked by getProductDetail before this ever reaches the
         // extension, so it's a straight seed, no further fallback needed here.
         setUnitCosts(

@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useFetcher, useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { ProductPickerModal } from "./ProductPickerModal";
 import { Thumbnail } from "./Thumbnail";
+import { usePurchaseOrderActionsStore } from "../../stores/purchase-order-actions-store";
+import type { CreatedPurchaseOrder } from "../../lib/purchase-order.server";
 
 const NEW_SUPPLIER = "__new__";
 
@@ -36,19 +38,87 @@ export type CandidateRow = {
 type SupplierOption = { id: string; name: string; paymentTerms: string | null };
 type LocationOption = { id: string; name: string };
 
-type CreateSupplierResult = { success: boolean; error?: string; id?: string; name?: string };
-type CreatePOResult = { success: boolean; error?: string; purchaseOrderId?: string; costSyncWarning?: string | null };
-
 function formatMoney(n: number): string {
   return n.toFixed(2);
 }
 
-export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { suppliers: SupplierOption[]; locations: LocationOption[]; onClose: () => void }) {
+function rowToLine(row: CandidateRow): LineState {
+  return {
+    productTitle: row.productTitle,
+    variantTitle: row.variantTitle,
+    sku: row.sku,
+    imageUrl: row.imageUrl,
+    imageAlt: row.imageAlt,
+    currentQuantity: row.currentQuantity,
+    price: row.price,
+    compareAtPrice: row.compareAtPrice,
+    // Left empty rather than forced to 1 when there's no suggested quantity
+    // to seed it with, so an empty field visibly still needs the
+    // merchant's input instead of silently ordering 1 of something they
+    // only meant to review.
+    quantityOrdered: row.suggestedQuantity > 0 ? String(row.suggestedQuantity) : "",
+    unitCost: row.unitCost != null ? String(row.unitCost) : "",
+  };
+}
+
+export function CreatePurchaseOrderModal({
+  suppliers,
+  locations,
+  preselect,
+  onCreated,
+  onClose,
+}: {
+  suppliers: SupplierOption[];
+  locations: LocationOption[];
+  // Opens the modal with one product's variants already selected, and (when
+  // set) that product's current supplier preselected — the product-detail
+  // page's use case, replacing the old ProductCreatePoCard. `productId`
+  // also travels with the submit, which is what triggers the server's
+  // "supplier of record" write for that product (see
+  // api.purchase-orders.create.ts).
+  preselect?: { productId: string; rows: CandidateRow[]; defaultSupplierId?: string | null };
+  // When provided, the modal stays open on success and shows an inline
+  // confirmation instead of navigating to the new PO — the product-detail
+  // page uses this to patch its own store and keep the merchant in place.
+  onCreated?: (result: { purchaseOrder: CreatedPurchaseOrder; supplierId: string; supplierOfRecordWarning: string | null }) => void;
+  onClose: () => void;
+}) {
   const navigate = useNavigate();
-  const [supplierList, setSupplierList] = useState(suppliers);
-  const [supplierId, setSupplierId] = useState("");
-  const [locationId, setLocationId] = useState(locations[0]?.id ?? "");
-  const [showNewSupplierForm, setShowNewSupplierForm] = useState(false);
+
+  const {
+    createSupplier: submitCreateSupplier,
+    createPurchaseOrder: submitCreatePurchaseOrder,
+    creatingSupplier,
+    supplierError,
+    creatingPurchaseOrder,
+    purchaseOrderError,
+    reset: resetActionsStore,
+  } = usePurchaseOrderActionsStore();
+  // The store is a module singleton shared by every page — without this, a
+  // previous modal session's leftover error would show the instant this
+  // one opens.
+  useEffect(() => { resetActionsStore(); }, [resetActionsStore]);
+
+  // Suppliers created inline this session, merged on top of the `suppliers`
+  // prop rather than a useState(suppliers) snapshot — a prop that arrives
+  // (or changes) after mount can no longer get locked out. That snapshot is
+  // exactly what left the dropdown permanently empty the first time this
+  // modal was mounted behind a still-in-flight lazy fetch (Products page).
+  const [extraSuppliers, setExtraSuppliers] = useState<SupplierOption[]>([]);
+  const supplierList = useMemo(
+    () => [...suppliers, ...extraSuppliers].sort((a, b) => a.name.localeCompare(b.name)),
+    [suppliers, extraSuppliers],
+  );
+
+  // null means "merchant hasn't chosen" — the fallback re-evaluates on
+  // every render, so a late-arriving prop still yields a sane default
+  // instead of being locked out the way a useState(prop) snapshot would be.
+  const [supplierIdOverride, setSupplierIdOverride] = useState<string | null>(null);
+  const supplierId = supplierIdOverride ?? preselect?.defaultSupplierId ?? "";
+  const [locationIdOverride, setLocationIdOverride] = useState<string | null>(null);
+  const locationId = locationIdOverride ?? locations[0]?.id ?? "";
+
+  const [showNewSupplierForm, setShowNewSupplierForm] = useState(suppliers.length === 0);
   const [newSupplierName, setNewSupplierName] = useState("");
   const [newSupplierContactName, setNewSupplierContactName] = useState("");
   const [newSupplierEmail, setNewSupplierEmail] = useState("");
@@ -63,22 +133,28 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
   const [newSupplierPaymentTerms, setNewSupplierPaymentTerms] = useState("");
   const [newSupplierCurrency, setNewSupplierCurrency] = useState("");
   const [newSupplierLeadTime, setNewSupplierLeadTime] = useState("");
-  const [lines, setLines] = useState<Record<string, LineState>>({});
+  // Genuinely mount-once, unlike the fields above — this is merchant-edited
+  // state, not a mirror of a prop that can change out from under it. Safe
+  // as long as the modal itself is only ever mounted once its data (and
+  // preselect, if any) is actually ready, which both call sites already do.
+  const [lines, setLines] = useState<Record<string, LineState>>(() =>
+    preselect ? Object.fromEntries(preselect.rows.map((r) => [r.variantId, rowToLine(r)])) : {},
+  );
   const [referenceNumber, setReferenceNumber] = useState("");
   const [supplierNote, setSupplierNote] = useState("");
   const [terms, setTerms] = useState("");
   const [tagsInput, setTagsInput] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const supplierFetcher = useFetcher<CreateSupplierResult>();
-  const createFetcher = useFetcher<CreatePOResult>();
+  const [createdPo, setCreatedPo] = useState<CreatedPurchaseOrder | null>(null);
+  const [createWarnings, setCreateWarnings] = useState<string[]>([]);
 
   function handleSupplierChange(value: string) {
     if (value === NEW_SUPPLIER) {
       setShowNewSupplierForm(true);
       return;
     }
-    setSupplierId(value);
+    setSupplierIdOverride(value);
     setShowNewSupplierForm(false);
     // Auto-populates from the supplier's own payment terms, same as
     // Shopify's own supplier form promises ("This will auto populate the
@@ -107,50 +183,32 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
     setNewSupplierLeadTime("");
   }
 
-  function createNewSupplier() {
+  async function createNewSupplier() {
     if (!newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim()) return;
-    supplierFetcher.submit(
-      {
-        intent: "create_supplier",
-        name: newSupplierName,
-        contactName: newSupplierContactName,
-        email: newSupplierEmail,
-        phone: newSupplierPhone,
-        website: newSupplierWebsite,
-        address1: newSupplierAddress1,
-        address2: newSupplierAddress2,
-        city: newSupplierCity,
-        province: newSupplierProvince,
-        zip: newSupplierZip,
-        country: newSupplierCountry,
-        paymentTerms: newSupplierPaymentTerms,
-        currency: newSupplierCurrency,
-        leadTimeDays: newSupplierLeadTime,
-      },
-      { method: "post" },
-    );
+    const result = await submitCreateSupplier({
+      name: newSupplierName,
+      contactName: newSupplierContactName,
+      email: newSupplierEmail,
+      phone: newSupplierPhone,
+      website: newSupplierWebsite,
+      address1: newSupplierAddress1,
+      address2: newSupplierAddress2,
+      city: newSupplierCity,
+      province: newSupplierProvince,
+      zip: newSupplierZip,
+      country: newSupplierCountry,
+      paymentTerms: newSupplierPaymentTerms,
+      currency: newSupplierCurrency,
+      leadTimeDays: newSupplierLeadTime,
+    });
+    if (!result.success) return; // supplierError already set in the store
+    const paymentTerms = newSupplierPaymentTerms.trim() || null;
+    setExtraSuppliers((prev) => [...prev, { ...result.supplier, paymentTerms }]);
+    setSupplierIdOverride(result.supplier.id);
+    setShowNewSupplierForm(false);
+    if (!terms.trim() && paymentTerms) setTerms(paymentTerms);
+    resetNewSupplierForm();
   }
-
-  useEffect(() => {
-    if (supplierFetcher.state !== "idle" || !supplierFetcher.data) return;
-    if (supplierFetcher.data.success && supplierFetcher.data.id && supplierFetcher.data.name) {
-      const newSupplier = { id: supplierFetcher.data.id, name: supplierFetcher.data.name, paymentTerms: newSupplierPaymentTerms.trim() || null };
-      setSupplierList((prev) => [...prev, newSupplier].sort((a, b) => a.name.localeCompare(b.name)));
-      setSupplierId(newSupplier.id);
-      setShowNewSupplierForm(false);
-      if (!terms.trim() && newSupplier.paymentTerms) setTerms(newSupplier.paymentTerms);
-      resetNewSupplierForm();
-      // No explicit reload — setSupplierId above already changes suggestUrl,
-      // which useSSEData picks up on its own.
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierFetcher.state, supplierFetcher.data]);
-
-  useEffect(() => {
-    if (createFetcher.state === "idle" && createFetcher.data?.success && createFetcher.data.purchaseOrderId) {
-      navigate(`/app/purchase-orders/${createFetcher.data.purchaseOrderId}`);
-    }
-  }, [createFetcher.state, createFetcher.data, navigate]);
 
   function toggleLine(row: CandidateRow) {
     setLines((prev) => {
@@ -159,26 +217,7 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
         delete next[row.variantId];
         return next;
       }
-      return {
-        ...prev,
-        [row.variantId]: {
-          productTitle: row.productTitle,
-          variantTitle: row.variantTitle,
-          sku: row.sku,
-          imageUrl: row.imageUrl,
-          imageAlt: row.imageAlt,
-          currentQuantity: row.currentQuantity,
-          price: row.price,
-          compareAtPrice: row.compareAtPrice,
-          // Left empty rather than forced to 1 when there's no suggested
-          // quantity to seed it with — same as ProductCreatePoCard's own
-          // default — so an empty field visibly still needs the merchant's
-          // input instead of silently ordering 1 of something they only
-          // meant to review.
-          quantityOrdered: row.suggestedQuantity > 0 ? String(row.suggestedQuantity) : "",
-          unitCost: row.unitCost != null ? String(row.unitCost) : "",
-        },
-      };
+      return { ...prev, [row.variantId]: rowToLine(row) };
     });
   }
 
@@ -196,10 +235,9 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
 
   const lineEntries = Object.entries(lines);
   const hasValidLine = lineEntries.some(([, l]) => (parseInt(l.quantityOrdered) || 0) > 0);
-  const creating = createFetcher.state !== "idle";
-  const canSubmit = !!supplierId && !!locationId && hasValidLine && !creating;
+  const canSubmit = !!supplierId && !!locationId && hasValidLine && !creatingPurchaseOrder;
 
-  function handleCreate() {
+  async function handleCreate() {
     const chosenLocation = locations.find((l) => l.id === locationId) ?? null;
     const submitLines = lineEntries
       .map(([variantId, l]) => ({
@@ -210,20 +248,28 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
       }))
       .filter((l) => l.quantityOrdered > 0);
     const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
-    createFetcher.submit(
-      {
-        intent: "create_po",
-        supplierId,
-        locationId: chosenLocation?.id ?? "",
-        locationName: chosenLocation?.name ?? "",
-        lines: JSON.stringify(submitLines),
-        referenceNumber,
-        supplierNote,
-        terms,
-        tags: JSON.stringify(tags),
-      },
-      { method: "post" },
-    );
+    const result = await submitCreatePurchaseOrder({
+      supplierId,
+      locationId: chosenLocation?.id ?? "",
+      locationName: chosenLocation?.name ?? "",
+      lines: submitLines,
+      referenceNumber,
+      supplierNote,
+      terms,
+      tags,
+      ...(preselect ? { productId: preselect.productId } : {}),
+    });
+    if (!result.success) return; // purchaseOrderError already set in the store
+
+    if (!onCreated) {
+      // Default, unchanged: Purchase Orders page and Products list both
+      // jump straight to the new PO.
+      navigate(`/app/purchase-orders/${result.purchaseOrder.purchaseOrderId}`);
+      return;
+    }
+    onCreated({ purchaseOrder: result.purchaseOrder, supplierId, supplierOfRecordWarning: result.supplierOfRecordWarning });
+    setCreatedPo(result.purchaseOrder);
+    setCreateWarnings([result.purchaseOrder.costSyncWarning, result.supplierOfRecordWarning].filter((w): w is string => !!w));
   }
 
   // Portal to <body>, not rendered inline inside <s-page> — matches
@@ -233,25 +279,37 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
   return createPortal(
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget && !createdPo) onClose(); }}
     >
       <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 820, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", overflow: "hidden" }}>
         <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: "#111827" }}>Create Purchase Order</p>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 20, lineHeight: 1, padding: 4 }}>
-            ✕
-          </button>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 16, color: "#111827" }}>{createdPo ? "Purchase order created" : "Create Purchase Order"}</p>
+          {!createdPo && (
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 20, lineHeight: 1, padding: 4 }}>
+              ✕
+            </button>
+          )}
         </div>
 
-        <div style={{ overflowY: "auto", flex: 1, padding: "16px 24px 24px" }}>
-          {createFetcher.data && !createFetcher.data.success && (
-            <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "8px 12px", marginBottom: 16, color: "#991b1b", fontSize: 13 }}>
-              {createFetcher.data.error}
+        {createdPo ? (
+          <div style={{ padding: "16px 24px 24px" }}>
+            <div style={{ background: "#d1fae5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "8px 12px", marginBottom: 10, color: "#065f46", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <span>Purchase order #{createdPo.poNumber} created.</span>
+              <Link to={`/app/purchase-orders/${createdPo.purchaseOrderId}`} style={{ color: "#065f46", fontWeight: 600, whiteSpace: "nowrap" }}>
+                View it →
+              </Link>
             </div>
-          )}
-          {createFetcher.data?.success && createFetcher.data.costSyncWarning && (
-            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", marginBottom: 16, color: "#92400e", fontSize: 13 }}>
-              {createFetcher.data.costSyncWarning}
+            {createWarnings.map((w) => (
+              <div key={w} style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", marginBottom: 10, color: "#92400e", fontSize: 13 }}>
+                {w}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ overflowY: "auto", flex: 1, padding: "16px 24px 24px" }}>
+          {purchaseOrderError && (
+            <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "8px 12px", marginBottom: 16, color: "#991b1b", fontSize: 13 }}>
+              {purchaseOrderError}
             </div>
           )}
 
@@ -276,7 +334,7 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
               <label style={{ display: "block", fontSize: 12, fontWeight: 500, color: "#6b7280", marginBottom: 4 }}>Location</label>
               <select
                 value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
+                onChange={(e) => setLocationIdOverride(e.target.value)}
                 disabled={locations.length === 0}
                 style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: 6, padding: "7px 10px", fontSize: 13, boxSizing: "border-box" }}
               >
@@ -290,8 +348,8 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
 
           {showNewSupplierForm && (
             <div style={{ marginBottom: 20, padding: 12, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-              {supplierFetcher.data && !supplierFetcher.data.success && (
-                <p style={{ margin: "0 0 8px", fontSize: 12, color: "#991b1b" }}>{supplierFetcher.data.error}</p>
+              {supplierError && (
+                <p style={{ margin: "0 0 8px", fontSize: 12, color: "#991b1b" }}>{supplierError}</p>
               )}
               <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <input
@@ -360,10 +418,10 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
                 />
               </div>
               <button
-                type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() || supplierFetcher.state !== "idle"}
+                type="button" onClick={createNewSupplier} disabled={!newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() || creatingSupplier}
                 style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#111827", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !newSupplierName.trim() || !newSupplierEmail.trim() || !newSupplierPhone.trim() ? "not-allowed" : "pointer" }}
               >
-                {supplierFetcher.state !== "idle" ? "Creating…" : "Create Supplier"}
+                {creatingSupplier ? "Creating…" : "Create Supplier"}
               </button>
             </div>
           )}
@@ -385,8 +443,8 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
           </div>
 
           {/* Same variant-table layout as the product-detail page's own
-              Create Purchase Order card (ProductCreatePoCard) — header row,
-              row structure, and input styling all mirror it, swapping its
+              Create Purchase Order card used to have — header row, row
+              structure, and input styling all mirror it, swapping its
               checkbox for a thumbnail and adding a remove button and an
               editable SKU field (selection itself happens in
               ProductPickerModal, not here). Bounded height so a long
@@ -510,17 +568,27 @@ export function CreatePurchaseOrderModal({ suppliers, locations, onClose }: { su
               </div>
             </div>
           </div>
-        </div>
+          </div>
+        )}
 
         <div style={{ padding: "14px 24px", borderTop: "1px solid #f3f4f6", display: "flex", justifyContent: "flex-end", gap: 10, flexShrink: 0 }}>
-          <button type="button" onClick={onClose} disabled={creating}
-            style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 14, fontWeight: 500 }}>
-            Cancel
-          </button>
-          <button type="button" onClick={handleCreate} disabled={!canSubmit}
-            style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: canSubmit ? "#111827" : "#9ca3af", color: "#fff", cursor: canSubmit ? "pointer" : "not-allowed", fontSize: 14, fontWeight: 600 }}>
-            {creating ? "Creating…" : "Create Purchase Order"}
-          </button>
+          {createdPo ? (
+            <button type="button" onClick={onClose}
+              style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+              Done
+            </button>
+          ) : (
+            <>
+              <button type="button" onClick={onClose} disabled={creatingPurchaseOrder}
+                style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 14, fontWeight: 500 }}>
+                Cancel
+              </button>
+              <button type="button" onClick={handleCreate} disabled={!canSubmit}
+                style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: canSubmit ? "#111827" : "#9ca3af", color: "#fff", cursor: canSubmit ? "pointer" : "not-allowed", fontSize: 14, fontWeight: 600 }}>
+                {creatingPurchaseOrder ? "Creating…" : "Create Purchase Order"}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>,

@@ -6,8 +6,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
 import { canUseFeature } from "../lib/plan-limits";
-import { createSupplier } from "../lib/supplier.server";
-import { createPurchaseOrder, getShopLocations } from "../lib/purchase-order.server";
+import { getShopLocations } from "../lib/purchase-order.server";
 import { PurchaseOrderList, type PurchaseOrderRow } from "../components/purchase-orders/PurchaseOrderList";
 import { CreatePurchaseOrderModal } from "../components/purchase-orders/CreatePurchaseOrderModal";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
@@ -58,7 +57,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const shop = session.shop;
   const storeSession = await getCachedSession(shop);
   const plan = storeSession?.plan ?? null;
@@ -70,53 +69,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = form.get("intent") as string;
 
-  if (intent === "create_supplier") {
-    const result = await createSupplier(shop, {
-      name: (form.get("name") as string) ?? "",
-      email: (form.get("email") as string) ?? "",
-      phone: (form.get("phone") as string) ?? "",
-      leadTimeDays: (form.get("leadTimeDays") as string) ?? "",
-      contactName: (form.get("contactName") as string) ?? "",
-      website: (form.get("website") as string) ?? "",
-      address1: (form.get("address1") as string) ?? "",
-      address2: (form.get("address2") as string) ?? "",
-      city: (form.get("city") as string) ?? "",
-      province: (form.get("province") as string) ?? "",
-      zip: (form.get("zip") as string) ?? "",
-      country: (form.get("country") as string) ?? "",
-      paymentTerms: (form.get("paymentTerms") as string) ?? "",
-      currency: (form.get("currency") as string) ?? "",
-    });
-    return { ...result, intent };
-  }
-
-  if (intent === "create_po") {
-    const supplierId = form.get("supplierId") as string;
-    if (!supplierId) return { success: false as const, error: "Select a supplier first." };
-    const locationId = ((form.get("locationId") as string) ?? "").trim() || null;
-    const locationName = ((form.get("locationName") as string) ?? "").trim() || null;
-
-    try {
-      const rawLines = JSON.parse((form.get("lines") as string) ?? "[]") as { variantId: string; quantityOrdered: number; unitCost?: number | null; sku?: string | null }[];
-      // One location for the whole PO, stamped onto every line — same model
-      // as the product-detail page's Create Purchase Order flow, passing
-      // `admin` through (previously undefined here) so location validation,
-      // Shopify cost-sync, and per-product pricing rules all apply on this
-      // page too, not just the product-detail one.
-      const lines = rawLines.map((l) => ({ ...l, locationId, locationName }));
-      const { purchaseOrderId, costSyncWarning } = await createPurchaseOrder(shop, supplierId, lines, admin, {
-        referenceNumber: (form.get("referenceNumber") as string) ?? "",
-        supplierNote: (form.get("supplierNote") as string) ?? "",
-        terms: (form.get("terms") as string) ?? "",
-        tags: JSON.parse((form.get("tags") as string) ?? "[]") as string[],
-      });
-      invalidateShopCache(shop);
-      return { success: true as const, intent, purchaseOrderId, costSyncWarning };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to create purchase order.";
-      return { success: false as const, error: message };
-    }
-  }
+  // create_supplier / create_po now go through api.purchase-orders.create.ts
+  // (see purchase-order-actions-store.ts) instead of this route's own
+  // action — one canonical endpoint shared by this page, the Products list,
+  // and the product detail page.
 
   if (intent === "cancel_po") {
     const id = form.get("id") as string;

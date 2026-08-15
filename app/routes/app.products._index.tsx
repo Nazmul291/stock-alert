@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "re
 import { useLoaderData, useActionData, useNavigation, useSubmit, useFetcher } from "react-router";
 import { useSyncStream } from "../hooks/use-sync-stream";
 import { useSSECacheStore } from "../hooks/use-sse-cache-store";
+import { useSSEData } from "../hooks/use-sse-data";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -18,6 +19,7 @@ import { ProductsToolbar } from "../components/products/ProductsToolbar";
 import { ProductsTable } from "../components/products/ProductsTable";
 import { ProductsBulkActionBar } from "../components/products/ProductsBulkActionBar";
 import { ProductsPagination } from "../components/products/ProductsPagination";
+import { CreatePurchaseOrderModal } from "../components/purchase-orders/CreatePurchaseOrderModal";
 import type { ProductsData } from "../lib/products-data.server";
 import { useProductsStore, type ProductsStore } from "../stores/products-store";
 import type { InventoryStatus } from "@prisma/client";
@@ -531,6 +533,16 @@ function ProductsPageContent() {
     URL.revokeObjectURL(a.href);
   }, [csvFetcher.data]);
 
+  // Suppliers + shop locations for the Create Purchase Order modal — fetched
+  // lazily (only once the modal is actually opened) via the same resource
+  // route/pattern the general Purchase Orders page's picker uses, instead of
+  // blocking this page's own loader (which deliberately stays cheap — see
+  // its comment — for merchants who never touch purchase orders here).
+  const [showCreatePoModal, setShowCreatePoModal] = useState(false);
+  const { data: createPoContext } = useSSEData<{ suppliers: { id: string; name: string; paymentTerms: string | null }[]; locations: { id: string; name: string }[] }>(
+    showCreatePoModal ? "/api/purchase-order-picker-stream?intent=context" : null,
+  );
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set());
   const toggleExpandProduct = (productId: string) => {
@@ -634,6 +646,8 @@ function ProductsPageContent() {
         <ProductsToolbar
           onExportCsv={() => csvFetcher.load(`/app/products?intent=export_csv${filter !== "all" ? `&filter=${filter}` : ""}`)}
           exporting={csvFetcher.state !== "idle"}
+          onCreatePurchaseOrder={() => setShowCreatePoModal(true)}
+          loadingPurchaseOrderContext={showCreatePoModal && !createPoContext}
         />
         <div style={{ marginBottom: 16 }} />
 
@@ -660,6 +674,19 @@ function ProductsPageContent() {
         <ProductsPagination />
       </s-section>
 
+      {/* Only mounted once suppliers/locations have actually loaded. The
+          modal itself now tolerates a late-arriving suppliers/locations
+          prop fine (derived state, not a mount-once snapshot) — this gate
+          is purely so the merchant never sees a flash of empty dropdowns
+          while the fetch above is still in flight, not a correctness
+          requirement anymore. */}
+      {showCreatePoModal && createPoContext && (
+        <CreatePurchaseOrderModal
+          suppliers={createPoContext.suppliers}
+          locations={createPoContext.locations}
+          onClose={() => setShowCreatePoModal(false)}
+        />
+      )}
     </>
   );
 }

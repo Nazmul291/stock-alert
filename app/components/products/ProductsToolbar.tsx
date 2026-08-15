@@ -10,9 +10,11 @@ const FILTER_TABS = [
   { key: "not_tracked",   label: "Not Tracked" },
 ];
 
-export function ProductsToolbar({ onExportCsv, exporting }: {
+export function ProductsToolbar({ onExportCsv, exporting, onCreatePurchaseOrder, loadingPurchaseOrderContext }: {
   onExportCsv: () => void;
   exporting: boolean;
+  onCreatePurchaseOrder: () => void;
+  loadingPurchaseOrderContext: boolean;
 }) {
   const search = useProductsStore((s) => s.search);
   const filter = useProductsStore((s) => s.filter);
@@ -88,17 +90,28 @@ export function ProductsToolbar({ onExportCsv, exporting }: {
           {exporting ? "Exporting…" : "Export CSV"}
         </button>
         {canManagePurchaseOrders && (
-          <Link
-            to="/app/purchase-orders"
+          <button
+            type="button"
+            onClick={onCreatePurchaseOrder}
+            disabled={loadingPurchaseOrderContext}
             style={{
               display: "inline-flex", alignItems: "center", gap: 5,
               padding: "5px 12px", borderRadius: 6, border: "1px solid #d1d5db",
-              background: "#fff", color: "#374151", fontSize: 13, textDecoration: "none",
+              background: "#fff", color: "#374151", fontSize: 13,
+              cursor: loadingPurchaseOrderContext ? "not-allowed" : "pointer",
+              opacity: loadingPurchaseOrderContext ? 0.7 : 1,
               whiteSpace: "nowrap", marginBottom: 1,
             }}
           >
-            Create Purchase Order
-          </Link>
+            {loadingPurchaseOrderContext && (
+              <span style={{
+                width: 12, height: 12, borderRadius: "50%",
+                border: "2px solid #d1d5db", borderTopColor: "#374151",
+                animation: "btn-spin 0.6s linear infinite", flexShrink: 0,
+              }} />
+            )}
+            {loadingPurchaseOrderContext ? "Loading…" : "Create Purchase Order"}
+          </button>
         )}
       </div>
     </>
