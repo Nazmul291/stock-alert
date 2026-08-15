@@ -19,6 +19,7 @@ import { ProductPurchaseOrdersList } from "../components/products/ProductPurchas
 import { ProductHistoryTimeline } from "../components/products/ProductHistoryTimeline";
 import { SuppliersUpsellCard } from "../components/suppliers/SuppliersUpsellCard";
 import { CreatePurchaseOrderModal, type CandidateRow } from "../components/purchase-orders/CreatePurchaseOrderModal";
+import { DemandForecastSection } from "../components/products/DemandForecastSection";
 import type { ProductRow } from "../components/products/ProductEditModal";
 
 // Only the auth check + plan lookup block the response — hands off to
@@ -422,6 +423,16 @@ function ProductDetailContent({ plan }: { plan: string }) {
       <s-section heading="Overview">
         <ProductDetailHeader product={product} loading={loading} />
       </s-section>
+
+      {/* demandForecast is only ever non-null on plans that also have
+          purchaseOrders (both are Enterprise-only, see plan-limits.ts), so
+          the "Create Purchase Order" button below always has a mounted
+          modal to open — see the canManageSupplier branch underneath. */}
+      <DemandForecastSection
+        productId={product.productId}
+        demandForecast={data?.demandForecast ?? null}
+        onCreatePurchaseOrder={() => setShowCreatePoModal(true)}
+      />
 
       {canManageSupplier ? (
         <s-section heading="Purchase Orders">

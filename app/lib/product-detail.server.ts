@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { getCachedSettings } from "./shop-cache.server";
 import { canUseFeature } from "./plan-limits";
 import { suggestReorderQuantity, getVariantLocationsForPicker, getVariantPricing, type VariantLocationLevel, type VariantPricing } from "./purchase-order.server";
+import { computeStockOutDays } from "./velocity.server";
 import { parsePricingRuleConfig, type PricingRuleType } from "./pricing-rules.server";
 import { buildTrackedProductRow } from "./products-data.server";
 import { PRODUCT_INVENTORY_QUERY, PRODUCT_METAFIELDS_QUERY } from "./graphql";
@@ -95,6 +96,47 @@ export type ProductDetailConfigure = {
   pricingRuleValue: string;
 };
 
+export type ProductDemandForecast = {
+  avgDailySales: number;
+  stockOutDays: number | null;
+  recommendedQuantity: number;
+  orderByDate: string | null;
+};
+
+// Pure — no Shopify/Prisma calls — so it's unit-testable with plain fixture
+// rows, independent of getProductDetail's live-Shopify-dependent branches.
+//
+// Computed as one aggregate line for the whole product (total quantity
+// across variants, one representative velocity) rather than by summing
+// per-variant suggestions: every variant row of a multi-variant product
+// carries an identical *product-level* avgDailySales (calcSalesVelocity
+// computes it per product; refreshShopVelocity copies that same value onto
+// every variant row — see velocity.server.ts), so summing per-variant
+// suggestions (each already computed against the full product velocity)
+// would over-suggest by roughly the variant count.
+export function computeDemandForecast(
+  rows: { currentQuantity: number; manualDailySales: number | null; avgDailySales: number | null }[],
+  leadTimeDays: number,
+  now: Date = new Date(),
+): ProductDemandForecast | null {
+  if (rows.length === 0) return null;
+  const totalQuantity = rows.reduce((sum, r) => sum + r.currentQuantity, 0);
+  const avgDailySales = rows[0].manualDailySales ?? rows[0].avgDailySales ?? null;
+  if (!avgDailySales || avgDailySales <= 0) return null;
+
+  const stockOutDays = computeStockOutDays(totalQuantity, avgDailySales);
+  const recommendedQuantity = suggestReorderQuantity(totalQuantity, avgDailySales, leadTimeDays);
+  const orderByDate = (() => {
+    if (stockOutDays === null) return null;
+    const daysUntilOrder = Math.max(0, stockOutDays - leadTimeDays);
+    const d = new Date(now);
+    d.setDate(d.getDate() + daysUntilOrder);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  return { avgDailySales, stockOutDays, recommendedQuantity, orderByDate };
+}
+
 export type ProductDetailData = {
   product: ProductRow;
   configure: ProductDetailConfigure;
@@ -104,6 +146,10 @@ export type ProductDetailData = {
   variantsForPo: ProductDetailVariantForPo[];
   purchaseOrders: ProductPurchaseOrderRow[];
   history: ProductHistoryEntry[];
+  // null when not entitled (see plan-limits.ts's demandForecast flag) or
+  // when there's no sales history to project from — never a zero-filled
+  // placeholder, so the UI can tell "nothing to show" from "genuinely zero."
+  demandForecast: ProductDemandForecast | null;
 };
 
 const HISTORY_LIMIT = 50;
@@ -272,6 +318,12 @@ export async function getProductDetail(shop: string, productId: string, plan: st
     };
   });
 
+  // No new Shopify call — rows/defaultLeadTime are already fetched above for
+  // variantsForPo.
+  const demandForecast = canUseFeature(plan, "demandForecast")
+    ? computeDemandForecast(rows, defaultLeadTime)
+    : null;
+
   const [alerts, lineItems] = await Promise.all([
     prisma.alertHistory.findMany({
       where: { shop, productId: productIdBigInt },
@@ -373,5 +425,6 @@ export async function getProductDetail(shop: string, productId: string, plan: st
     variantsForPo,
     purchaseOrders,
     history,
+    demandForecast,
   };
 }
