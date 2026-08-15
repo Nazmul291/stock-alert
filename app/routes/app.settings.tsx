@@ -9,13 +9,10 @@ import { SSEErrorRetry } from "../components/Skeleton";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSECacheStore } from "../hooks/use-sse-cache-store";
 import { canUseFeature } from "../lib/plan-limits";
-import { isValidDigestTimezone } from "../lib/timezones";
 import { useSettingsStore, type SettingsStore } from "../stores/settings-store";
 import { useLiveEventsStore } from "../stores/live-events-store";
 import { PlanCard } from "../components/settings/PlanCard";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
-import { DigestEmailsSection } from "../components/settings/DigestEmailsSection";
-import { AlertDeliverySection } from "../components/settings/AlertDeliverySection";
 import { EmailBrandingSection } from "../components/settings/EmailBrandingSection";
 import { MonitoringScopeSection } from "../components/settings/MonitoringScopeSection";
 import { EnterpriseReportingSection } from "../components/settings/EnterpriseReportingSection";
@@ -63,9 +60,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { intent: "save", success: false as const, errors };
   }
 
-  const rawDigestFrequency = form.get("digestFrequency") as string;
-  const rawDigestTimezone = form.get("digestTimezone") as string;
-  const rawAlertDeliveryMode = form.get("alertDeliveryMode") as string;
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
   const rawMonitoringFilter = form.get("monitoringFilter");
@@ -74,13 +68,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     autoHideEnabled: bool("autoHideEnabled"),
     autoRepublishEnabled: bool("autoRepublishEnabled"),
     lowStockThreshold: rawThreshold,
-    digestEnabled: bool("digestEnabled"),
-    digestFrequency: canUseFeature(plan, "dailyDigest") && rawDigestFrequency === "daily" ? "daily" : "weekly",
-    digestTimezone: isValidDigestTimezone(rawDigestTimezone) ? rawDigestTimezone : "UTC",
-    alertDeliveryMode: rawAlertDeliveryMode === "daily" ? "daily" : "instant",
-    lowStockMuted: bool("lowStockMuted"),
-    outOfStockMuted: bool("outOfStockMuted"),
-    restockMuted: bool("restockMuted"),
     supplierLeadTimeDays: !isNaN(rawLeadTime) && rawLeadTime >= 1 && rawLeadTime <= 90 ? rawLeadTime : 7,
     monitoringFilter:
       rawMonitoringFilter === "all" || rawMonitoringFilter === "collection" || rawMonitoringFilter === "tags"
@@ -162,6 +149,10 @@ export default function SettingsPage() {
 // Same defaults `loadSettingsData` returns for a shop with no stored
 // settings row yet — used here as the placeholder while the SSE payload is
 // still in flight, so the form seeds with a sensible starting point either way.
+// Includes fields this page no longer edits (digest/alert-delivery — see
+// Notification Center) because it shares SettingsData["settings"]'s full
+// type with that page; only the ones actually rendered below get their own
+// useState/handlers here.
 const DEFAULT_SETTINGS: SettingsData["settings"] = {
   autoHideEnabled: false,
   autoRepublishEnabled: false,
@@ -169,6 +160,8 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   digestEnabled: true,
   digestFrequency: "weekly",
   digestTimezone: "UTC",
+  digestHour: 8,
+  digestDayOfWeek: 1,
   brandLogoUrl: "",
   brandColor: "#4f46e5",
   brandSenderName: "",
@@ -179,6 +172,7 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   limitedEditionTag: "limited-edition",
   deadStockThresholdDays: 60,
   alertDeliveryMode: "daily",
+  alertBatchHour: 23,
   lowStockMuted: false,
   outOfStockMuted: false,
   restockMuted: false,
@@ -198,9 +192,6 @@ function SettingsContent() {
   const saving = saveFetcher.state !== "idle";
   const [autoHideEnabled, setAutoHideEnabled] = useState(settings.autoHideEnabled);
   const [autoRepublishEnabled, setAutoRepublishEnabled] = useState(settings.autoRepublishEnabled);
-  const [digestEnabled, setDigestEnabled] = useState(settings.digestEnabled);
-  const [digestFrequency, setDigestFrequency] = useState(settings.digestFrequency);
-  const [digestTimezone, setDigestTimezone] = useState(settings.digestTimezone);
   const [brandLogoUrl, setBrandLogoUrl] = useState(settings.brandLogoUrl);
   const [brandColor, setBrandColor] = useState(settings.brandColor);
   const [brandSenderName, setBrandSenderName] = useState(settings.brandSenderName);
@@ -209,10 +200,6 @@ function SettingsContent() {
   const [monitoringTags, setMonitoringTags] = useState(settings.monitoringTags);
   const [limitedEditionTag, setLimitedEditionTag] = useState(settings.limitedEditionTag);
   const [deadStockThresholdDays, setDeadStockThresholdDays] = useState(settings.deadStockThresholdDays);
-  const [alertDeliveryMode, setAlertDeliveryMode] = useState(settings.alertDeliveryMode);
-  const [lowStockMuted, setLowStockMuted] = useState(settings.lowStockMuted);
-  const [outOfStockMuted, setOutOfStockMuted] = useState(settings.outOfStockMuted);
-  const [restockMuted, setRestockMuted] = useState(settings.restockMuted);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -225,9 +212,6 @@ function SettingsContent() {
     if (loading) return;
     setAutoHideEnabled(settings.autoHideEnabled);
     setAutoRepublishEnabled(settings.autoRepublishEnabled);
-    setDigestEnabled(settings.digestEnabled);
-    setDigestFrequency(settings.digestFrequency);
-    setDigestTimezone(settings.digestTimezone);
     setBrandLogoUrl(settings.brandLogoUrl);
     setBrandColor(settings.brandColor);
     setBrandSenderName(settings.brandSenderName);
@@ -236,10 +220,6 @@ function SettingsContent() {
     setMonitoringTags(settings.monitoringTags);
     setLimitedEditionTag(settings.limitedEditionTag);
     setDeadStockThresholdDays(settings.deadStockThresholdDays);
-    setAlertDeliveryMode(settings.alertDeliveryMode);
-    setLowStockMuted(settings.lowStockMuted);
-    setOutOfStockMuted(settings.outOfStockMuted);
-    setRestockMuted(settings.restockMuted);
     // Only re-seed on the loading -> loaded transition, not on every
     // settings identity change (e.g. an in-place SSE re-push), so it
     // doesn't clobber in-progress edits.
@@ -249,9 +229,6 @@ function SettingsContent() {
   function handleDiscard() {
     setAutoHideEnabled(settings.autoHideEnabled);
     setAutoRepublishEnabled(settings.autoRepublishEnabled);
-    setDigestEnabled(settings.digestEnabled);
-    setDigestFrequency(settings.digestFrequency);
-    setDigestTimezone(settings.digestTimezone);
     setBrandLogoUrl(settings.brandLogoUrl);
     setBrandColor(settings.brandColor);
     setBrandSenderName(settings.brandSenderName);
@@ -260,10 +237,6 @@ function SettingsContent() {
     setMonitoringTags(settings.monitoringTags);
     setLimitedEditionTag(settings.limitedEditionTag);
     setDeadStockThresholdDays(settings.deadStockThresholdDays);
-    setAlertDeliveryMode(settings.alertDeliveryMode);
-    setLowStockMuted(settings.lowStockMuted);
-    setOutOfStockMuted(settings.outOfStockMuted);
-    setRestockMuted(settings.restockMuted);
     formRef.current?.reset();
     setIsDirty(false);
   }
@@ -294,9 +267,6 @@ function SettingsContent() {
     // Set all state-controlled values explicitly — do not rely on DOM serialization
     fd.set("autoHideEnabled", autoHideEnabled ? "true" : "false");
     fd.set("autoRepublishEnabled", autoRepublishEnabled ? "true" : "false");
-    fd.set("digestEnabled", digestEnabled ? "true" : "false");
-    fd.set("digestFrequency", digestFrequency);
-    fd.set("digestTimezone", digestTimezone);
     fd.set("monitoringFilter", monitoringFilter);
     fd.set("monitoringCollectionId", monitoringCollectionId);
     fd.set("monitoringTags", monitoringTags);
@@ -305,15 +275,10 @@ function SettingsContent() {
     fd.set("brandSenderName", brandSenderName);
     fd.set("limitedEditionTag", limitedEditionTag);
     fd.set("deadStockThresholdDays", String(deadStockThresholdDays));
-    fd.set("alertDeliveryMode", alertDeliveryMode);
-    fd.set("lowStockMuted", lowStockMuted ? "true" : "false");
-    fd.set("outOfStockMuted", outOfStockMuted ? "true" : "false");
-    fd.set("restockMuted", restockMuted ? "true" : "false");
     saveFetcher.submit(fd, { method: "post" });
   }
 
   const canAutoRepublish = canUseFeature(plan, "autoRepublish");
-  const canDailyDigest = canUseFeature(plan, "dailyDigest");
   const canWhiteLabelEmails = canUseFeature(plan, "whiteLabelEmails");
   const canCoreLimitedEdition = canUseFeature(plan, "coreLimitedEditionSections");
   const canDeadStockAlerts = canUseFeature(plan, "deadStockAlerts");
@@ -357,26 +322,14 @@ function SettingsContent() {
           supplierLeadTimeDays={settings.supplierLeadTimeDays}
         />
 
-        <DigestEmailsSection
-          digestEnabled={digestEnabled}
-          digestFrequency={digestFrequency}
-          digestTimezone={digestTimezone}
-          canDailyDigest={canDailyDigest}
-          onDigestEnabledChange={(v) => { setDigestEnabled(v); markDirty(); }}
-          onDigestFrequencyChange={(v) => { setDigestFrequency(v); markDirty(); }}
-          onDigestTimezoneChange={(v) => { setDigestTimezone(v); markDirty(); }}
-        />
-
-        <AlertDeliverySection
-          alertDeliveryMode={alertDeliveryMode}
-          lowStockMuted={lowStockMuted}
-          outOfStockMuted={outOfStockMuted}
-          restockMuted={restockMuted}
-          onAlertDeliveryModeChange={(v) => { setAlertDeliveryMode(v); markDirty(); }}
-          onLowStockMutedChange={(v) => { setLowStockMuted(v); markDirty(); }}
-          onOutOfStockMutedChange={(v) => { setOutOfStockMuted(v); markDirty(); }}
-          onRestockMutedChange={(v) => { setRestockMuted(v); markDirty(); }}
-        />
+        <div style={{ marginTop: 24 }}>
+          <s-section heading="Alert Rules & Digest Schedule">
+            <p style={{ fontSize: 14, color: "#6b7280", margin: 0 }}>
+              Moved to <s-link href="/app/notification-center">Notification Center</s-link> — choose which
+              alerts to receive, delivery timing, and digest schedule there.
+            </p>
+          </s-section>
+        </div>
 
         <EmailBrandingSection
           brandSenderName={brandSenderName}

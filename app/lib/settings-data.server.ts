@@ -7,6 +7,8 @@ type SettingsValues = {
   digestEnabled: boolean;
   digestFrequency: string;
   digestTimezone: string;
+  digestHour: number;
+  digestDayOfWeek: number;
   brandLogoUrl: string;
   brandColor: string;
   brandSenderName: string;
@@ -17,6 +19,7 @@ type SettingsValues = {
   limitedEditionTag: string;
   deadStockThresholdDays: number;
   alertDeliveryMode: string;
+  alertBatchHour: number;
   lowStockMuted: boolean;
   outOfStockMuted: boolean;
   restockMuted: boolean;
@@ -45,6 +48,8 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           digestEnabled: settings.digestEnabled,
           digestFrequency: settings.digestFrequency,
           digestTimezone: settings.digestTimezone ?? "UTC",
+          digestHour: settings.digestHour ?? 8,
+          digestDayOfWeek: settings.digestDayOfWeek ?? 1,
           brandLogoUrl: settings.brandLogoUrl ?? "",
           brandColor: settings.brandColor ?? "#4f46e5",
           brandSenderName: settings.brandSenderName ?? "",
@@ -55,6 +60,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           limitedEditionTag: settings.limitedEditionTag ?? "limited-edition",
           deadStockThresholdDays: settings.deadStockThresholdDays ?? 60,
           alertDeliveryMode: settings.alertDeliveryMode ?? "daily",
+          alertBatchHour: settings.alertBatchHour ?? 23,
           lowStockMuted: settings.lowStockMuted ?? false,
           outOfStockMuted: settings.outOfStockMuted ?? false,
           restockMuted: settings.restockMuted ?? false,
@@ -66,6 +72,8 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           digestEnabled: true,
           digestFrequency: "weekly",
           digestTimezone: "UTC",
+          digestHour: 8,
+          digestDayOfWeek: 1,
           brandLogoUrl: "",
           brandColor: "#4f46e5",
           brandSenderName: "",
@@ -76,6 +84,7 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           limitedEditionTag: "limited-edition",
           deadStockThresholdDays: 60,
           alertDeliveryMode: "daily",
+          alertBatchHour: 23,
           lowStockMuted: false,
           outOfStockMuted: false,
           restockMuted: false,

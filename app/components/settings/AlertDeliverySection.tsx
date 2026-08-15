@@ -1,20 +1,29 @@
 import { Toggle, fieldLabel, helpText } from "../IntegrationControls";
+import { DIGEST_TIMEZONES, HOUR_OPTIONS, formatHourLabel } from "../../lib/timezones";
 
 export function AlertDeliverySection({
   alertDeliveryMode,
+  alertBatchHour,
+  digestTimezone,
   lowStockMuted,
   outOfStockMuted,
   restockMuted,
   onAlertDeliveryModeChange,
+  onAlertBatchHourChange,
   onLowStockMutedChange,
   onOutOfStockMutedChange,
   onRestockMutedChange,
 }: {
   alertDeliveryMode: string;
+  alertBatchHour: number;
+  // Read-only here — the timezone picker itself lives on DigestEmailsSection
+  // (one shared notification timezone, not a second field to keep in sync).
+  digestTimezone: string;
   lowStockMuted: boolean;
   outOfStockMuted: boolean;
   restockMuted: boolean;
   onAlertDeliveryModeChange: (v: string) => void;
+  onAlertBatchHourChange: (v: number) => void;
   onLowStockMutedChange: (v: boolean) => void;
   onOutOfStockMutedChange: (v: boolean) => void;
   onRestockMutedChange: (v: boolean) => void;
@@ -54,9 +63,29 @@ export function AlertDeliverySection({
         </div>
         <p style={helpText}>
           {alertDeliveryMode === "daily"
-            ? "One combined summary — a single table of low-stock, out-of-stock, and back-in-stock events — is sent at 11:55 PM UTC instead of a separate email/Slack message per event."
+            ? "One combined summary — a single table of low-stock, out-of-stock, and back-in-stock events — is sent once a day instead of a separate email/Slack message per event."
             : "An email/Slack message is sent the moment each alert fires (today's behavior)."}
         </p>
+
+        {alertDeliveryMode === "daily" && (
+          <div style={{ marginBottom: 16 }}>
+            <label htmlFor="alertBatchHour" style={fieldLabel}>Sent at</label>
+            <select
+              id="alertBatchHour"
+              name="alertBatchHour"
+              value={alertBatchHour}
+              onChange={(e) => onAlertBatchHourChange(parseInt(e.target.value, 10))}
+              style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "9px 12px", fontSize: 14, color: "#374151", width: "fit-content", minWidth: 140 }}
+            >
+              {HOUR_OPTIONS.map((h) => (
+                <option key={h} value={h}>{formatHourLabel(h)}</option>
+              ))}
+            </select>
+            <p style={helpText}>
+              In {DIGEST_TIMEZONES.find((tz) => tz.value === digestTimezone)?.label ?? digestTimezone} — same time zone as the digest, set below.
+            </p>
+          </div>
+        )}
 
         <div style={{ marginTop: 16 }}>
           <p style={fieldLabel}>Choose which alerts to receive</p>

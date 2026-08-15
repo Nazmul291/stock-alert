@@ -74,17 +74,25 @@ model StoreSettings {
   autoRepublishEnabled Boolean   @default(false) @map("auto_republish_enabled")
   digestEnabled        Boolean   @default(true) @map("digest_enabled")
   digestFrequency      String    @default("weekly") @map("digest_frequency")
-  // IANA identifier (e.g. "America/New_York") — the worker's digest cron
-  // runs hourly and compares each shop's local hour against 8am in this
-  // zone, rather than firing once at a fixed UTC hour (see processDigests
-  // in inventory-buffer.worker.ts).
+  // IANA identifier (e.g. "America/New_York") — shared by both the digest and
+  // the alert-batch schedule below; the worker's crons run hourly and compare
+  // each shop's local hour against digestHour/alertBatchHour in this zone,
+  // rather than firing once at a fixed UTC hour (see shouldSendDigestNow /
+  // shouldSendAlertBatchNow in inventory-buffer.worker.ts).
   digestTimezone       String    @default("UTC") @map("digest_timezone") @db.VarChar(64)
+  // Local hour (0-23) the digest sends at. Day of week (0=Sun..6=Sat) only
+  // applies when digestFrequency="weekly".
+  digestHour           Int       @default(8) @map("digest_hour")
+  digestDayOfWeek      Int       @default(1) @map("digest_day_of_week")
   lastDigestSentAt     DateTime? @map("last_digest_sent_at") @db.Timestamptz
   // Email + Slack cadence only for low_stock/out_of_stock/restock alerts —
-  // "instant" (today's behavior) or "daily" (one batched summary at 23:55 UTC,
-  // see processAlertBatches). In-app history, WhatsApp, Klaviyo, Asana, and
-  // Shopify Flow are unaffected by this and always fire immediately.
+  // "instant" (today's behavior) or "daily" (one batched summary at
+  // alertBatchHour local time, see processAlertBatches). In-app history,
+  // WhatsApp, Klaviyo, Asana, and Shopify Flow are unaffected by this and
+  // always fire immediately.
   alertDeliveryMode      String    @default("daily") @map("alert_delivery_mode")
+  // Local hour (0-23, per digestTimezone) the daily batch flushes at.
+  alertBatchHour         Int       @default(23) @map("alert_batch_hour")
   lastAlertBatchSentAt   DateTime? @map("last_alert_batch_sent_at") @db.Timestamptz
   // Per-event-type mute — Email + Slack only, same scoping as above.
   lowStockMuted          Boolean   @default(false) @map("low_stock_muted")
