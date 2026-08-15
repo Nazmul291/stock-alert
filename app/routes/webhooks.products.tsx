@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { canAddProduct } from "../lib/plan-enforcement";
 import { canUseFeature } from "../lib/plan-limits";
 import { publishEvent } from "../lib/broadcast.server";
+import { syncInventoryItemMap, deleteInventoryItemMapForProducts } from "../lib/inventory-item-map.server";
 
 type WebhookAdminClient = Awaited<ReturnType<typeof authenticate.webhook>>["admin"];
 
@@ -13,6 +14,10 @@ type ProductVariantPayload = {
   sku?: string | null;
   inventory_management?: string | null;
   inventory_quantity?: number | null;
+  // Shopify's REST product payload carries this per variant — it's what
+  // inventory_item_map is keyed by, so the inventory webhook can resolve an
+  // event without calling the Admin API.
+  inventory_item_id?: number | string | null;
 };
 
 type ProductWebhookPayload = {
@@ -145,6 +150,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
+    // Map the new variants so the inventory webhook can resolve their events
+    // without an Admin call. Best-effort — a miss just costs the fast path.
+    await syncInventoryItemMap(
+      shop,
+      storeSession?.plan,
+      trackedVariants
+        .filter((v) => v.id && v.inventory_item_id)
+        .map((v) => ({
+          inventoryItemId: v.inventory_item_id!,
+          productId,
+          variantId: v.id!,
+        })),
+    ).catch((err) => console.error("[Webhook] inventory_item_map sync failed:", err));
+
     console.log(`[Webhook] Auto-added new product ${productId} (${title}) — ${trackedVariants.length} variant(s) for ${shop}`);
     publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
   }
@@ -155,6 +174,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.inventoryTracking.deleteMany({
         where: { shop, productId: BigInt(productId) },
       });
+      await deleteInventoryItemMapForProducts(shop, [productId]).catch(() => {});
       publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
     }
   }
@@ -181,6 +201,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await prisma.inventoryTracking.deleteMany({
         where: { shop, productId: BigInt(productId) },
       });
+      await deleteInventoryItemMapForProducts(shop, [productId]).catch(() => {});
       publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
       return new Response(null, { status: 200 });
     }
@@ -239,6 +260,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           });
         }
+        await syncInventoryItemMap(
+          shop,
+          storeSession?.plan,
+          trackedVariants
+            .filter((v) => v.id && v.inventory_item_id)
+            .map((v) => ({ inventoryItemId: v.inventory_item_id!, productId, variantId: v.id! })),
+        ).catch((err) => console.error("[Webhook] inventory_item_map sync failed:", err));
         console.log(`[Webhook] Re-added product ${productId} (${title}) — ${trackedVariants.length} variant(s) for ${shop} after status change to ACTIVE`);
         publishEvent(shop, ["products", "dashboard", "analytics"]).catch(() => {});
         return new Response(null, { status: 200 });

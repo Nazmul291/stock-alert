@@ -32,6 +32,7 @@ model Session {
 
   storeSettings          StoreSettings?
   inventoryTracking      InventoryTracking[]
+  inventoryItemMap       InventoryItemMap[]
   alertHistory           AlertHistory[]
   setupProgress          SetupProgress?
   backInStockSubscribers BackInStockSubscriber[]
@@ -192,6 +193,39 @@ model InventoryTracking {
   @@index([shop, inventoryStatus])
   @@index([shop, supplierId])
   @@map("inventory_tracking")
+}
+
+// Lets the inventory webhook answer "which variant is this, and does this shop
+// still care about it?" from one indexed read, instead of a Shopify Admin
+// GraphQL round trip on every inventory_levels/update event. Shopify's webhook
+// only carries inventory_item_id, and inventory_tracking is keyed by
+// (shop, variantId) with no inventoryItemId column — so without this table the
+// webhook *must* call the Admin API before it can even tell whether the variant
+// is tracked.
+//
+// monitoringEnabled and plan are denormalized copies, kept in sync by every
+// site that writes inventory_tracking or changes a shop's plan (see the
+// callers of syncInventoryItemMap in app/lib/inventory-item-map.server.ts).
+// A miss here is deliberately NOT treated as "untracked" — see the webhook's
+// fail-open guard, since a newly created product is mapped only after its
+// products/create webhook or the next sync pass lands.
+model InventoryItemMap {
+  // Shopify inventory item ids are globally unique, so this is the natural PK
+  // and gives the webhook its single-row lookup.
+  inventoryItemId   BigInt   @id @map("inventory_item_id")
+  shop              String
+  productId         BigInt   @map("product_id")
+  variantId         BigInt   @map("variant_id")
+  monitoringEnabled Boolean  @default(true) @map("monitoring_enabled")
+  plan              Plan?
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop])
+  @@index([shop, variantId])
+  @@map("inventory_item_map")
 }
 
 model AlertHistory {

@@ -24,16 +24,19 @@ import {
 } from "../app/lib/notifications.js";
 import {
   QUEUE_NAME,
+  INVENTORY_EVENT_QUEUE_NAME,
   DIGEST_QUEUE_NAME,
   VELOCITY_QUEUE_NAME,
   ALERT_BATCH_QUEUE_NAME,
   type BufferPayload,
   type InventoryBufferJobData,
+  type InventoryEventJobData,
 } from "../app/lib/queue.js";
 import type { AlertBatchEmailData, AlertBatchEvent } from "../app/lib/email-templates.js";
 import type { AlertType } from "@prisma/client";
 import { atRiskRepresentativeRows } from "../app/lib/inventory-rollup.server.js";
 import { refreshShopVelocity } from "../app/lib/velocity.server.js";
+import { processInventoryEvent } from "../app/lib/inventory-event.server.js";
 import { unauthenticated } from "../app/shopify.server.js";
 
 // ── pg-boss instance ──────────────────────────────────────────────────────────
@@ -47,10 +50,11 @@ boss.on("error", (err) => {
 
 await boss.start();
 await boss.createQueue(QUEUE_NAME);
+await boss.createQueue(INVENTORY_EVENT_QUEUE_NAME);
 await boss.createQueue(DIGEST_QUEUE_NAME);
 await boss.createQueue(VELOCITY_QUEUE_NAME);
 await boss.createQueue(ALERT_BATCH_QUEUE_NAME);
-console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME);
+console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, INVENTORY_EVENT_QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────
 // pg-boss v12 WorkHandler always receives Job<T>[] — an array.
@@ -61,6 +65,23 @@ await boss.work<InventoryBufferJobData>(
   async (jobs: Job<InventoryBufferJobData>[]) => {
     for (const job of jobs) {
       await processJob(job);
+    }
+  },
+);
+
+// ── Inventory event handler ───────────────────────────────────────────────────
+// The webhook now only verifies, guards on inventory_item_map and enqueues here;
+// resolving the variant, classifying it, writing inventory_tracking and routing
+// into the debounce buffer all happen in this process. Because the job is
+// durable, a restart mid-flight retries the event rather than losing it — the
+// old fire-and-forget promise after the webhook's 200 had no such guarantee.
+await boss.work<InventoryEventJobData>(
+  INVENTORY_EVENT_QUEUE_NAME,
+  { localConcurrency: 5 },
+  async (jobs: Job<InventoryEventJobData>[]) => {
+    for (const job of jobs) {
+      console.log(`[Worker] Processing inventory event ${job.id} — ${job.data.shop} item ${job.data.inventoryItemId}`);
+      await processInventoryEvent(job.data);
     }
   },
 );

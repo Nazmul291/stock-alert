@@ -9,6 +9,7 @@ import { canUseFeature } from "../lib/plan-limits";
 import { createSupplier } from "../lib/supplier.server";
 import { createPurchaseOrder } from "../lib/purchase-order.server";
 import { PRODUCT_INVENTORY_QUERY, INVENTORY_ITEM_UPDATE_MUTATION, METAFIELDS_SET_MUTATION, METAFIELDS_DELETE_MUTATION } from "../lib/graphql";
+import { syncInventoryItemMap, deleteInventoryItemMapForProducts } from "../lib/inventory-item-map.server";
 import type { ProductDetailData } from "../lib/product-detail.server";
 import { useProductDetailStore, type ProductDetailStore } from "../stores/product-detail-store";
 import { SSEErrorRetry } from "../components/Skeleton";
@@ -203,8 +204,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           });
         }
       }
+
+      // Mirror into inventory_item_map so the inventory webhook's guard reads
+      // the same monitoringEnabled the merchant just saved, and can resolve
+      // these variants without an Admin call.
+      await syncInventoryItemMap(
+        shop,
+        plan,
+        variantsFresh
+          .filter((v) => v.inventoryItemId)
+          .map((v) => ({
+            inventoryItemId: (v.inventoryItemId as string).split("/").pop() as string,
+            productId,
+            variantId: v.variantId,
+            monitoringEnabled,
+          })),
+      ).catch((err) => console.error("[ProductDetail] inventory_item_map sync failed:", err));
     } else if (existingRows.length > 0) {
       await prisma.inventoryTracking.deleteMany({ where: { shop, productId: BigInt(productId) } });
+      await deleteInventoryItemMapForProducts(shop, [productId]).catch(() => {});
     }
 
     // A plain product metafield with no dependency on InventoryTracking rows

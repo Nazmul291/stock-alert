@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { planKeyForBillingName, type PlanKey } from "../lib/billing-plans";
 import { enforcePlanLimits } from "../lib/plan-enforcement";
+import { setInventoryItemMapPlan } from "../lib/inventory-item-map.server";
 import { invalidateShopCache } from "../lib/shop-cache.server";
 import { getActiveSubscriptionPlan, invalidateBillingCache } from "../services/billing.server";
 
@@ -27,6 +28,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shop, isOnline: false },
       data: { plan },
     });
+    // inventory_item_map carries a denormalized plan so the inventory webhook
+    // can gate on it in one read — one bulk UPDATE, not a write per item.
+    await setInventoryItemMapPlan(shop, plan).catch((err) =>
+      console.error("[Billing] inventory_item_map plan sync failed:", err),
+    );
     invalidateShopCache(shop);
     invalidateBillingCache(shop);
     console.log(`[Billing] Plan updated to ${plan} for ${shop} (subscription ${status})`);
@@ -48,6 +54,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shop, isOnline: false },
       data: { plan: currentPlan },
     });
+    await setInventoryItemMapPlan(shop, currentPlan).catch((err) =>
+      console.error("[Billing] inventory_item_map plan sync failed:", err),
+    );
     invalidateShopCache(shop);
     invalidateBillingCache(shop);
 

@@ -11,6 +11,7 @@ import { enforcePlanLimits } from "../lib/plan-enforcement";
 import { syncState } from "../lib/sync-state.server";
 import { refreshShopVelocity } from "../lib/velocity.server";
 import { publishEvent } from "../lib/broadcast.server";
+import { syncInventoryItemMap, setInventoryItemMapMonitoring } from "../lib/inventory-item-map.server";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { ProductSyncButton } from "../components/products/ProductSyncButton";
 import { ProductsToolbar } from "../components/products/ProductsToolbar";
@@ -39,7 +40,7 @@ type CollectionsResponse = GraphQLResponse<{
 type SyncProductVariantEdge = {
   node: {
     id: string; title: string; sku: string | null; inventoryQuantity: number | null;
-    inventoryItem: { tracked: boolean } | null;
+    inventoryItem: { id: string; tracked: boolean } | null;
   };
 };
 type SyncProductEdge = {
@@ -58,6 +59,10 @@ type SyncVariantRow = {
   productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
   sku: string | null; currentQuantity: number; inventoryStatus: "in_stock" | "low_stock" | "out_of_stock";
   imageUrl: string | null; imageAlt: string | null; tags: string | null;
+  // Feeds inventory_item_map alongside the inventory_tracking upsert below.
+  // Nullable because a variant with inventory tracking switched off in Shopify
+  // has no inventoryItem to map.
+  inventoryItemId: bigint | null;
 };
 
 const SYNC_PRODUCTS_GRAPHQL = `
@@ -72,7 +77,9 @@ const SYNC_PRODUCTS_GRAPHQL = `
             edges {
               node {
                 id title sku inventoryQuantity
-                inventoryItem { tracked }
+                # inventoryItem.id feeds inventory_item_map, which is what lets
+                # the inventory webhook resolve an event without an Admin call.
+                inventoryItem { id tracked }
               }
             }
           }
@@ -244,6 +251,9 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
             imageUrl,
             imageAlt,
             tags,
+            inventoryItemId: v.inventoryItem?.id
+              ? BigInt(v.inventoryItem.id.split("/").pop() as string)
+              : null,
           });
         }
       }
@@ -279,6 +289,22 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
       const dbPct = 82 + Math.round(((i + chunk.length) / allVariants.length) * 16);
       await syncState.progress(shop, dbPct);
     }
+
+    // Mirror into inventory_item_map so the inventory webhook can resolve
+    // these variants without an Admin API call. Best-effort: a failure here
+    // only costs the webhook its fast path (it falls open to the worker), so
+    // it must never fail the sync itself.
+    await syncInventoryItemMap(
+      shop,
+      plan,
+      allVariants
+        .filter((v) => v.inventoryItemId !== null)
+        .map((v) => ({
+          inventoryItemId: v.inventoryItemId!,
+          productId: v.productId,
+          variantId: v.variantId,
+        })),
+    ).catch((err) => console.error("[Sync] inventory_item_map sync failed:", err));
 
     if (allVariants.length > 0) {
       const syncedVariantIds = allVariants.map((v) => v.variantId);
@@ -394,6 +420,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           data: { monitoringEnabled: false, inventoryStatus: "deactivated" },
         });
       }
+      // Mirror the flag so the inventory webhook's guard sees the same answer
+      // — otherwise it keeps enqueueing events for variants the merchant just
+      // switched off (or keeps dropping them after switching back on).
+      await setInventoryItemMapMonitoring(shop, { productIds: ids }, enabled).catch((err) =>
+        console.error("[Products] inventory_item_map monitoring sync failed:", err),
+      );
     }
     return { success: true, message: `Monitoring ${enabled ? "enabled" : "disabled"} for ${updatedCount} product(s).` };
   }
