@@ -70,13 +70,15 @@ export function CreatePurchaseOrderModal({
 }: {
   suppliers: SupplierOption[];
   locations: LocationOption[];
-  // Opens the modal with one product's variants already selected, and (when
-  // set) that product's current supplier preselected — the product-detail
-  // page's use case, replacing the old ProductCreatePoCard. `productId`
-  // also travels with the submit, which is what triggers the server's
-  // "supplier of record" write for that product (see
-  // api.purchase-orders.create.ts).
-  preselect?: { productId: string; rows: CandidateRow[]; defaultSupplierId?: string | null };
+  // Opens the modal with rows already selected, and (when set) a supplier
+  // preselected. `productId` is optional: when present (the product-detail
+  // page's use case, replacing the old ProductCreatePoCard) it travels with
+  // the submit and triggers the server's "supplier of record" write for that
+  // product (see api.purchase-orders.create.ts). Omit it for preselects that
+  // span many products with an already-correct supplier (e.g. Reorder
+  // Planner) — there's no single product to reassign, and every row's
+  // supplier is already right.
+  preselect?: { productId?: string; rows: CandidateRow[]; defaultSupplierId?: string | null };
   // When provided, the modal stays open on success and shows an inline
   // confirmation instead of navigating to the new PO — the product-detail
   // page uses this to patch its own store and keep the merchant in place.
@@ -257,7 +259,7 @@ export function CreatePurchaseOrderModal({
       supplierNote,
       terms,
       tags,
-      ...(preselect ? { productId: preselect.productId } : {}),
+      ...(preselect?.productId ? { productId: preselect.productId } : {}),
     });
     if (!result.success) return; // purchaseOrderError already set in the store
 

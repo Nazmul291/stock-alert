@@ -15,6 +15,7 @@ export type PreviewLine = {
   currentQuantity: number;
   stockOutDays: number | null;
   avgDailySales: number | null;
+  manualDailySales: number | null;
   unitCost: number | null;
   price: string | null;
   compareAtPrice: string | null;
@@ -102,6 +103,7 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
       currentQuantity: row.currentQuantity,
       stockOutDays: row.stockOutDays,
       avgDailySales: row.avgDailySales,
+      manualDailySales: row.manualDailySales,
       unitCost: row.unitCost,
       price: null,
       compareAtPrice: null,
