@@ -39,6 +39,8 @@ model Session {
   dashboardSnapshots     DashboardSnapshot[]
   suppliers              Supplier[]
   purchaseOrders         PurchaseOrder[]
+  forecastRules          ForecastRule[]
+  forecastCollectionMembers ForecastCollectionMember[]
 
   @@index([plan])
 }
@@ -201,6 +203,11 @@ model InventoryTracking {
   supplierId           String?   @map("supplier_id") @db.Uuid
   unitCost             Float?    @map("unit_cost")
   tags                 String?   @db.VarChar(1000)
+  // Shopify's product.vendor, mirrored locally so a vendor-scoped
+  // ForecastRule can be evaluated without a Shopify round trip —
+  // previewPurchaseOrders has no admin context and runs on every dashboard
+  // render. Null until the shop's next full sync populates it.
+  vendor               String?   @db.VarChar(255)
   zeroSalesSinceAt     DateTime? @map("zero_sales_since_at") @db.Timestamptz
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz
@@ -217,7 +224,77 @@ model InventoryTracking {
   @@index([shop, lastAlertSentAt])
   @@index([shop, inventoryStatus])
   @@index([shop, supplierId])
+  @@index([shop, vendor])
   @@map("inventory_tracking")
+}
+
+// A merchant-authored override of the forecast inputs for some slice of the
+// catalog. Only consulted when StoreSettings.forecastMode is "custom";
+// products matching no rule fall back to the store-level smart defaults.
+//
+// Deliberately a table rather than a Shopify metafield (the pattern used for
+// per-product settings like custom_threshold): collection/vendor/tag rules
+// have no single product to hang a metafield on, and the resolver has to be
+// able to load every rule for a shop in one query.
+model ForecastRule {
+  id        String   @id @default(uuid()) @db.Uuid
+  shop      String
+  name      String   @db.VarChar(200)
+  enabled   Boolean  @default(true)
+  // "product" | "collection" | "vendor" | "tag". Kept as a plain string,
+  // matching how monitoringFilter/alertDeliveryMode are stored, so adding a
+  // scope later needs no enum migration.
+  scopeType String   @map("scope_type") @db.VarChar(20)
+  // productId / collectionId / vendor name / tag, per scopeType.
+  scopeValue String  @map("scope_value") @db.VarChar(255)
+  // "velocity" (scale with sales rate) or "fixed" (flat stock level).
+  basis     String   @db.VarChar(20)
+  // All nullable — a rule overrides only what it sets; anything left null
+  // falls through to the store-level default.
+  leadTimeDays    Int? @map("lead_time_days")
+  safetyStockDays Int? @map("safety_stock_days")
+  minStockLevel   Int? @map("min_stock_level")
+  // Recurring seasonal window as MM-DD encoded ints (Nov 1 => 1101). Both
+  // null = always active. start > end means the window wraps the new year
+  // (e.g. 1101..0228), which the resolver handles explicitly.
+  seasonStart Int? @map("season_start")
+  seasonEnd   Int? @map("season_end")
+  // Seeded in bands by scope specificity on create (product 400 /
+  // collection 300 / vendor 200 / tag 100) so the common case needs no
+  // manual tuning; breaks ties between rules of the same specificity.
+  priority  Int      @default(100)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop])
+  @@index([shop, enabled])
+  @@map("forecast_rule")
+}
+
+// Materialized membership for collection-scoped rules only — NOT a general
+// product->collection index.
+//
+// Shopify has no reliable per-product webhook for automated-collection
+// membership (it changes implicitly when tags/price/etc. change), and
+// nesting `collections` under the product sync query would multiply the cost
+// of a sync that already hand-throttles. So instead of tracking membership
+// for every product, a cron resolves one `collection_id:X` search per
+// *distinct collection actually referenced by a rule* — a handful of calls
+// regardless of catalog size.
+model ForecastCollectionMember {
+  id           String   @id @default(uuid()) @db.Uuid
+  shop         String
+  collectionId String   @map("collection_id") @db.VarChar(50)
+  productId    BigInt   @map("product_id")
+  refreshedAt  DateTime @default(now()) @map("refreshed_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@unique([shop, collectionId, productId])
+  @@index([shop, collectionId])
+  @@map("forecast_collection_member")
 }
 
 // Lets the inventory webhook answer "which variant is this, and does this shop

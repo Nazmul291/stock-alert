@@ -116,6 +116,15 @@ export function ReorderPlannerSupplierGroup({
                         </Link>
                         {!isDefaultVariant && <div style={{ fontSize: 12, color: "#6b7280" }}>{line.variantTitle}</div>}
                         {line.sku && <div style={{ fontSize: 12, color: "#9ca3af" }}>{line.sku}</div>}
+                        {/* Explains *why* this row's numbers are what they
+                            are — far more useful to a merchant than any
+                            precedence scheme they'd otherwise have to
+                            reason about. Only present in custom mode. */}
+                        {line.matchedRuleName && (
+                          <div style={{ marginTop: 3, display: "inline-block", fontSize: 11, fontWeight: 600, color: "#c97d10", background: "#fdf1dd", borderRadius: 6, padding: "2px 7px" }}>
+                            Rule: {line.matchedRuleName}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>

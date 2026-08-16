@@ -24,6 +24,10 @@ type ProductWebhookPayload = {
   id?: number | string;
   title?: string;
   status?: string;
+  // REST shape: a single comma-separated string ("a, b"), not an array —
+  // unlike the GraphQL sync path, where tags is string[].
+  tags?: string;
+  vendor?: string;
   image?: { src?: string | null; alt?: string | null } | null;
   variants?: ProductVariantPayload[];
 };
@@ -274,12 +278,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Always sync title and image (whole-product fields) regardless of status change.
+    //
+    // tags/vendor are refreshed here too. They previously weren't, so local
+    // copies went stale until the shop's next full sync — harmless while
+    // they only fed a reporting split, but forecast rules can be scoped to
+    // a tag or vendor, and a stale copy there means ordering against the
+    // wrong rule. REST sends tags as a comma-separated string with spaces
+    // ("a, b"); normalized to match the sync path's join(",") form.
+    const rawTags: string | undefined = data?.tags;
+    const normalizedTags = typeof rawTags === "string"
+      ? (rawTags.split(",").map((t) => t.trim()).filter(Boolean).join(",") || null)
+      : undefined;
+    const rawVendor: string | undefined = data?.vendor;
     await prisma.inventoryTracking.updateMany({
       where: { shop, productId: BigInt(productId) },
       data: {
         ...(title ? { productTitle: title } : {}),
         imageUrl,
         imageAlt,
+        // Only written when the payload actually carried the field, so a
+        // partial payload can't blank out good data.
+        ...(normalizedTags !== undefined ? { tags: normalizedTags } : {}),
+        ...(typeof rawVendor === "string" ? { vendor: rawVendor.trim() || null } : {}),
       },
     });
 

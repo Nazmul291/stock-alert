@@ -29,6 +29,7 @@ import {
   VELOCITY_QUEUE_NAME,
   ALERT_BATCH_QUEUE_NAME,
   DASHBOARD_SNAPSHOT_QUEUE_NAME,
+  FORECAST_COLLECTIONS_QUEUE_NAME,
   type BufferPayload,
   type InventoryBufferJobData,
   type InventoryEventJobData,
@@ -40,6 +41,7 @@ import { refreshShopVelocity } from "../app/lib/velocity.server.js";
 import { processInventoryEvent } from "../app/lib/inventory-event.server.js";
 import { unauthenticated } from "../app/shopify.server.js";
 import { shouldSendDigestNow, shouldSendAlertBatchNow } from "../app/lib/notification-schedule.js";
+import { refreshForecastCollectionMembers } from "../app/lib/forecast-collections.server.js";
 
 // ── pg-boss instance ──────────────────────────────────────────────────────────
 const boss = new PgBoss({ connectionString: process.env.DATABASE_URL! });
@@ -57,7 +59,8 @@ await boss.createQueue(DIGEST_QUEUE_NAME);
 await boss.createQueue(VELOCITY_QUEUE_NAME);
 await boss.createQueue(ALERT_BATCH_QUEUE_NAME);
 await boss.createQueue(DASHBOARD_SNAPSHOT_QUEUE_NAME);
-console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, INVENTORY_EVENT_QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME, DASHBOARD_SNAPSHOT_QUEUE_NAME);
+await boss.createQueue(FORECAST_COLLECTIONS_QUEUE_NAME);
+console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, INVENTORY_EVENT_QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME, DASHBOARD_SNAPSHOT_QUEUE_NAME, FORECAST_COLLECTIONS_QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────
 // pg-boss v12 WorkHandler always receives Job<T>[] — an array.
@@ -189,6 +192,45 @@ console.log("[Worker] Dashboard snapshot cron scheduled — fires daily at 03:00
 await boss.work<Record<string, never>>(DASHBOARD_SNAPSHOT_QUEUE_NAME, async () => {
   await processDashboardSnapshot();
 });
+
+// ── Forecast collection membership cron ────────────────────────────────────────
+// Only does work for shops that actually have collection-scoped forecast
+// rules; everyone else is a no-op costing one indexed query. Membership has
+// to be materialized because rule evaluation happens in
+// previewPurchaseOrders, which runs on every dashboard render with no admin
+// context — and because Shopify emits no reliable per-product event when an
+// automated collection's membership changes.
+await boss.schedule(FORECAST_COLLECTIONS_QUEUE_NAME, "30 4 * * *", {});
+console.log("[Worker] Forecast collection cron scheduled — fires daily at 04:30 UTC");
+
+await boss.work<Record<string, never>>(FORECAST_COLLECTIONS_QUEUE_NAME, async () => {
+  await processForecastCollections();
+});
+
+// Refreshes materialized collection membership for collection-scoped
+// forecast rules. Scoped to shops that actually have at least one such rule,
+// so the overwhelming majority of installs cost one indexed query and no
+// Shopify calls at all.
+async function processForecastCollections(): Promise<void> {
+  console.log(`[ForecastCollections] Running daily refresh — ${new Date().toUTCString()}`);
+
+  const shopsWithRules = await prisma.forecastRule.findMany({
+    where: { enabled: true, scopeType: "collection" },
+    select: { shop: true },
+    distinct: ["shop"],
+  });
+  console.log(`[ForecastCollections] ${shopsWithRules.length} shop(s) with collection rules`);
+
+  for (const { shop } of shopsWithRules) {
+    try {
+      const { admin } = await unauthenticated.admin(shop);
+      const { collections, members } = await refreshForecastCollectionMembers(shop, admin);
+      console.log(`[ForecastCollections] ${shop}: ${collections} collection(s), ${members} member(s)`);
+    } catch (err) {
+      console.error(`[ForecastCollections] Failed for ${shop}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
 
 async function processVelocityRefresh(): Promise<void> {
   const now = new Date();

@@ -47,7 +47,7 @@ type SyncProductVariantEdge = {
 };
 type SyncProductEdge = {
   node: {
-    id: string; title: string; status: string; tags: string[];
+    id: string; title: string; status: string; tags: string[]; vendor: string | null;
     featuredMedia: { preview: { image: { url: string; altText: string | null } | null } | null } | null;
     customThreshold: { value: string } | null;
     variants: { edges: SyncProductVariantEdge[] };
@@ -60,7 +60,7 @@ type SyncProductsResponse = GraphQLResponse<{
 type SyncVariantRow = {
   productId: bigint; variantId: bigint; productTitle: string; variantTitle: string | null;
   sku: string | null; currentQuantity: number; inventoryStatus: "in_stock" | "low_stock" | "out_of_stock";
-  imageUrl: string | null; imageAlt: string | null; tags: string | null;
+  imageUrl: string | null; imageAlt: string | null; tags: string | null; vendor: string | null;
   // Feeds inventory_item_map alongside the inventory_tracking upsert below.
   // Nullable because a variant with inventory tracking switched off in Shopify
   // has no inventoryItem to map.
@@ -72,7 +72,7 @@ const SYNC_PRODUCTS_GRAPHQL = `
     products(first: $first, after: $after, query: $query) {
       edges {
         node {
-          id title status tags
+          id title status tags vendor
           featuredMedia { preview { image { url altText } } }
           customThreshold: metafield(namespace: "stock_alert", key: "custom_threshold") { value }
           variants(first: 100) {
@@ -226,6 +226,9 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         // Comma-joined, consistent with StoreSettings.monitoringTags — used
         // by the Enterprise "Core vs. Limited-Edition" report split.
         const tags = p.tags && p.tags.length > 0 ? p.tags.join(",") : null;
+        // Mirrored locally so vendor-scoped forecast rules can be resolved
+        // without a Shopify round trip (see forecast-mode.ts).
+        const vendor = p.vendor?.trim() || null;
 
         // Per-product custom thresholds are a Pro feature; ignore the metafield for basic stores.
         const productThreshold =
@@ -253,6 +256,7 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
             imageUrl,
             imageAlt,
             tags,
+            vendor,
             inventoryItemId: v.inventoryItem?.id
               ? BigInt(v.inventoryItem.id.split("/").pop() as string)
               : null,
@@ -283,8 +287,8 @@ async function runProductSync({ admin, shop, plan, maxProducts, threshold, monit
         chunk.map((v) =>
           prisma.inventoryTracking.upsert({
             where: { shop_variantId: { shop, variantId: v.variantId } },
-            update: { productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags, lastCheckedAt: now },
-            create: { shop, productId: v.productId, variantId: v.variantId, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, previousQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags },
+            update: { productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags, vendor: v.vendor, lastCheckedAt: now },
+            create: { shop, productId: v.productId, variantId: v.variantId, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, currentQuantity: v.currentQuantity, previousQuantity: v.currentQuantity, inventoryStatus: v.inventoryStatus, imageUrl: v.imageUrl, imageAlt: v.imageAlt, tags: v.tags, vendor: v.vendor },
           }),
         ),
       );

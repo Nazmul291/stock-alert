@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { setInventoryQuantities, activateInventoryAtLocation, getVariantInventoryItemIds, updateInventoryItemCost, updateVariantPrice } from "./shopify-inventory.server";
 import { getPricingRuleConfigs, applyPricingRule } from "./pricing-rules.server";
 import { storeForecastParams, computeReorderTargets, maxTriggerQuantity } from "./forecast-mode";
+import { getForecastContext, resolveForRow } from "./forecast-context.server";
 
 export type PreviewLine = {
   productId: string;
@@ -21,6 +22,10 @@ export type PreviewLine = {
   price: string | null;
   compareAtPrice: string | null;
   suggestedQuantity: number;
+  // Which custom rule produced this line's numbers, surfaced in the Reorder
+  // Planner so a merchant can see *why* a quantity is what it is. null in
+  // smart/classic, or in custom when no rule matched.
+  matchedRuleName: string | null;
 };
 
 export type SupplierPreview = {
@@ -63,19 +68,13 @@ export function sanitizeUnitCost(value: number | null | undefined): number | nul
 // persist anything — this is a preview for the merchant to review/edit
 // before generatePurchaseOrder() actually creates a PO.
 export async function previewPurchaseOrders(shop: string, supplierIds?: string[]): Promise<SupplierPreview[]> {
-  const settingsRow = await prisma.storeSettings.findUnique({ where: { shop } });
-  const effectiveThreshold = settingsRow?.lowStockThreshold ?? 5;
-  const forecastParams = storeForecastParams({
-    forecastMode: settingsRow?.forecastMode ?? "smart",
-    supplierLeadTimeDays: settingsRow?.supplierLeadTimeDays ?? 7,
-    safetyStockDays: settingsRow?.safetyStockDays ?? 0,
-    minStockLevel: settingsRow?.minStockLevel ?? null,
-  });
-  // Widest quantity that could trigger a reorder under these params — lets
-  // the SQL below prefilter without needing to express per-row forecast
+  const ctx = await getForecastContext(shop);
+  const { effectiveThreshold } = ctx;
+  // Widest quantity that could trigger a reorder anywhere in this shop —
+  // lets the SQL below prefilter without needing to express per-row forecast
   // resolution in SQL. Deliberately over-selects: a row wrongly excluded
   // here can never be recovered by the exact per-row check in the loop.
-  const maxQty = maxTriggerQuantity(forecastParams, effectiveThreshold);
+  const maxQty = maxTriggerQuantity(ctx.defaults, effectiveThreshold, ctx.rules);
 
   const [suppliers, rows] = await Promise.all([
     prisma.supplier.findMany({
@@ -105,7 +104,7 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
     }),
   ]);
 
-  const defaultLeadTime = settingsRow?.supplierLeadTimeDays ?? 7;
+  const defaultLeadTime = ctx.defaults.leadTimeDays;
   const suppliersById = new Map(suppliers.map((s) => [s.id, s]));
 
   const bySupplier = new Map<string, PreviewLine[]>();
@@ -114,11 +113,18 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
     const supplier = suppliersById.get(supplierId);
     if (!supplier) continue; // filtered out by supplierIds, or deleted between queries
 
-    // Supplier's own lead time still wins over the store default — that's
-    // per-supplier data the forecast mode doesn't override.
-    const leadTimeDays = supplier.leadTimeDays ?? defaultLeadTime;
+    // Per-row rule resolution (custom mode only — a no-op otherwise).
+    const resolved = resolveForRow(ctx, row);
+    // Precedence for lead time, most specific first: an explicit rule
+    // override, then the supplier's own lead time, then the store default.
+    // The supplier's value beats the store default because it's real
+    // per-supplier data; a rule beats both because the merchant set it for
+    // exactly this slice of the catalog.
+    const leadTimeDays = resolved.matchedRule && resolved.params.leadTimeDays !== ctx.defaults.leadTimeDays
+      ? resolved.params.leadTimeDays
+      : supplier.leadTimeDays ?? defaultLeadTime;
     const targets = computeReorderTargets(
-      { ...forecastParams, leadTimeDays },
+      { ...resolved.params, leadTimeDays },
       {
         currentQuantity: row.currentQuantity,
         // avgDailySales only, deliberately — NOT `manualDailySales ??
@@ -151,6 +157,7 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
       price: null,
       compareAtPrice: null,
       suggestedQuantity: targets.suggestedQuantity,
+      matchedRuleName: resolved.matchedRule?.name ?? null,
     };
     const list = bySupplier.get(supplierId);
     if (list) list.push(line); else bySupplier.set(supplierId, [line]);
