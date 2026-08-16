@@ -5,6 +5,7 @@ import { ProductPickerModal } from "./ProductPickerModal";
 import { Thumbnail } from "./Thumbnail";
 import { usePurchaseOrderActionsStore } from "../../stores/purchase-order-actions-store";
 import type { CreatedPurchaseOrder } from "../../lib/purchase-order.server";
+import { PAYMENT_TERMS_OPTIONS, CURRENCY_OPTIONS, paymentTermsLabel } from "../../lib/supplier-options";
 
 const NEW_SUPPLIER = "__new__";
 
@@ -164,7 +165,7 @@ export function CreatePurchaseOrderModal({
     // merchant hasn't already typed something of their own in here.
     if (value && !terms.trim()) {
       const picked = supplierList.find((s) => s.id === value);
-      if (picked?.paymentTerms) setTerms(picked.paymentTerms);
+      if (picked?.paymentTerms) setTerms(paymentTermsLabel(picked.paymentTerms) ?? picked.paymentTerms);
     }
   }
 
@@ -208,7 +209,7 @@ export function CreatePurchaseOrderModal({
     setExtraSuppliers((prev) => [...prev, { ...result.supplier, paymentTerms }]);
     setSupplierIdOverride(result.supplier.id);
     setShowNewSupplierForm(false);
-    if (!terms.trim() && paymentTerms) setTerms(paymentTerms);
+    if (!terms.trim() && paymentTerms) setTerms(paymentTermsLabel(paymentTerms) ?? paymentTerms);
     resetNewSupplierForm();
   }
 
@@ -406,14 +407,23 @@ export function CreatePurchaseOrderModal({
                 />
               </div>
               <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                <input
-                  type="text" placeholder="Payment terms (e.g. Net 30)" value={newSupplierPaymentTerms} onChange={(e) => setNewSupplierPaymentTerms(e.target.value)}
+                <select
+                  value={newSupplierPaymentTerms} onChange={(e) => setNewSupplierPaymentTerms(e.target.value)}
                   style={{ flex: "1 1 180px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                />
-                <input
-                  type="text" maxLength={10} placeholder="Currency (e.g. USD)" value={newSupplierCurrency} onChange={(e) => setNewSupplierCurrency(e.target.value)}
+                >
+                  {PAYMENT_TERMS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.value ? o.label : "Payment terms"}</option>
+                  ))}
+                </select>
+                <select
+                  value={newSupplierCurrency} onChange={(e) => setNewSupplierCurrency(e.target.value)}
                   style={{ flex: "1 1 140px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
-                />
+                >
+                  <option value="">Currency</option>
+                  {CURRENCY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
                 <input
                   type="number" min={1} placeholder="Lead time (days)" value={newSupplierLeadTime} onChange={(e) => setNewSupplierLeadTime(e.target.value)}
                   style={{ flex: "1 1 120px", border: "1px solid #d1d5db", borderRadius: 6, padding: "6px 10px", fontSize: 13 }}
