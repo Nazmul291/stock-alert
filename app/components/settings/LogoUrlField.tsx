@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { fieldLabel, inputStyle, helpText } from "../IntegrationControls";
+import { fieldLabel, helpText } from "../IntegrationControls";
 import { ShopifyFilePicker } from "./ShopifyFilePicker";
 
-/* ── Logo URL field with Shopify file picker + live email preview ── */
+/* ── Logo field: Shopify file picker only + live email preview ── */
 export function LogoUrlField({
   value, brandColor, disabled, onChange,
 }: {
@@ -11,16 +11,13 @@ export function LogoUrlField({
   disabled: boolean;
   onChange: (v: string) => void;
 }) {
-  const [imgStatus, setImgStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
-  const [debouncedUrl, setDebouncedUrl] = useState(value);
+  const [imgStatus, setImgStatus] = useState<"idle" | "ok" | "error">("idle");
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  useEffect(() => {
-    if (!value) { setImgStatus("idle"); setDebouncedUrl(""); return; }
-    setImgStatus("loading");
-    const t = setTimeout(() => setDebouncedUrl(value), 500);
-    return () => clearTimeout(t);
-  }, [value]);
+  // Resets the loaded/error badge whenever a new file is selected — the
+  // <img key={value}> below already remounts and re-fires onLoad/onError,
+  // this just avoids a stale badge flashing before that resolves.
+  useEffect(() => { setImgStatus("idle"); }, [value]);
 
   const isValidUrl = (u: string) => { try { return Boolean(new URL(u)); } catch { return false; } };
   const showPreview = value && isValidUrl(value);
@@ -28,33 +25,12 @@ export function LogoUrlField({
 
   return (
     <div>
-      <label style={fieldLabel}>Logo URL</label>
+      <label style={fieldLabel}>Logo</label>
 
+      {/* Shopify Files only — no manual URL entry, so every logo is always
+          a real file the merchant actually uploaded, not an arbitrary
+          (and possibly dead) external link. */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1 }}>
-          <input
-            type="url"
-            name="brandLogoUrl"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="https://yourstore.com/logo.png"
-            disabled={disabled}
-            style={{ ...inputStyle(), paddingRight: value ? 36 : 12 }}
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={() => onChange("")}
-              aria-label="Clear logo URL"
-              style={{
-                position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
-                background: "#f3f4f6", border: "none", borderRadius: "50%",
-                width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", color: "#6b7280", fontSize: 14, lineHeight: 1,
-              }}
-            >×</button>
-          )}
-        </div>
         {!disabled && (
           <button
             type="button"
@@ -69,7 +45,20 @@ export function LogoUrlField({
               <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
               <polyline points="21 15 16 10 5 21"/>
             </svg>
-            Browse Files
+            {value ? "Change File" : "Browse Files"}
+          </button>
+        )}
+        {value && !disabled && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            style={{
+              padding: "9px 12px", borderRadius: 8, border: "none",
+              background: "none", color: "#6b7280", fontSize: 13, fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Remove
           </button>
         )}
       </div>
@@ -87,10 +76,10 @@ export function LogoUrlField({
           <div style={{ background: color, padding: "20px 28px", borderRadius: 10, display: "flex", alignItems: "center" }}>
             {imgStatus === "error" ? (
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontStyle: "italic" }}>Logo failed to load</span>
-            ) : debouncedUrl ? (
+            ) : value ? (
               <img
-                key={debouncedUrl}
-                src={debouncedUrl}
+                key={value}
+                src={value}
                 alt="Logo"
                 loading="lazy"
                 style={{ display: "block", width: "auto", maxHeight: 80, objectFit: "contain" }}
@@ -104,7 +93,7 @@ export function LogoUrlField({
 
           {imgStatus === "error" && (
             <div style={{ marginTop: 8, padding: "10px 14px", background: "#fee2e2", fontSize: 12, color: "#991b1b", borderRadius: 8, border: "1px solid #fecaca" }}>
-              Could not load image — make sure the URL is publicly accessible and links directly to an image file.
+              Could not load this file — try selecting it again from Shopify Files.
             </div>
           )}
         </div>
@@ -116,7 +105,6 @@ export function LogoUrlField({
           >
             <div style={{ fontSize: 28, marginBottom: 8 }}>🖼️</div>
             <p style={{ fontSize: 13, color: "#4f46e5", margin: 0, fontWeight: 600 }}>Browse Shopify Files</p>
-            <p style={{ fontSize: 12, color: "#9ca3af", margin: "4px 0 0" }}>or paste a URL above</p>
           </div>
         )
       )}

@@ -137,7 +137,7 @@ export function ReorderPlannerSupplierGroup({
                     />
                   </td>
                   <td style={{ padding: "10px 12px" }}>
-                    <ReorderBadge days={line.stockOutDays} leadTime={group.leadTimeDays} />
+                    <ReorderBadge days={line.stockOutDays} leadTime={group.leadTimeDays} isOutOfStock={line.currentQuantity <= 0} />
                   </td>
                 </tr>
               );

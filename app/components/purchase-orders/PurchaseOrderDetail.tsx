@@ -3,6 +3,7 @@ import { useFetcher, useNavigate } from "react-router";
 import { StatusPill } from "../StatusPill";
 import { STATUS_STYLE } from "./PurchaseOrderList";
 import { buildReceiptDrafts, isReceiveLocationMissing } from "../../lib/purchase-order-receive";
+import { paymentTermsLabel } from "../../lib/supplier-options";
 
 export type PurchaseOrderDetailData = {
   id: string;
@@ -164,7 +165,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
         )}
         {(po.supplier.paymentTerms || po.supplier.currency) && (
           <p style={{ margin: "4px 0 0", fontSize: 13, color: "#374151" }}>
-            {po.supplier.paymentTerms && <><strong>Payment terms:</strong> {po.supplier.paymentTerms}</>}
+            {po.supplier.paymentTerms && <><strong>Payment terms:</strong> {paymentTermsLabel(po.supplier.paymentTerms)}</>}
             {po.supplier.paymentTerms && po.supplier.currency ? " · " : ""}
             {po.supplier.currency && <><strong>Currency:</strong> {po.supplier.currency}</>}
           </p>

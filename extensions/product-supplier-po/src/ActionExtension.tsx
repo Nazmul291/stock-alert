@@ -2,6 +2,187 @@ import '@shopify/ui-extensions/preact';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
+// Kept in sync by hand with app/lib/supplier-options.ts — this extension is
+// a separately bundled Shopify admin UI extension (its own build, no
+// cross-import of app/lib), so the two option lists are intentionally
+// duplicated rather than shared. Update both if this list ever changes.
+const PAYMENT_TERMS_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'None' },
+  { value: 'NET7', label: 'Net 7' },
+  { value: 'NET15', label: 'Net 15' },
+  { value: 'NET30', label: 'Net 30' },
+  { value: 'NET45', label: 'Net 45' },
+  { value: 'NET60', label: 'Net 60' },
+  { value: 'COD', label: 'Cash on delivery' },
+  { value: 'ON_RECEIPT', label: 'Payment on receipt' },
+  { value: 'IN_ADVANCE', label: 'Payment in advance' },
+];
+
+const CURRENCY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'USD', label: 'US Dollar (USD $)' },
+  { value: 'EUR', label: 'Euro (EUR €)' },
+  { value: 'GBP', label: 'British Pound (GBP £)' },
+  { value: 'CAD', label: 'Canadian Dollar (CAD $)' },
+  { value: 'AFN', label: 'Afghan Afghani (AFN ؋)' },
+  { value: 'ALL', label: 'Albanian Lek (ALL)' },
+  { value: 'DZD', label: 'Algerian Dinar (DZD)' },
+  { value: 'AOA', label: 'Angolan Kwanza (AOA Kz)' },
+  { value: 'ARS', label: 'Argentine Peso (ARS $)' },
+  { value: 'AMD', label: 'Armenian Dram (AMD ֏)' },
+  { value: 'AWG', label: 'Aruban Florin (AWG)' },
+  { value: 'AUD', label: 'Australian Dollar (AUD $)' },
+  { value: 'BBD', label: 'Barbadian Dollar (BBD $)' },
+  { value: 'AZN', label: 'Azerbaijani Manat (AZN ₼)' },
+  { value: 'BDT', label: 'Bangladeshi Taka (BDT ৳)' },
+  { value: 'BSD', label: 'Bahamian Dollar (BSD $)' },
+  { value: 'BHD', label: 'Bahraini Dinar (BHD)' },
+  { value: 'BIF', label: 'Burundian Franc (BIF)' },
+  { value: 'BYN', label: 'Belarusian Ruble (BYN)' },
+  { value: 'BZD', label: 'Belize Dollar (BZD $)' },
+  { value: 'BMD', label: 'Bermudan Dollar (BMD $)' },
+  { value: 'BTN', label: 'Bhutanese Ngultrum (BTN)' },
+  { value: 'BAM', label: 'Bosnia-Herzegovina Convertible Mark (BAM KM)' },
+  { value: 'BRL', label: 'Brazilian Real (BRL R$)' },
+  { value: 'BOB', label: 'Bolivian Boliviano (BOB Bs)' },
+  { value: 'BWP', label: 'Botswanan Pula (BWP P)' },
+  { value: 'BND', label: 'Brunei Dollar (BND $)' },
+  { value: 'BGN', label: 'Bulgarian Lev (BGN)' },
+  { value: 'MMK', label: 'Myanmar Kyat (MMK K)' },
+  { value: 'KHR', label: 'Cambodian Riel (KHR ៛)' },
+  { value: 'CVE', label: 'Cape Verdean Escudo (CVE)' },
+  { value: 'KYD', label: 'Cayman Islands Dollar (KYD $)' },
+  { value: 'XAF', label: 'Central African CFA Franc (XAF FCFA)' },
+  { value: 'CLP', label: 'Chilean Peso (CLP $)' },
+  { value: 'CNY', label: 'Chinese Yuan (CNY ¥)' },
+  { value: 'COP', label: 'Colombian Peso (COP $)' },
+  { value: 'KMF', label: 'Comorian Franc (KMF CF)' },
+  { value: 'CDF', label: 'Congolese Franc (CDF)' },
+  { value: 'CRC', label: 'Costa Rican Colón (CRC ₡)' },
+  { value: 'HRK', label: 'Croatian Kuna (HRK kn)' },
+  { value: 'CZK', label: 'Czech Koruna (CZK Kč)' },
+  { value: 'DKK', label: 'Danish Krone (DKK kr)' },
+  { value: 'DJF', label: 'Djiboutian Franc (DJF)' },
+  { value: 'DOP', label: 'Dominican Peso (DOP $)' },
+  { value: 'XCD', label: 'East Caribbean Dollar (XCD $)' },
+  { value: 'EGP', label: 'Egyptian Pound (EGP E£)' },
+  { value: 'ERN', label: 'Eritrean Nakfa (ERN)' },
+  { value: 'ETB', label: 'Ethiopian Birr (ETB)' },
+  { value: 'FKP', label: 'Falkland Islands Pound (FKP £)' },
+  { value: 'XPF', label: 'CFP Franc (XPF CFPF)' },
+  { value: 'FJD', label: 'Fijian Dollar (FJD $)' },
+  { value: 'GIP', label: 'Gibraltar Pound (GIP £)' },
+  { value: 'GMD', label: 'Gambian Dalasi (GMD)' },
+  { value: 'GHS', label: 'Ghanaian Cedi (GHS ₵)' },
+  { value: 'GTQ', label: 'Guatemalan Quetzal (GTQ Q)' },
+  { value: 'GYD', label: 'Guyanaese Dollar (GYD $)' },
+  { value: 'GEL', label: 'Georgian Lari (GEL ₾)' },
+  { value: 'GNF', label: 'Guinean Franc (GNF FG)' },
+  { value: 'HTG', label: 'Haitian Gourde (HTG)' },
+  { value: 'HNL', label: 'Honduran Lempira (HNL L)' },
+  { value: 'HKD', label: 'Hong Kong Dollar (HKD HK$)' },
+  { value: 'HUF', label: 'Hungarian Forint (HUF Ft)' },
+  { value: 'ISK', label: 'Icelandic Króna (ISK kr)' },
+  { value: 'INR', label: 'Indian Rupee (INR ₹)' },
+  { value: 'IDR', label: 'Indonesian Rupiah (IDR Rp)' },
+  { value: 'ILS', label: 'Israeli New Shekel (ILS ₪)' },
+  { value: 'IRR', label: 'Iranian Rial (IRR)' },
+  { value: 'IQD', label: 'Iraqi Dinar (IQD)' },
+  { value: 'JMD', label: 'Jamaican Dollar (JMD $)' },
+  { value: 'JPY', label: 'Japanese Yen (JPY ¥)' },
+  { value: 'JEP', label: 'Jersey Pound (JEP)' },
+  { value: 'JOD', label: 'Jordanian Dinar (JOD)' },
+  { value: 'KZT', label: 'Kazakhstani Tenge (KZT ₸)' },
+  { value: 'KES', label: 'Kenyan Shilling (KES)' },
+  { value: 'KID', label: 'Kiribati Dollar (KID)' },
+  { value: 'KWD', label: 'Kuwaiti Dinar (KWD)' },
+  { value: 'KGS', label: 'Kyrgystani Som (KGS ⃀)' },
+  { value: 'LAK', label: 'Laotian Kip (LAK ₭)' },
+  { value: 'LVL', label: 'Latvian Lats (LVL)' },
+  { value: 'LBP', label: 'Lebanese Pound (LBP L£)' },
+  { value: 'LSL', label: 'Lesotho Loti (LSL)' },
+  { value: 'LRD', label: 'Liberian Dollar (LRD $)' },
+  { value: 'LYD', label: 'Libyan Dinar (LYD)' },
+  { value: 'LTL', label: 'Lithuanian Litas (LTL)' },
+  { value: 'MGA', label: 'Malagasy Ariary (MGA Ar)' },
+  { value: 'MKD', label: 'Macedonian Denar (MKD)' },
+  { value: 'MOP', label: 'Macanese Pataca (MOP)' },
+  { value: 'MWK', label: 'Malawian Kwacha (MWK)' },
+  { value: 'MVR', label: 'Maldivian Rufiyaa (MVR)' },
+  { value: 'MRU', label: 'Mauritanian Ouguiya (MRU)' },
+  { value: 'MXN', label: 'Mexican Peso (MXN $)' },
+  { value: 'MYR', label: 'Malaysian Ringgit (MYR RM)' },
+  { value: 'MUR', label: 'Mauritian Rupee (MUR Rs)' },
+  { value: 'MDL', label: 'Moldovan Leu (MDL)' },
+  { value: 'MAD', label: 'Moroccan Dirham (MAD)' },
+  { value: 'MNT', label: 'Mongolian Tugrik (MNT ₮)' },
+  { value: 'MZN', label: 'Mozambican Metical (MZN)' },
+  { value: 'NAD', label: 'Namibian Dollar (NAD $)' },
+  { value: 'NPR', label: 'Nepalese Rupee (NPR Rs)' },
+  { value: 'ANG', label: 'Netherlands Antillean Guilder (ANG)' },
+  { value: 'NZD', label: 'New Zealand Dollar (NZD $)' },
+  { value: 'NIO', label: 'Nicaraguan Córdoba (NIO C$)' },
+  { value: 'NGN', label: 'Nigerian Naira (NGN ₦)' },
+  { value: 'NOK', label: 'Norwegian Krone (NOK kr)' },
+  { value: 'OMR', label: 'Omani Rial (OMR)' },
+  { value: 'PAB', label: 'Panamanian Balboa (PAB)' },
+  { value: 'PKR', label: 'Pakistani Rupee (PKR Rs)' },
+  { value: 'PGK', label: 'Papua New Guinean Kina (PGK)' },
+  { value: 'PYG', label: 'Paraguayan Guarani (PYG ₲)' },
+  { value: 'PEN', label: 'Peruvian Sol (PEN)' },
+  { value: 'PHP', label: 'Philippine Piso (PHP ₱)' },
+  { value: 'PLN', label: 'Polish Zloty (PLN zł)' },
+  { value: 'QAR', label: 'Qatari Rial (QAR)' },
+  { value: 'RON', label: 'Romanian Leu (RON lei)' },
+  { value: 'RUB', label: 'Russian Ruble (RUB ₽)' },
+  { value: 'RWF', label: 'Rwandan Franc (RWF RF)' },
+  { value: 'WST', label: 'Samoan Tala (WST)' },
+  { value: 'SHP', label: 'St. Helena Pound (SHP £)' },
+  { value: 'SAR', label: 'Saudi Riyal (SAR)' },
+  { value: 'RSD', label: 'Serbian Dinar (RSD)' },
+  { value: 'SCR', label: 'Seychellois Rupee (SCR)' },
+  { value: 'SLL', label: 'Sierra Leonean Leone (SLL)' },
+  { value: 'SGD', label: 'Singapore Dollar (SGD $)' },
+  { value: 'SDG', label: 'Sudanese Pound (SDG)' },
+  { value: 'SOS', label: 'Somali Shilling (SOS)' },
+  { value: 'SYP', label: 'Syrian Pound (SYP £)' },
+  { value: 'ZAR', label: 'South African Rand (ZAR R)' },
+  { value: 'KRW', label: 'South Korean Won (KRW ₩)' },
+  { value: 'SSP', label: 'South Sudanese Pound (SSP £)' },
+  { value: 'SBD', label: 'Solomon Islands Dollar (SBD $)' },
+  { value: 'LKR', label: 'Sri Lankan Rupee (LKR Rs)' },
+  { value: 'SRD', label: 'Surinamese Dollar (SRD $)' },
+  { value: 'SZL', label: 'Swazi Lilangeni (SZL)' },
+  { value: 'SEK', label: 'Swedish Krona (SEK kr)' },
+  { value: 'CHF', label: 'Swiss Franc (CHF)' },
+  { value: 'TWD', label: 'New Taiwan Dollar (TWD $)' },
+  { value: 'THB', label: 'Thai Baht (THB ฿)' },
+  { value: 'TJS', label: 'Tajikistani Somoni (TJS)' },
+  { value: 'TZS', label: 'Tanzanian Shilling (TZS)' },
+  { value: 'TOP', label: "Tongan Pa'anga (TOP T$)" },
+  { value: 'TTD', label: 'Trinidad & Tobago Dollar (TTD $)' },
+  { value: 'TND', label: 'Tunisian Dinar (TND)' },
+  { value: 'TRY', label: 'Turkish Lira (TRY ₺)' },
+  { value: 'TMT', label: 'Turkmenistani Manat (TMT)' },
+  { value: 'UGX', label: 'Ugandan Shilling (UGX)' },
+  { value: 'UAH', label: 'Ukrainian Hryvnia (UAH ₴)' },
+  { value: 'AED', label: 'United Arab Emirates Dirham (AED)' },
+  { value: 'UYU', label: 'Uruguayan Peso (UYU $)' },
+  { value: 'UZS', label: 'Uzbekistani Som (UZS)' },
+  { value: 'VUV', label: 'Vanuatu Vatu (VUV)' },
+  { value: 'VES', label: 'Venezuelan Bolívar (VES)' },
+  { value: 'VND', label: 'Vietnamese Dong (VND ₫)' },
+  { value: 'XOF', label: 'West African CFA Franc (XOF F CFA)' },
+  { value: 'YER', label: 'Yemeni Rial (YER)' },
+  { value: 'ZMW', label: 'Zambian Kwacha (ZMW ZK)' },
+  { value: 'BYR', label: 'Belarusian Ruble (2000–2016) (BYR)' },
+  { value: 'STD', label: 'São Tomé & Príncipe Dobra (1977–2017) (STD)' },
+  { value: 'STN', label: 'São Tomé & Príncipe Dobra (STN Db)' },
+  { value: 'VED', label: 'Bolívar Soberano (VED)' },
+  { value: 'VEF', label: 'Venezuelan Bolívar (2008–2018) (VEF)' },
+  { value: 'XXX', label: 'Unknown Currency (XXX)' },
+  { value: 'USDC', label: 'USDC (USDC USD)' },
+];
+
 type SupplierOption = { id: string; name: string };
 type LocationOption = { locationId: string; locationName: string };
 type VariantLine = {
@@ -310,18 +491,17 @@ function Extension() {
                 onChange={(event) => setNewCountry(event.currentTarget.value)}
               />
               <s-stack direction="inline" gap="base">
-                <s-text-field
-                  label="Payment terms"
-                  value={newPaymentTerms}
-                  placeholder="e.g. Net 30"
-                  onChange={(event) => setNewPaymentTerms(event.currentTarget.value)}
-                />
-                <s-text-field
-                  label="Currency"
-                  value={newCurrency}
-                  placeholder="USD"
-                  onChange={(event) => setNewCurrency(event.currentTarget.value)}
-                />
+                <s-select label="Payment terms" value={newPaymentTerms} onChange={(event) => setNewPaymentTerms(event.currentTarget.value)}>
+                  {PAYMENT_TERMS_OPTIONS.map((o) => (
+                    <s-option key={o.value} value={o.value}>{o.label}</s-option>
+                  ))}
+                </s-select>
+                <s-select label="Currency" value={newCurrency} onChange={(event) => setNewCurrency(event.currentTarget.value)}>
+                  <s-option value="">None</s-option>
+                  {CURRENCY_OPTIONS.map((o) => (
+                    <s-option key={o.value} value={o.value}>{o.label}</s-option>
+                  ))}
+                </s-select>
               </s-stack>
               <s-number-field
                 label="Lead time (days)"

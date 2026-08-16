@@ -4,7 +4,7 @@ import { Form, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getCachedSession, invalidateShopCache } from "../lib/shop-cache.server";
+import { getCachedSession, invalidateShopCache, refreshShopIdentity } from "../lib/shop-cache.server";
 import { SSEErrorRetry } from "../components/Skeleton";
 import type { SettingsData } from "../lib/settings-data.server";
 import { useSSECacheStore } from "../hooks/use-sse-cache-store";
@@ -12,6 +12,7 @@ import { canUseFeature } from "../lib/plan-limits";
 import { useSettingsStore, type SettingsStore } from "../stores/settings-store";
 import { useLiveEventsStore } from "../stores/live-events-store";
 import { PlanCard } from "../components/settings/PlanCard";
+import { StoreInformationSection } from "../components/settings/StoreInformationSection";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
 import { EmailBrandingSection } from "../components/settings/EmailBrandingSection";
 import { MonitoringScopeSection } from "../components/settings/MonitoringScopeSection";
@@ -41,6 +42,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       prisma.alertHistory.deleteMany({ where: { shop } }),
     ]);
     return { intent: "reset", success: true, message: "All product data reset successfully." };
+  }
+
+  if (intent === "sync_store_details") {
+    const { name, email } = await refreshShopIdentity(shop);
+    return { intent: "sync_store_details" as const, success: true, storeName: name, storeEmail: email };
   }
 
   const storeSession = await getCachedSession(shop);
@@ -309,6 +315,7 @@ function SettingsContent() {
       )}
 
       <PlanCard />
+      <StoreInformationSection />
 
       <Form method="post" ref={formRef} onChange={markDirty}>
         <InventorySettingsSection

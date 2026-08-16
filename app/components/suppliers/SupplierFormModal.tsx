@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useFetcher } from "react-router";
 import type { SupplierRow } from "./SupplierList";
+import { PAYMENT_TERMS_OPTIONS, CURRENCY_OPTIONS } from "../../lib/supplier-options";
 
 type SaveResult = { success: true; intent: string } | { success: false; error: string };
 
@@ -128,14 +129,24 @@ export function SupplierFormModal({ supplier, onClose }: { supplier: SupplierRow
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
               <div style={{ flex: 1 }}>
                 <label style={fieldLabelStyle}>Payment terms</label>
-                <input type="text" name="paymentTerms" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} placeholder="e.g. Net 30" style={inputStyle} />
+                <select name="paymentTerms" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} style={inputStyle}>
+                  {PAYMENT_TERMS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
               </div>
               <div style={{ flex: 1 }}>
                 <label style={fieldLabelStyle}>Currency</label>
-                <input
-                  type="text" name="currency" value={currency} onChange={(e) => setCurrency(e.target.value)}
-                  placeholder="USD" maxLength={10} style={inputStyle}
-                />
+                <select name="currency" value={currency} onChange={(e) => setCurrency(e.target.value)} style={inputStyle}>
+                  {/* Not part of the fixed list below — kept so an existing
+                      supplier saved without a currency (the field is
+                      optional) doesn't get silently forced to USD just by
+                      opening this form. */}
+                  <option value="">None</option>
+                  {CURRENCY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
 

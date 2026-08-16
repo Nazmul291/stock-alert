@@ -109,6 +109,27 @@ export async function getCachedShopName(shop: string): Promise<string | null> {
   return name;
 }
 
+// Store name/email change essentially never (hence the 24h TTL above), but
+// "essentially never" isn't "never" — a merchant who just renamed their
+// store or changed the owner email in Shopify admin has no way to make this
+// app notice before the cache naturally expires. Evicts both keys and
+// immediately re-fetches from the Admin API (rather than just evicting and
+// waiting for the next lazy read) so a "Sync now" action can report the
+// fresh values back to the UI right away.
+export async function refreshShopIdentity(shop: string): Promise<{ name: string | null; email: string | null }> {
+  memoryFallback.delete(`shop-name:${shop}`);
+  memoryFallback.delete(`shop-email:${shop}`);
+  if (redis) {
+    try {
+      await redis.del(`shop-name:${shop}`, `shop-email:${shop}`);
+    } catch {
+      // best-effort — if this fails the stale entry just rides out its TTL
+    }
+  }
+  const [name, email] = await Promise.all([getCachedShopName(shop), getCachedShopEmail(shop)]);
+  return { name, email };
+}
+
 // Call after any mutation to storeSettings or session.plan so the stale
 // entry is evicted before the next page load reads from cache.
 export async function invalidateShopCache(shop: string): Promise<void> {
