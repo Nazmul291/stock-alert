@@ -75,7 +75,14 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
         shop,
         supplierId: { not: null, ...(supplierIds ? { in: supplierIds } : {}) },
         monitoringEnabled: true,
-        stockOutDays: { not: null },
+        // stockOutDays is null whenever there's no recent (30-day) sales to
+        // compute a rate from (computeStockOutDays, velocity.server.ts) —
+        // which is exactly the situation a product that's already out of
+        // stock is most likely to be in (it can't sell what it doesn't
+        // have). Without the currentQuantity branch, the products a
+        // merchant most needs to see here were the ones most likely to be
+        // silently excluded.
+        OR: [{ stockOutDays: { not: null } }, { currentQuantity: { lte: 0 } }],
       },
     }),
   ]);
@@ -90,7 +97,13 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
     if (!supplier) continue; // filtered out by supplierIds, or deleted between queries
 
     const leadTimeDays = supplier.leadTimeDays ?? defaultLeadTime;
-    if (row.stockOutDays === null || row.stockOutDays > leadTimeDays) continue;
+    const isOutOfStock = row.currentQuantity <= 0;
+    // Already out of stock is always urgent, regardless of stockOutDays —
+    // skip the runway/lead-time comparison entirely for it (there's nothing
+    // to compare against zero). Otherwise, keep excluding rows with no
+    // prediction or with enough runway that a fresh order would arrive
+    // before they'd actually run out.
+    if (!isOutOfStock && (row.stockOutDays === null || row.stockOutDays > leadTimeDays)) continue;
 
     const line: PreviewLine = {
       productId: row.productId.toString(),

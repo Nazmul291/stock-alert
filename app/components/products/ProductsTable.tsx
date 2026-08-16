@@ -201,7 +201,7 @@ export function ProductsTable({
                 </td>
                 <td style={{ padding: "10px 12px" }}>
                   <span className={loading ? "skeleton-text" : undefined}>
-                    <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} />
+                    <ReorderBadge days={p.isTracked ? (p.stockOutDays ?? null) : null} leadTime={supplierLeadTimeDays ?? 7} isOutOfStock={p.isTracked && p.inventoryStatus === "out_of_stock"} />
                   </span>
                 </td>
                 {showSupplierColumn && (
