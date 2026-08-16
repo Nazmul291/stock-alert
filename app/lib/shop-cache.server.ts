@@ -86,6 +86,29 @@ export async function getCachedShopEmail(shop: string): Promise<string | null> {
   return email;
 }
 
+// Same reasoning as getCachedShopEmail above — the shop's real business name
+// (e.g. "ZR Sports Co") isn't on the offline Session row either, and has to
+// come from the Admin API. Used for the dashboard's greeting; falls back to
+// a slug-derived guess (see deriveShopDisplayName) if this ever returns null.
+export async function getCachedShopName(shop: string): Promise<string | null> {
+  const key = `shop-name:${shop}`;
+  const cached = await readCache<string | null>(key);
+  if (cached !== undefined) return cached;
+
+  let name: string | null = null;
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    const res = await admin.graphql(`query { shop { name } }`);
+    const json: { data?: { shop?: { name: string | null } } } = await res.json();
+    name = json.data?.shop?.name ?? null;
+  } catch {
+    // Non-fatal — caller falls back to deriveShopDisplayName
+  }
+
+  await writeCache(key, name, SHOP_EMAIL_TTL_SECONDS);
+  return name;
+}
+
 // Call after any mutation to storeSettings or session.plan so the stale
 // entry is evicted before the next page load reads from cache.
 export async function invalidateShopCache(shop: string): Promise<void> {

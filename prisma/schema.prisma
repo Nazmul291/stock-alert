@@ -36,6 +36,7 @@ model Session {
   alertHistory           AlertHistory[]
   setupProgress          SetupProgress?
   backInStockSubscribers BackInStockSubscriber[]
+  dashboardSnapshots     DashboardSnapshot[]
   suppliers              Supplier[]
   purchaseOrders         PurchaseOrder[]
 
@@ -500,4 +501,26 @@ model BackInStockSubscriber {
   @@index([shop])
   @@index([shop, productId])
   @@map("back_in_stock_subscribers")
+}
+
+// One row per shop per UTC day, written by the worker's daily snapshot cron
+// (see processDashboardSnapshot in inventory-buffer.worker.ts). Backs the
+// dashboard's trend arrows: trend is computed as *live* current counts vs.
+// the snapshot from ~7 days ago, not two stored snapshots — so a shop has no
+// trend to show until 7 days of snapshots have accumulated after this ships.
+model DashboardSnapshot {
+  id            String   @id @default(uuid()) @db.Uuid
+  shop          String
+  date          DateTime @db.Date
+  totalProducts Int      @map("total_products")
+  inStock       Int      @map("in_stock")
+  lowStock      Int      @map("low_stock")
+  outOfStock    Int      @map("out_of_stock")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  session Session @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@unique([shop, date])
+  @@index([shop])
+  @@map("dashboard_snapshot")
 }
