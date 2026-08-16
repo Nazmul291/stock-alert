@@ -9,6 +9,17 @@ const RUNWAY_REFERENCE_DAYS = 14;
 // Mockup shows exactly 4 rows — the underlying query still fetches 8 (see
 // dashboard-data.server.ts), "View all" covers the rest.
 const VISIBLE_ROWS = 4;
+// Hard cap, not just CSS ellipsis — a very long, unbroken product title
+// (no spaces for whiteSpace:nowrap+textOverflow:ellipsis to wrap around)
+// was stretching the whole card wider than its column. Truncating the
+// string itself guarantees the row's width regardless of layout. Full
+// title is still available via the row's title="" tooltip.
+const TITLE_MAX_CHARS = 50;
+
+function truncateTitle(title: string | null): string {
+  if (!title) return "—";
+  return title.length > TITLE_MAX_CHARS ? `${title.slice(0, TITLE_MAX_CHARS)}...` : title;
+}
 
 const PLACEHOLDER_ROWS = Array.from({ length: VISIBLE_ROWS }, (_, i) => ({
   productId: `skeleton-${i}`,
@@ -80,7 +91,7 @@ export function TopItemsToWatch() {
                 title={p.productTitle ?? undefined}
                 style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700, fontSize: 13.5, color: "#26253a" }}
               >
-                {p.productTitle ?? "—"}
+                {truncateTitle(p.productTitle)}
               </span>
               <div title={hasPrediction ? `~${p.stockOutDays}d of stock left` : daysLabel} style={{ height: 5, borderRadius: 99, background: "#f0eff5", overflow: "hidden" }}>
                 <div className={loading ? "skeleton-text" : undefined} style={{ width: `${runwayFrac * 100}%`, height: "100%", background: barColor, borderRadius: 99 }} />
