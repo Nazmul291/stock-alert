@@ -13,6 +13,12 @@ type SettingsValues = {
   brandColor: string;
   brandSenderName: string;
   supplierLeadTimeDays: number;
+  forecastMode: string;
+  safetyStockDays: number;
+  // null = "use the low-stock threshold" (see forecast-mode.ts). Kept
+  // nullable rather than pre-filled so a shop that never opens this page
+  // still gets sane classic-mode behavior.
+  minStockLevel: number | null;
   monitoringFilter: string;
   monitoringCollectionId: string;
   monitoringTags: string;
@@ -65,6 +71,9 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           brandColor: settings.brandColor ?? "#4f46e5",
           brandSenderName: settings.brandSenderName ?? "",
           supplierLeadTimeDays: settings.supplierLeadTimeDays ?? 7,
+          forecastMode: settings.forecastMode ?? "smart",
+          safetyStockDays: settings.safetyStockDays ?? 0,
+          minStockLevel: settings.minStockLevel ?? null,
           monitoringFilter: settings.monitoringFilter ?? "all",
           monitoringCollectionId: settings.monitoringCollectionId ?? "",
           monitoringTags: settings.monitoringTags ?? "",
@@ -89,6 +98,9 @@ export async function loadSettingsData(shop: string): Promise<SettingsData> {
           brandColor: "#4f46e5",
           brandSenderName: "",
           supplierLeadTimeDays: 7,
+          forecastMode: "smart",
+          safetyStockDays: 0,
+          minStockLevel: null,
           monitoringFilter: "all",
           monitoringCollectionId: "",
           monitoringTags: "",

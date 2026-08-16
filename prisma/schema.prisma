@@ -104,6 +104,22 @@ model StoreSettings {
   brandSenderName      String?   @map("brand_sender_name") @db.VarChar(100)
   outboundWebhookUrl   String?   @map("outbound_webhook_url") @db.VarChar(500)
   supplierLeadTimeDays Int       @default(7) @map("supplier_lead_time_days")
+  // How reorder *suggestions* are computed — "smart" | "classic" | "custom".
+  // Deliberately scoped to suggestions only: low-stock alerting and
+  // inventoryStatus classification are unaffected by this and always run
+  // (see forecast-mode.ts). Defaults to "smart", today's behavior.
+  forecastMode         String    @default("smart") @map("forecast_mode")
+  // Extra days of cover held beyond lead time, in "smart" mode:
+  // reorderPoint = avgDailySales * (supplierLeadTimeDays + safetyStockDays).
+  // Defaults to 0 specifically so existing shops' suggested quantities are
+  // byte-identical after this ships — any other default silently changes
+  // every open reorder recommendation on deploy.
+  safetyStockDays      Int       @default(0) @map("safety_stock_days")
+  // "classic" mode's fixed per-variant reorder point. Null means "reuse the
+  // effective low-stock threshold" (store-wide lowStockThreshold, or the
+  // product's custom_threshold metafield override), so classic mode works
+  // immediately without configuring a second, competing "minimum" number.
+  minStockLevel        Int?      @map("min_stock_level")
   monitoringFilter     String    @default("all") @map("monitoring_filter")
   monitoringCollectionId String? @map("monitoring_collection_id") @db.VarChar(50)
   monitoringTags         String?  @map("monitoring_tags") @db.VarChar(500)

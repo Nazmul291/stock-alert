@@ -15,6 +15,7 @@ import { PlanCard } from "../components/settings/PlanCard";
 import { StoreInformationSection } from "../components/settings/StoreInformationSection";
 import { InventorySettingsSection } from "../components/settings/InventorySettingsSection";
 import { EmailBrandingSection } from "../components/settings/EmailBrandingSection";
+import { ForecastModeSection } from "../components/settings/ForecastModeSection";
 import { MonitoringScopeSection } from "../components/settings/MonitoringScopeSection";
 import { EnterpriseReportingSection } from "../components/settings/EnterpriseReportingSection";
 import { ThemeAppEmbedSection } from "../components/settings/ThemeAppEmbedSection";
@@ -69,6 +70,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const rawBrandColor = ((form.get("brandColor") as string) ?? "").trim();
   const rawLeadTime = parseInt((form.get("supplierLeadTimeDays") as string) ?? "7");
   const rawMonitoringFilter = form.get("monitoringFilter");
+  const rawForecastMode = form.get("forecastMode");
+  const rawSafetyStockDays = parseInt((form.get("safetyStockDays") as string) ?? "0");
+  // Empty string is meaningfully different from 0 here: blank means "fall
+  // back to the low-stock threshold", 0 means "only reorder at zero stock".
+  const rawMinStockLevel = ((form.get("minStockLevel") as string) ?? "").trim();
   const rawDeadStockThresholdDays = parseInt((form.get("deadStockThresholdDays") as string) ?? "60");
   const data = {
     autoHideEnabled: bool("autoHideEnabled"),
@@ -81,6 +87,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : "all",
     monitoringCollectionId: ((form.get("monitoringCollectionId") as string) ?? "").trim() || null,
     monitoringTags: ((form.get("monitoringTags") as string) ?? "").trim() || null,
+    // Whitelist rather than trusting the posted value, same as
+    // monitoringFilter above. "custom" is additionally gated on the plan —
+    // a downgraded shop silently falls back to "smart" rather than sitting
+    // in a mode it can no longer manage rules for.
+    forecastMode:
+      rawForecastMode === "classic" || (rawForecastMode === "custom" && canUseFeature(plan, "customForecastRules"))
+        ? rawForecastMode
+        : "smart",
+    safetyStockDays: !isNaN(rawSafetyStockDays) && rawSafetyStockDays >= 0 && rawSafetyStockDays <= 90 ? rawSafetyStockDays : 0,
+    minStockLevel: (() => {
+      if (rawMinStockLevel === "") return null;
+      const n = parseInt(rawMinStockLevel);
+      return !isNaN(n) && n >= 0 && n <= 100000 ? n : null;
+    })(),
     ...(canUseFeature(plan, "whiteLabelEmails") ? {
       brandLogoUrl: ((form.get("brandLogoUrl") as string) ?? "").trim() || null,
       brandColor: /^#[0-9a-fA-F]{6}$/.test(rawBrandColor) ? rawBrandColor : null,
@@ -172,6 +192,9 @@ const DEFAULT_SETTINGS: SettingsData["settings"] = {
   brandColor: "#4f46e5",
   brandSenderName: "",
   supplierLeadTimeDays: 7,
+  forecastMode: "smart",
+  safetyStockDays: 0,
+  minStockLevel: null,
   monitoringFilter: "all",
   monitoringCollectionId: "",
   monitoringTags: "",
@@ -206,6 +229,9 @@ function SettingsContent() {
   const [monitoringTags, setMonitoringTags] = useState(settings.monitoringTags);
   const [limitedEditionTag, setLimitedEditionTag] = useState(settings.limitedEditionTag);
   const [deadStockThresholdDays, setDeadStockThresholdDays] = useState(settings.deadStockThresholdDays);
+  const [forecastMode, setForecastMode] = useState(settings.forecastMode);
+  const [safetyStockDays, setSafetyStockDays] = useState(settings.safetyStockDays);
+  const [minStockLevel, setMinStockLevel] = useState<number | null>(settings.minStockLevel);
   const [isDirty, setIsDirty] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -226,6 +252,9 @@ function SettingsContent() {
     setMonitoringTags(settings.monitoringTags);
     setLimitedEditionTag(settings.limitedEditionTag);
     setDeadStockThresholdDays(settings.deadStockThresholdDays);
+    setForecastMode(settings.forecastMode);
+    setSafetyStockDays(settings.safetyStockDays);
+    setMinStockLevel(settings.minStockLevel);
     // Only re-seed on the loading -> loaded transition, not on every
     // settings identity change (e.g. an in-place SSE re-push), so it
     // doesn't clobber in-progress edits.
@@ -243,6 +272,9 @@ function SettingsContent() {
     setMonitoringTags(settings.monitoringTags);
     setLimitedEditionTag(settings.limitedEditionTag);
     setDeadStockThresholdDays(settings.deadStockThresholdDays);
+    setForecastMode(settings.forecastMode);
+    setSafetyStockDays(settings.safetyStockDays);
+    setMinStockLevel(settings.minStockLevel);
     formRef.current?.reset();
     setIsDirty(false);
   }
@@ -281,6 +313,11 @@ function SettingsContent() {
     fd.set("brandSenderName", brandSenderName);
     fd.set("limitedEditionTag", limitedEditionTag);
     fd.set("deadStockThresholdDays", String(deadStockThresholdDays));
+    fd.set("forecastMode", forecastMode);
+    fd.set("safetyStockDays", String(safetyStockDays));
+    // "" (not "0") when unset — the action distinguishes blank ("use the
+    // low-stock threshold") from an explicit 0.
+    fd.set("minStockLevel", minStockLevel === null ? "" : String(minStockLevel));
     saveFetcher.submit(fd, { method: "post" });
   }
 
@@ -288,6 +325,7 @@ function SettingsContent() {
   const canWhiteLabelEmails = canUseFeature(plan, "whiteLabelEmails");
   const canCoreLimitedEdition = canUseFeature(plan, "coreLimitedEditionSections");
   const canDeadStockAlerts = canUseFeature(plan, "deadStockAlerts");
+  const canUseCustomRules = canUseFeature(plan, "customForecastRules");
 
   function markDirty() {
     setIsDirty(true);
@@ -327,6 +365,17 @@ function SettingsContent() {
           lowStockThreshold={settings.lowStockThreshold}
           lowStockError={saveErrors?.lowStockThreshold}
           supplierLeadTimeDays={settings.supplierLeadTimeDays}
+        />
+
+        <ForecastModeSection
+          forecastMode={forecastMode}
+          safetyStockDays={safetyStockDays}
+          minStockLevel={minStockLevel}
+          lowStockThreshold={settings.lowStockThreshold}
+          canUseCustomRules={canUseCustomRules}
+          onForecastModeChange={(v) => { setForecastMode(v); markDirty(); }}
+          onSafetyStockDaysChange={(v) => { setSafetyStockDays(v); markDirty(); }}
+          onMinStockLevelChange={(v) => { setMinStockLevel(v); markDirty(); }}
         />
 
         <div style={{ marginTop: 24 }}>
