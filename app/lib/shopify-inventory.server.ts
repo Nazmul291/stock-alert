@@ -94,9 +94,17 @@ export async function getVariantInventoryItemIds(
   return map;
 }
 
+// @idempotent added because the app is pinned to Admin API version 2026-04
+// (see apiVersion in shopify.server.ts), which now requires it on this
+// mutation — same as inventorySetQuantities above. Without it Shopify
+// rejects the call with "The @idempotent directive is required for this
+// mutation but was not provided," which is exactly the error this was
+// missing before: createPurchaseOrder (purchase-order.server.ts's
+// syncLineCostsToShopify) calls this the moment a PO is created with a unit
+// cost already set on a line, so it fired on PO creation, not receiving.
 export const INVENTORY_ITEM_UPDATE_MUTATION = `
-  mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
-    inventoryItemUpdate(id: $id, input: $input) {
+  mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!, $idempotencyKey: String!) {
+    inventoryItemUpdate(id: $id, input: $input) @idempotent(key: $idempotencyKey) {
       inventoryItem { id unitCost { amount } }
       userErrors { field message }
     }
@@ -113,16 +121,19 @@ export async function updateInventoryItemCost(
   cost: number,
 ): Promise<{ userErrors: string[] }> {
   const res = await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
-    variables: { id: inventoryItemId, input: { cost } },
+    variables: { id: inventoryItemId, input: { cost }, idempotencyKey: crypto.randomUUID() },
   });
   const json: { data?: { inventoryItemUpdate?: { userErrors: Array<{ message: string }> } } } = await res.json();
   const userErrors = (json.data?.inventoryItemUpdate?.userErrors ?? []).map((e) => e.message);
   return { userErrors };
 }
 
+// Same @idempotent requirement under API version 2026-04 as
+// inventoryItemUpdate above — called right after it, in the same
+// syncLineCostsToShopify pass.
 export const PRODUCT_VARIANTS_BULK_UPDATE_MUTATION = `
-  mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+  mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!, $idempotencyKey: String!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) @idempotent(key: $idempotencyKey) {
       productVariants { id price }
       userErrors { field message }
     }
@@ -144,6 +155,7 @@ export async function updateVariantPrice(
     variables: {
       productId: `gid://shopify/Product/${productId}`,
       variants: [{ id: `gid://shopify/ProductVariant/${variantId}`, price: price.toFixed(2) }],
+      idempotencyKey: crypto.randomUUID(),
     },
   });
   const json: { data?: { productVariantsBulkUpdate?: { userErrors: Array<{ message: string }> } } } = await res.json();

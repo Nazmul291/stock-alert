@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
 import { StatusPill } from "../StatusPill";
 import { STATUS_STYLE } from "./PurchaseOrderList";
+import { buildReceiptDrafts, isReceiveLocationMissing } from "../../lib/purchase-order-receive";
 
 export type PurchaseOrderDetailData = {
   id: string;
@@ -126,10 +127,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
   // pending receive quantity but no location chosen yet — the server
   // enforces this too (receivePurchaseOrderItems), this just avoids a
   // round trip for the common case of forgetting to pick one.
-  const receiveLocationMissing = po.lineItems.some((li) => {
-    const qty = Math.max(0, parseInt(receiveEdits[li.id] ?? "0") || 0);
-    return qty > 0 && !li.locationId && li.locations.length > 1 && !receiveLocationEdits[li.id];
-  });
+  const receiveLocationMissing = isReceiveLocationMissing(po.lineItems, receiveEdits, receiveLocationEdits);
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 18 }}>
@@ -352,13 +350,7 @@ export function PurchaseOrderDetail({ po }: { po: PurchaseOrderDetailData }) {
           <button
             type="button" disabled={busy || receiveLocationMissing}
             onClick={() => {
-              const receipts = po.lineItems
-                .map((li) => ({
-                  lineItemId: li.id,
-                  quantityReceived: Math.max(0, parseInt(receiveEdits[li.id] ?? "0") || 0),
-                  locationId: receiveLocationEdits[li.id] || undefined,
-                }))
-                .filter((r) => r.quantityReceived > 0);
+              const receipts = buildReceiptDrafts(po.lineItems, receiveEdits, receiveLocationEdits);
               if (receipts.length === 0) return;
               actionFetcher.submit({ intent: "receive_items", receipts: JSON.stringify(receipts) }, { method: "post" });
             }}
