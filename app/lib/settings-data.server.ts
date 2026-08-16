@@ -1,4 +1,4 @@
-import { getCachedSettings, getCachedSession } from "./shop-cache.server";
+import { getCachedSettings, getCachedSession, getCachedShopName, getCachedShopEmail } from "./shop-cache.server";
 
 type SettingsValues = {
   autoHideEnabled: boolean;
@@ -28,18 +28,29 @@ type SettingsValues = {
 export type SettingsData = {
   shop: string;
   plan: string;
+  // Cached from the Admin API (see shop-cache.server.ts) — null on a fetch
+  // failure, never a fabricated placeholder. The "Sync now" action in
+  // StoreInformationSection force-refreshes these ahead of their normal 24h
+  // TTL when a merchant has just renamed their store or changed the owner
+  // email in Shopify admin.
+  storeName: string | null;
+  storeEmail: string | null;
   settings: SettingsValues;
 };
 
 export async function loadSettingsData(shop: string): Promise<SettingsData> {
-  const [settings, storeSession] = await Promise.all([
+  const [settings, storeSession, storeName, storeEmail] = await Promise.all([
     getCachedSettings(shop),
     getCachedSession(shop),
+    getCachedShopName(shop),
+    getCachedShopEmail(shop),
   ]);
 
   return {
     shop,
     plan: storeSession?.plan ?? "basic",
+    storeName,
+    storeEmail,
     settings: settings
       ? {
           autoHideEnabled: settings.autoHideEnabled,
