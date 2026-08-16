@@ -1,5 +1,29 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
+// Single place every mutation in this file parses its response.
+//
+// GraphQL reports two *different* kinds of failure and these helpers used to
+// only read one of them: `userErrors` (business-rule rejections, nested in
+// `data`) and the top-level `errors` array (query/validation failures — a
+// missing required directive, a bad field, an auth problem). On a top-level
+// error Shopify sets `data.<mutation>` to null, so reading only
+// `data.<mutation>.userErrors` yields `[]` — indistinguishable from success.
+// That's how a hard "@idempotent directive is required" failure silently
+// reported OK for months, and why the receive flow appeared to work while
+// nothing was actually written to Shopify. Both are surfaced here.
+async function readMutationErrors(
+  res: { json: () => Promise<unknown> },
+  mutationName: string,
+): Promise<{ userErrors: string[] }> {
+  const json = (await res.json()) as {
+    data?: Record<string, { userErrors?: Array<{ message: string }> } | null>;
+    errors?: Array<{ message: string }>;
+  };
+  const topLevel = (json.errors ?? []).map((e) => e.message);
+  if (topLevel.length > 0) return { userErrors: topLevel };
+  return { userErrors: (json.data?.[mutationName]?.userErrors ?? []).map((e) => e.message) };
+}
+
 export const INVENTORY_SET_MUTATION = `
   mutation inventorySetQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
     inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
@@ -31,14 +55,20 @@ export async function setInventoryQuantities(
       input: { name: "available", reason, quantities },
     },
   });
-  const json: { data?: { inventorySetQuantities?: { userErrors: Array<{ message: string }> } } } = await res.json();
-  const userErrors = (json.data?.inventorySetQuantities?.userErrors ?? []).map((e) => e.message);
-  return { userErrors };
+  return readMutationErrors(res, "inventorySetQuantities");
 }
 
+// @idempotent is REQUIRED on this mutation under Admin API 2026-04 (this
+// app's pinned apiVersion — see shopify.server.ts). Verified empirically
+// against the live API: this is the one mutation in the codebase that
+// rejects the call without it, with "The @idempotent directive is required
+// for this mutation but was not provided." It sits in the receive-purchase-
+// order path (receivePurchaseOrderItems activates a location the variant
+// isn't stocked at yet), which is why "Receive Items" failed while every
+// other PO action worked.
 export const INVENTORY_ACTIVATE_MUTATION = `
-  mutation inventoryActivate($inventoryItemId: ID!, $locationId: ID!) {
-    inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+  mutation inventoryActivate($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) {
+    inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) @idempotent(key: $idempotencyKey) {
       inventoryLevel { id }
       userErrors { field message }
     }
@@ -55,10 +85,10 @@ export async function activateInventoryAtLocation(
   inventoryItemId: string,
   locationId: string,
 ): Promise<{ userErrors: string[] }> {
-  const res = await admin.graphql(INVENTORY_ACTIVATE_MUTATION, { variables: { inventoryItemId, locationId } });
-  const json: { data?: { inventoryActivate?: { userErrors: Array<{ message: string }> } } } = await res.json();
-  const userErrors = (json.data?.inventoryActivate?.userErrors ?? []).map((e) => e.message);
-  return { userErrors };
+  const res = await admin.graphql(INVENTORY_ACTIVATE_MUTATION, {
+    variables: { inventoryItemId, locationId, idempotencyKey: crypto.randomUUID() },
+  });
+  return readMutationErrors(res, "inventoryActivate");
 }
 
 const VARIANT_INVENTORY_ITEM_IDS_QUERY = `
@@ -94,14 +124,14 @@ export async function getVariantInventoryItemIds(
   return map;
 }
 
-// @idempotent added because the app is pinned to Admin API version 2026-04
-// (see apiVersion in shopify.server.ts), which now requires it on this
-// mutation — same as inventorySetQuantities above. Without it Shopify
-// rejects the call with "The @idempotent directive is required for this
-// mutation but was not provided," which is exactly the error this was
-// missing before: createPurchaseOrder (purchase-order.server.ts's
-// syncLineCostsToShopify) calls this the moment a PO is created with a unit
-// cost already set on a line, so it fired on PO creation, not receiving.
+// @idempotent is NOT required here under API 2026-04 (probed against the
+// live API: this mutation is accepted without it — only inventoryActivate
+// currently demands it). Kept anyway because it's accepted, costs nothing,
+// and Shopify has been progressively making this mandatory across
+// inventory-mutating fields; the same applies to productVariantsBulkUpdate
+// below. Note the second, un-decorated copy of this same mutation in
+// app/lib/graphql.ts — it writes `tracked`, not `cost`, and is likewise
+// accepted as-is.
 export const INVENTORY_ITEM_UPDATE_MUTATION = `
   mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!, $idempotencyKey: String!) {
     inventoryItemUpdate(id: $id, input: $input) @idempotent(key: $idempotencyKey) {
@@ -123,14 +153,11 @@ export async function updateInventoryItemCost(
   const res = await admin.graphql(INVENTORY_ITEM_UPDATE_MUTATION, {
     variables: { id: inventoryItemId, input: { cost }, idempotencyKey: crypto.randomUUID() },
   });
-  const json: { data?: { inventoryItemUpdate?: { userErrors: Array<{ message: string }> } } } = await res.json();
-  const userErrors = (json.data?.inventoryItemUpdate?.userErrors ?? []).map((e) => e.message);
-  return { userErrors };
+  return readMutationErrors(res, "inventoryItemUpdate");
 }
 
-// Same @idempotent requirement under API version 2026-04 as
-// inventoryItemUpdate above — called right after it, in the same
-// syncLineCostsToShopify pass.
+// Same situation as inventoryItemUpdate above: accepted with or without
+// @idempotent today, decorated pre-emptively rather than out of necessity.
 export const PRODUCT_VARIANTS_BULK_UPDATE_MUTATION = `
   mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!, $idempotencyKey: String!) {
     productVariantsBulkUpdate(productId: $productId, variants: $variants) @idempotent(key: $idempotencyKey) {
@@ -158,7 +185,5 @@ export async function updateVariantPrice(
       idempotencyKey: crypto.randomUUID(),
     },
   });
-  const json: { data?: { productVariantsBulkUpdate?: { userErrors: Array<{ message: string }> } } } = await res.json();
-  const userErrors = (json.data?.productVariantsBulkUpdate?.userErrors ?? []).map((e) => e.message);
-  return { userErrors };
+  return readMutationErrors(res, "productVariantsBulkUpdate");
 }
