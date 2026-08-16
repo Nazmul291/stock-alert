@@ -8,6 +8,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getCachedSettings, getCachedShopEmail } from "../lib/shop-cache.server";
 import { getWizardProgress } from "../lib/wizard-progress.server";
+import { deriveShopDisplayName } from "../lib/shop-display";
 import { requestPlanSubscription } from "../lib/billing-request.server";
 import type { PlanKey } from "../lib/billing-plans";
 import type { DashboardData } from "../lib/dashboard-data.server";
@@ -15,13 +16,12 @@ import { useDashboardStore, type DashboardStore } from "../stores/dashboard-stor
 import { useWizardProgressStore } from "../stores/wizard-progress-store";
 import { SSEErrorRetry } from "../components/Skeleton";
 import { SetupChecklist } from "../components/dashboard/SetupChecklist";
-import { InventoryOverviewSection } from "../components/dashboard/InventoryOverviewSection";
-import { StockOutSoonBanner } from "../components/dashboard/StockOutSoonBanner";
-import { ReadyForReorderBanner } from "../components/dashboard/ReadyForReorderBanner";
-import { canUseFeature, getPlanLimits } from "../lib/plan-limits";
-import { ProductsAtRiskSection } from "../components/dashboard/ProductsAtRiskSection";
-import { RecentAlertsSection } from "../components/dashboard/RecentAlertsSection";
-import { DashboardSyncButton } from "../components/dashboard/DashboardSyncButton";
+import { DashboardHero } from "../components/dashboard/DashboardHero";
+import { InventoryHealthDonut } from "../components/dashboard/InventoryHealthDonut";
+import { InventoryHealthInsight } from "../components/dashboard/InventoryHealthInsight";
+import { RecommendedActionBanner } from "../components/dashboard/RecommendedActionBanner";
+import { TopItemsToWatch } from "../components/dashboard/TopItemsToWatch";
+import { AlertsAttentionBar } from "../components/dashboard/AlertsAttentionBar";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { TermsAcceptanceStep } from "../components/onboarding/TermsAcceptanceStep";
 import { OnboardingConfirmStep } from "../components/onboarding/OnboardingConfirmStep";
@@ -60,7 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const shopInfo = needsOnboardingData
     ? {
-        name: shop.replace(".myshopify.com", "").split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+        name: deriveShopDisplayName(shop),
         email: ownerEmail ?? "",
         domain: shop,
       }
@@ -251,23 +251,14 @@ function DashboardContent() {
   const loading = !data;
 
   const syncFetcher = useFetcher<{ status?: string; error?: string }>();
-  const { syncPct, syncStreamError, clearError, openStream } = useSyncStream(shop ?? "", data?.syncRunning ?? false);
+  const { syncPct, openStream } = useSyncStream(shop ?? "", data?.syncRunning ?? false);
 
   useEffect(() => {
     if (syncFetcher.data?.status === "started") openStream();
   }, [syncFetcher.data, openStream]);
 
-  const plan = data?.plan ?? "basic";
   const progressPct = data?.progressPct ?? 0;
-  const notificationEmail = data?.notificationEmail ?? null;
   const atRiskProducts = data?.atRiskProducts ?? [];
-  const stockOutSoonCount = data?.stockOutSoonCount ?? 0;
-  const readyForReorderCount = data?.readyForReorderCount ?? 0;
-  const canManagePurchaseOrders = canUseFeature(plan, "purchaseOrders");
-  const planLimits = getPlanLimits(plan);
-
-  const syncActionError = syncPct === null && syncFetcher.state === "idle" ? (syncFetcher.data?.error ?? null) : null;
-  const syncError = syncStreamError ?? syncActionError;
 
   return (
     <>
@@ -286,80 +277,40 @@ function DashboardContent() {
         />
       )}
 
-      <InventoryOverviewSection />
+      <DashboardHero />
 
-      {/* Held back until data confirms it's actually needed, same reasoning
-          as the setup checklist above — most loads won't need this, so
-          don't reserve space for it by default. */}
-      {(!loading && stockOutSoonCount > 0) && <StockOutSoonBanner />}
+      {/* Equal-width, equal-height columns (grid default alignItems:
+          stretch — deliberately not overridden — so both cards match
+          height regardless of which has more content). Card chrome
+          (border/radius/padding) lives here rather than inside each
+          component — matches the design reference's two side-by-side white
+          cards, each with its own title row. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ border: "1px solid #e9e7f2", borderRadius: 18, background: "#fff", padding: "18px 18px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-.2px", color: "#15151f" }}>Inventory Health</div>
+          <InventoryHealthDonut />
+          <InventoryHealthInsight />
+        </div>
 
-      {(!loading && canManagePurchaseOrders && readyForReorderCount > 0) && <ReadyForReorderBanner />}
-
-      {/* Unlike the two above, this one renders during loading too (showing
-          its own internal skeleton — see ProductsAtRiskSection.tsx's
-          PLACEHOLDER_ROWS) and only disappears once data confirms there's
-          genuinely nothing at risk, matching RecentAlertsSection's
-          always-mounted strategy below. */}
-      {(loading || atRiskProducts.length > 0) && <ProductsAtRiskSection />}
-
-      <RecentAlertsSection />
-
-      {/* Store info */}
-      <s-section heading="Store Information" slot="aside">
-        <s-paragraph><strong>Shop:</strong> {shop}</s-paragraph>
-        <s-paragraph>
-          <strong>Plan:</strong>{" "}
-          <span
-            className={loading ? "skeleton-text" : undefined}
-            style={{
-              background: plan === "enterprise" ? "#ede9fe" : plan === "pro" ? "#d1fae5" : "#dbeafe",
-              color: plan === "enterprise" ? "#5b21b6" : plan === "pro" ? "#065f46" : "#1e40af",
-              padding: "1px 8px", borderRadius: 12, fontSize: 12,
-            }}
-          >
-            {planLimits.name}
-          </span>
-        </s-paragraph>
-        {(loading || notificationEmail) && (
-          <s-paragraph>
-            <strong>Alert Email:</strong>{" "}
-            <span className={loading ? "skeleton-text" : undefined}>{notificationEmail || "name@example.com"}</span>
-          </s-paragraph>
-        )}
-      </s-section>
-
-      {/* Quick actions */}
-      <s-section heading="Quick Actions" slot="aside">
-        <s-stack direction="block" gap="base">
-          <DashboardSyncButton
-            pct={syncPct}
-            submitting={syncFetcher.state !== "idle"}
-            onClick={() => { if (syncPct === null && syncFetcher.state === "idle") syncFetcher.submit({ intent: "sync" }, { method: "post", action: "/app/products" }); }}
-          />
-          {syncError && (
-            <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 12px" }}>
-              <p style={{ fontSize: 12, color: "#991b1b", margin: "0 0 8px" }}>{syncError}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  clearError();
-                  if (syncFetcher.state === "idle") syncFetcher.submit({ intent: "sync" }, { method: "post", action: "/app/products" });
-                }}
-                style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fff", color: "#991b1b", cursor: "pointer", fontWeight: 600 }}
-              >
-                Retry
-              </button>
+        {/* Renders during loading too (its own internal skeleton — see
+            TopItemsToWatch.tsx's PLACEHOLDER_ROWS) and only disappears once
+            data confirms there's genuinely nothing at risk. */}
+        {(loading || atRiskProducts.length > 0) && (
+          <div style={{ border: "1px solid #e9e7f2", borderRadius: 18, background: "#fff", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-.2px", color: "#15151f" }}>Top Items to Watch</div>
+              <s-link href="/app/products?filter=out_of_stock">View all</s-link>
             </div>
-          )}
-          {/* suppressHydrationWarning on these s-button elements: see the comment above the "Manage Products" button. */}
-          {/* @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type */}
-          <s-button href="/app/settings" suppressHydrationWarning>Configure Settings</s-button>
-          {plan !== "enterprise" && (
-            // @ts-expect-error — suppressHydrationWarning is valid at runtime but missing from Button's generated JSX type
-            <s-button href="/app/billing" suppressHydrationWarning>{plan === "pro" ? "Upgrade to Enterprise" : "Upgrade Plan"}</s-button>
-          )}
-        </s-stack>
-      </s-section>
+            <TopItemsToWatch />
+          </div>
+        )}
+      </div>
+
+      {/* Self-gates on its own store read (renders nothing once loaded with
+          nothing to recommend) — no external loading/empty conditional needed. */}
+      <RecommendedActionBanner />
+
+      <AlertsAttentionBar />
     </>
   );
 }

@@ -28,13 +28,14 @@ import {
   DIGEST_QUEUE_NAME,
   VELOCITY_QUEUE_NAME,
   ALERT_BATCH_QUEUE_NAME,
+  DASHBOARD_SNAPSHOT_QUEUE_NAME,
   type BufferPayload,
   type InventoryBufferJobData,
   type InventoryEventJobData,
 } from "../app/lib/queue.js";
 import type { AlertBatchEmailData, AlertBatchEvent } from "../app/lib/email-templates.js";
 import type { AlertType } from "@prisma/client";
-import { atRiskRepresentativeRows } from "../app/lib/inventory-rollup.server.js";
+import { atRiskRepresentativeRows, rollupStatusCounts } from "../app/lib/inventory-rollup.server.js";
 import { refreshShopVelocity } from "../app/lib/velocity.server.js";
 import { processInventoryEvent } from "../app/lib/inventory-event.server.js";
 import { unauthenticated } from "../app/shopify.server.js";
@@ -55,7 +56,8 @@ await boss.createQueue(INVENTORY_EVENT_QUEUE_NAME);
 await boss.createQueue(DIGEST_QUEUE_NAME);
 await boss.createQueue(VELOCITY_QUEUE_NAME);
 await boss.createQueue(ALERT_BATCH_QUEUE_NAME);
-console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, INVENTORY_EVENT_QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME);
+await boss.createQueue(DASHBOARD_SNAPSHOT_QUEUE_NAME);
+console.log("[Worker] pg-boss started. Listening on queues:", QUEUE_NAME, INVENTORY_EVENT_QUEUE_NAME, DIGEST_QUEUE_NAME, VELOCITY_QUEUE_NAME, ALERT_BATCH_QUEUE_NAME, DASHBOARD_SNAPSHOT_QUEUE_NAME);
 
 // ── Job handler ───────────────────────────────────────────────────────────────
 // pg-boss v12 WorkHandler always receives Job<T>[] — an array.
@@ -175,6 +177,19 @@ await boss.work<Record<string, never>>(ALERT_BATCH_QUEUE_NAME, async () => {
   await processAlertBatches();
 });
 
+// ── Dashboard snapshot cron ────────────────────────────────────────────────────
+// Fires once daily at a fixed off-peak UTC hour — this is background
+// bookkeeping (feeds the dashboard's week-over-week trend arrows), not
+// merchant-facing-timing-sensitive like the digest/alert-batch crons above,
+// so it doesn't need per-shop-timezone awareness. Scheduled ahead of the
+// 5am velocity cron so the two don't contend for the same shops' rows.
+await boss.schedule(DASHBOARD_SNAPSHOT_QUEUE_NAME, "0 3 * * *", {});
+console.log("[Worker] Dashboard snapshot cron scheduled — fires daily at 03:00 UTC");
+
+await boss.work<Record<string, never>>(DASHBOARD_SNAPSHOT_QUEUE_NAME, async () => {
+  await processDashboardSnapshot();
+});
+
 async function processVelocityRefresh(): Promise<void> {
   const now = new Date();
   console.log(`[Velocity] Running daily refresh — ${now.toUTCString()}`);
@@ -193,6 +208,35 @@ async function processVelocityRefresh(): Promise<void> {
       console.log(`[Velocity] ${shop}: refreshed ${updatedProducts} product(s)`);
     } catch (err) {
       console.error(`[Velocity] Failed for ${shop}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+// Writes one DashboardSnapshot row per shop for today's UTC date — an
+// upsert, not a create, so a worker restart mid-run (or a manual re-run)
+// updates the existing row in place instead of failing on the
+// [shop, date] unique constraint.
+async function processDashboardSnapshot(): Promise<void> {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  console.log(`[DashboardSnapshot] Running daily snapshot — ${today.toUTCString()}`);
+
+  const shops = await prisma.session.findMany({ where: { isOnline: false }, select: { shop: true } });
+  console.log(`[DashboardSnapshot] ${shops.length} shop(s) eligible`);
+
+  for (const { shop } of shops) {
+    try {
+      const statusCounts = await rollupStatusCounts(shop);
+      const inStock = statusCounts.get("in_stock") ?? 0;
+      const lowStock = statusCounts.get("low_stock") ?? 0;
+      const outOfStock = statusCounts.get("out_of_stock") ?? 0;
+      await prisma.dashboardSnapshot.upsert({
+        where: { shop_date: { shop, date: today } },
+        update: { totalProducts: inStock + lowStock + outOfStock, inStock, lowStock, outOfStock },
+        create: { shop, date: today, totalProducts: inStock + lowStock + outOfStock, inStock, lowStock, outOfStock },
+      });
+    } catch (err) {
+      console.error(`[DashboardSnapshot] Failed for ${shop}:`, err instanceof Error ? err.message : err);
     }
   }
 }

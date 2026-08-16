@@ -97,12 +97,15 @@ export async function atRiskRepresentativeRows(shop: string, limit: number, only
   sku: string | null;
   currentQuantity: number;
   inventoryStatus: string;
+  stockOutDays: number | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
 }[]> {
   const monitoringFilter = onlyMonitoringEnabled ? Prisma.sql`AND monitoring_enabled = true` : Prisma.empty;
   return prisma.$queryRaw`
     SELECT * FROM (
       SELECT DISTINCT ON (product_id)
-        product_id AS "productId", product_title AS "productTitle", sku, current_quantity AS "currentQuantity", inventory_status AS "inventoryStatus"
+        product_id AS "productId", product_title AS "productTitle", sku, current_quantity AS "currentQuantity", inventory_status AS "inventoryStatus", stock_out_days AS "stockOutDays", image_url AS "imageUrl", image_alt AS "imageAlt"
       FROM inventory_tracking
       WHERE shop = ${shop} AND inventory_status IN ('out_of_stock', 'low_stock') ${monitoringFilter}
       ORDER BY product_id,

@@ -5,6 +5,7 @@ export const INVENTORY_EVENT_QUEUE_NAME = "inventory-event";
 export const DIGEST_QUEUE_NAME = "digest-daily";
 export const VELOCITY_QUEUE_NAME = "velocity-daily";
 export const ALERT_BATCH_QUEUE_NAME = "alert-batch-daily";
+export const DASHBOARD_SNAPSHOT_QUEUE_NAME = "dashboard-snapshot-daily";
 export const DEBOUNCE_SECONDS = 10;
 export const JOB_RETRY_LIMIT = 3;
 export const JOB_RETRY_DELAY = 60;

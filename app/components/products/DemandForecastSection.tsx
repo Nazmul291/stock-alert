@@ -114,7 +114,10 @@ export function DemandForecastSection({
   const { avgDailySales, stockOutDays, recommendedQuantity, orderByDate } = demandForecast;
 
   return (
-    <div style={{ marginTop: 24 }}>
+    // id target for the dashboard's "View Forecast" link
+    // (RecommendedActionBanner.tsx) — scrolls straight here instead of
+    // just landing on the page.
+    <div id="demand-forecast" style={{ marginTop: 24, scrollMarginTop: 16 }}>
       <s-section heading="Demand Forecast">
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
           {statCard("Sales Velocity", <SalesVelocityBadge unitsPerDay={avgDailySales} />)}

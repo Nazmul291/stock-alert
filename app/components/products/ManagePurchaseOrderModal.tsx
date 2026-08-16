@@ -5,6 +5,7 @@ import { STATUS_STYLE } from "../purchase-orders/PurchaseOrderList";
 import type { ProductPurchaseOrderRow } from "../../lib/product-detail.server";
 import { useProductDetailStore } from "../../stores/product-detail-store";
 import { StatusPill } from "../StatusPill";
+import { buildReceiptDrafts, isReceiveLocationMissing } from "../../lib/purchase-order-receive";
 
 type ActionResult = { success: boolean; error?: string; intent?: string };
 
@@ -117,19 +118,10 @@ export function ManagePurchaseOrderModal({
     actionFetcher.submit({ intent }, { method: "post", action: `/app/purchase-orders/${po.id}` });
   }
 
-  const locationMissing = po.lineItems.some((li) => {
-    const qty = Math.max(0, parseInt(quantities[li.id] ?? "0") || 0);
-    return qty > 0 && !li.locationId && li.locations.length > 1 && !locationEdits[li.id];
-  });
+  const locationMissing = isReceiveLocationMissing(po.lineItems, quantities, locationEdits);
 
   function handleReceive() {
-    const receipts = po.lineItems
-      .map((li) => ({
-        lineItemId: li.id,
-        quantityReceived: Math.max(0, parseInt(quantities[li.id] ?? "0") || 0),
-        locationId: locationEdits[li.id] || undefined,
-      }))
-      .filter((r) => r.quantityReceived > 0);
+    const receipts = buildReceiptDrafts(po.lineItems, quantities, locationEdits);
     if (receipts.length === 0) return;
     actionFetcher.submit(
       { intent: "receive_items", receipts: JSON.stringify(receipts) },

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useSearchParams } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs, HeadersFunction } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -381,7 +381,12 @@ function ProductDetailContent({ plan }: { plan: string }) {
   const suppliers = data?.suppliers ?? [];
   const history = data?.history ?? [];
 
-  const [showCreatePoModal, setShowCreatePoModal] = useState(false);
+  // Lazy initializer, not a useEffect — the dashboard's "Create Purchase
+  // Order" link (RecommendedActionBanner.tsx) appends ?openPO=1 so this
+  // page opens straight into the modal instead of landing on a page the
+  // merchant then has to find the button on again.
+  const [searchParams] = useSearchParams();
+  const [showCreatePoModal, setShowCreatePoModal] = useState(() => searchParams.get("openPO") === "1");
   const addPurchaseOrder = useProductDetailStore((s) => s.addPurchaseOrder);
   const bumpLiveEvents = useLiveEventsStore((s) => s.bump);
 
