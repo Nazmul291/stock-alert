@@ -2,8 +2,9 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { getCachedSettings } from "./shop-cache.server";
 import { canUseFeature } from "./plan-limits";
-import { suggestReorderQuantity, getVariantLocationsForPicker, getVariantPricing, type VariantLocationLevel, type VariantPricing } from "./purchase-order.server";
+import { getVariantLocationsForPicker, getVariantPricing, type VariantLocationLevel, type VariantPricing } from "./purchase-order.server";
 import { computeStockOutDays } from "./velocity.server";
+import { storeForecastParams, computeReorderTargets, type ForecastParams } from "./forecast-mode";
 import { parsePricingRuleConfig, type PricingRuleType } from "./pricing-rules.server";
 import { buildTrackedProductRow } from "./products-data.server";
 import { PRODUCT_INVENTORY_QUERY, PRODUCT_METAFIELDS_QUERY } from "./graphql";
@@ -97,7 +98,9 @@ export type ProductDetailConfigure = {
 };
 
 export type ProductDemandForecast = {
-  avgDailySales: number;
+  // null in "classic" mode for a product with no sales history — the whole
+  // point of that mode being that it still produces a recommendation.
+  avgDailySales: number | null;
   stockOutDays: number | null;
   recommendedQuantity: number;
   orderByDate: string | null;
@@ -106,26 +109,34 @@ export type ProductDemandForecast = {
 // Pure — no Shopify/Prisma calls — so it's unit-testable with plain fixture
 // rows, independent of getProductDetail's live-Shopify-dependent branches.
 //
-// Computed as one aggregate line for the whole product (total quantity
-// across variants, one representative velocity) rather than by summing
-// per-variant suggestions: every variant row of a multi-variant product
-// carries an identical *product-level* avgDailySales (calcSalesVelocity
-// computes it per product; refreshShopVelocity copies that same value onto
-// every variant row — see velocity.server.ts), so summing per-variant
-// suggestions (each already computed against the full product velocity)
-// would over-suggest by roughly the variant count.
+// Two deliberately different aggregations, depending on the forecast basis:
+//
+// - velocity: ONE aggregate line for the whole product (total quantity, one
+//   representative rate). Every variant row of a multi-variant product
+//   carries an identical *product-level* avgDailySales (calcSalesVelocity
+//   computes it per product; refreshShopVelocity copies it onto every
+//   variant row — see velocity.server.ts), so summing per-variant
+//   suggestions would over-suggest by roughly the variant count.
+//
+// - fixed: summed PER VARIANT, which is the exact inverse. A stock level is
+//   a real per-variant quantity, so summing per-variant deficits
+//   double-counts nothing — and comparing the aggregate instead would hide
+//   a zeroed variant behind well-stocked siblings.
 export function computeDemandForecast(
   rows: { currentQuantity: number; manualDailySales: number | null; avgDailySales: number | null }[],
-  leadTimeDays: number,
-  now: Date = new Date(),
+  opts: { params: ForecastParams; effectiveThreshold: number; now?: Date },
 ): ProductDemandForecast | null {
   if (rows.length === 0) return null;
+  const { params, effectiveThreshold } = opts;
+  const now = opts.now ?? new Date();
+  const leadTimeDays = params.leadTimeDays;
+
   const totalQuantity = rows.reduce((sum, r) => sum + r.currentQuantity, 0);
   const avgDailySales = rows[0].manualDailySales ?? rows[0].avgDailySales ?? null;
-  if (!avgDailySales || avgDailySales <= 0) return null;
-
-  const stockOutDays = computeStockOutDays(totalQuantity, avgDailySales);
-  const recommendedQuantity = suggestReorderQuantity(totalQuantity, avgDailySales, leadTimeDays);
+  const hasVelocity = avgDailySales !== null && avgDailySales > 0;
+  const stockOutDays = hasVelocity ? computeStockOutDays(totalQuantity, avgDailySales) : null;
+  // Informational either way — shown when there's a runway to project from,
+  // omitted (not faked) when there isn't.
   const orderByDate = (() => {
     if (stockOutDays === null) return null;
     const daysUntilOrder = Math.max(0, stockOutDays - leadTimeDays);
@@ -133,6 +144,24 @@ export function computeDemandForecast(
     d.setDate(d.getDate() + daysUntilOrder);
     return d.toISOString().slice(0, 10);
   })();
+
+  if (params.basis === "fixed") {
+    const level = params.minStockLevel ?? effectiveThreshold;
+    const recommendedQuantity = rows.reduce((sum, r) => sum + Math.max(0, level - r.currentQuantity), 0);
+    // Every variant already at or above its level — genuinely nothing to
+    // recommend, which the caller renders as "no forecast" rather than a
+    // zero-quantity suggestion.
+    if (recommendedQuantity <= 0) return null;
+    return { avgDailySales, stockOutDays, recommendedQuantity, orderByDate };
+  }
+
+  if (!hasVelocity) return null;
+  const recommendedQuantity = computeReorderTargets(params, {
+    currentQuantity: totalQuantity,
+    avgDailySales,
+    stockOutDays,
+    effectiveThreshold,
+  }).suggestedQuantity;
 
   return { avgDailySales, stockOutDays, recommendedQuantity, orderByDate };
 }
@@ -279,6 +308,16 @@ export async function getProductDetail(shop: string, productId: string, plan: st
   };
 
   const defaultLeadTime = settings?.supplierLeadTimeDays ?? 7;
+  // Per-product custom_threshold (read into `configure` above) wins over the
+  // store default, so "classic" mode honors a product's own threshold here
+  // even though the Reorder Planner can't (see forecast-mode.ts).
+  const effectiveThreshold = parseInt(configure.customThreshold) || settings?.lowStockThreshold || 5;
+  const forecastParams: ForecastParams = storeForecastParams({
+    forecastMode: settings?.forecastMode ?? "smart",
+    supplierLeadTimeDays: defaultLeadTime,
+    safetyStockDays: settings?.safetyStockDays ?? 0,
+    minStockLevel: settings?.minStockLevel ?? null,
+  });
   // Both best-effort and run in parallel — a Shopify API hiccup on either
   // shouldn't break the whole page (locations falls back to one plain
   // quantity field per variant with no location choice; pricing just leaves
@@ -306,7 +345,12 @@ export async function getProductDetail(shop: string, productId: string, plan: st
       // InventoryTracking.sku is only as fresh as the last product webhook.
       sku: pricingByVariant.get(r.variantId.toString())?.sku ?? r.sku,
       currentQuantity: r.currentQuantity,
-      suggestedQuantity: suggestReorderQuantity(r.currentQuantity, r.manualDailySales ?? r.avgDailySales, defaultLeadTime),
+      suggestedQuantity: computeReorderTargets(forecastParams, {
+        currentQuantity: r.currentQuantity,
+        avgDailySales: r.manualDailySales ?? r.avgDailySales,
+        stockOutDays: r.stockOutDays,
+        effectiveThreshold,
+      }).suggestedQuantity,
       unitCost: !isNaN(liveUnitCost) ? liveUnitCost : r.unitCost,
       price: pricingByVariant.get(r.variantId.toString())?.price ?? null,
       compareAtPrice: pricingByVariant.get(r.variantId.toString())?.compareAtPrice ?? null,
@@ -321,7 +365,7 @@ export async function getProductDetail(shop: string, productId: string, plan: st
   // No new Shopify call — rows/defaultLeadTime are already fetched above for
   // variantsForPo.
   const demandForecast = canUseFeature(plan, "demandForecast")
-    ? computeDemandForecast(rows, defaultLeadTime)
+    ? computeDemandForecast(rows, { params: forecastParams, effectiveThreshold })
     : null;
 
   const [alerts, lineItems] = await Promise.all([

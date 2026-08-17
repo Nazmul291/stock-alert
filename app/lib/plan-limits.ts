@@ -36,6 +36,7 @@ export const PLAN_LIMITS = {
       vendorLeadTimeReorderPoints: false,
       purchaseOrders: false,
       demandForecast: false,
+      customForecastRules: false,
     },
   },
   basic: {
@@ -71,6 +72,7 @@ export const PLAN_LIMITS = {
       vendorLeadTimeReorderPoints: false,
       purchaseOrders: false,
       demandForecast: false,
+      customForecastRules: false,
     },
   },
   pro: {
@@ -106,6 +108,7 @@ export const PLAN_LIMITS = {
       vendorLeadTimeReorderPoints: false,
       purchaseOrders: false,
       demandForecast: false,
+      customForecastRules: false,
     },
   },
   // Purchasable tier — billing.request()/billing.check() wired in
@@ -143,6 +146,7 @@ export const PLAN_LIMITS = {
       vendorLeadTimeReorderPoints: true,
       purchaseOrders: true,
       demandForecast: true,
+      customForecastRules: true,
     },
   },
 } as const;

@@ -154,6 +154,7 @@ export default function App() {
           <s-link href="/app/suppliers">Suppliers</s-link>
           <s-link href="/app/purchase-orders">Purchase Orders</s-link>
           <s-link href="/app/reorder-planner">Reorder Planner</s-link>
+          <s-link href="/app/forecast-rules">Forecast Rules</s-link>
           <s-link href="/app/analytics">Analytics</s-link>
           <s-link href="/app/integrations">Integrations</s-link>
           <s-link href="/app/notification-center">Notification Center</s-link>

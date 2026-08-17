@@ -3,6 +3,8 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
 import { setInventoryQuantities, activateInventoryAtLocation, getVariantInventoryItemIds, updateInventoryItemCost, updateVariantPrice } from "./shopify-inventory.server";
 import { getPricingRuleConfigs, applyPricingRule } from "./pricing-rules.server";
+import { storeForecastParams, computeReorderTargets, maxTriggerQuantity } from "./forecast-mode";
+import { getForecastContext, resolveForRow } from "./forecast-context.server";
 
 export type PreviewLine = {
   productId: string;
@@ -20,6 +22,10 @@ export type PreviewLine = {
   price: string | null;
   compareAtPrice: string | null;
   suggestedQuantity: number;
+  // Which custom rule produced this line's numbers, surfaced in the Reorder
+  // Planner so a merchant can see *why* a quantity is what it is. null in
+  // smart/classic, or in custom when no rule matched.
+  matchedRuleName: string | null;
 };
 
 export type SupplierPreview = {
@@ -29,15 +35,13 @@ export type SupplierPreview = {
   lines: PreviewLine[];
 };
 
-// Reorder up to `leadTimeDays` worth of sales as a buffer beyond zero, minus
-// what's already on hand. Clamped to at least 1 so a generated line is never
-// a zero-quantity no-op. Products with no sales history return 0 — the
-// caller lists them for a manual quantity instead of guessing.
-export function suggestReorderQuantity(currentQuantity: number, avgDailySales: number | null, leadTimeDays: number): number {
-  if (!avgDailySales || avgDailySales <= 0) return 0;
-  const target = Math.ceil(leadTimeDays * avgDailySales);
-  return Math.max(1, target - currentQuantity);
-}
+// (suggestReorderQuantity used to live here. It's been replaced by
+// computeReorderTargets in forecast-mode.ts, which produces the identical
+// result for the default "smart" mode with safetyStockDays 0, but also
+// handles the fixed-stock-level basis that "classic" mode needs — its
+// `avgDailySales <= 0 → 0` guard made it structurally unable to suggest a
+// quantity for a product with no sales history. Deleted rather than kept
+// alongside, so there's exactly one place reorder math lives.)
 
 // Floors a client-submitted quantity to a safe non-negative integer.
 // PurchaseOrderLineItem.quantityOrdered is an Int column — a fractional
@@ -64,12 +68,19 @@ export function sanitizeUnitCost(value: number | null | undefined): number | nul
 // persist anything — this is a preview for the merchant to review/edit
 // before generatePurchaseOrder() actually creates a PO.
 export async function previewPurchaseOrders(shop: string, supplierIds?: string[]): Promise<SupplierPreview[]> {
-  const [suppliers, settings, rows] = await Promise.all([
+  const ctx = await getForecastContext(shop);
+  const { effectiveThreshold } = ctx;
+  // Widest quantity that could trigger a reorder anywhere in this shop —
+  // lets the SQL below prefilter without needing to express per-row forecast
+  // resolution in SQL. Deliberately over-selects: a row wrongly excluded
+  // here can never be recovered by the exact per-row check in the loop.
+  const maxQty = maxTriggerQuantity(ctx.defaults, effectiveThreshold, ctx.rules);
+
+  const [suppliers, rows] = await Promise.all([
     prisma.supplier.findMany({
       where: { shop, ...(supplierIds ? { id: { in: supplierIds } } : {}) },
       orderBy: { name: "asc" },
     }),
-    prisma.storeSettings.findUnique({ where: { shop } }),
     prisma.inventoryTracking.findMany({
       where: {
         shop,
@@ -81,13 +92,19 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
         // stock is most likely to be in (it can't sell what it doesn't
         // have). Without the currentQuantity branch, the products a
         // merchant most needs to see here were the ones most likely to be
-        // silently excluded.
-        OR: [{ stockOutDays: { not: null } }, { currentQuantity: { lte: 0 } }],
+        // silently excluded. The third branch is what makes "classic" mode
+        // work at all: a fixed reorder point triggers on quantity alone,
+        // with no velocity and no stockOutDays involved.
+        OR: [
+          { stockOutDays: { not: null } },
+          { currentQuantity: { lte: 0 } },
+          ...(maxQty !== null ? [{ currentQuantity: { lte: maxQty } }] : []),
+        ],
       },
     }),
   ]);
 
-  const defaultLeadTime = settings?.supplierLeadTimeDays ?? 7;
+  const defaultLeadTime = ctx.defaults.leadTimeDays;
   const suppliersById = new Map(suppliers.map((s) => [s.id, s]));
 
   const bySupplier = new Map<string, PreviewLine[]>();
@@ -96,14 +113,33 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
     const supplier = suppliersById.get(supplierId);
     if (!supplier) continue; // filtered out by supplierIds, or deleted between queries
 
-    const leadTimeDays = supplier.leadTimeDays ?? defaultLeadTime;
-    const isOutOfStock = row.currentQuantity <= 0;
-    // Already out of stock is always urgent, regardless of stockOutDays —
-    // skip the runway/lead-time comparison entirely for it (there's nothing
-    // to compare against zero). Otherwise, keep excluding rows with no
-    // prediction or with enough runway that a fresh order would arrive
-    // before they'd actually run out.
-    if (!isOutOfStock && (row.stockOutDays === null || row.stockOutDays > leadTimeDays)) continue;
+    // Per-row rule resolution (custom mode only — a no-op otherwise).
+    const resolved = resolveForRow(ctx, row);
+    // Precedence for lead time, most specific first: an explicit rule
+    // override, then the supplier's own lead time, then the store default.
+    // The supplier's value beats the store default because it's real
+    // per-supplier data; a rule beats both because the merchant set it for
+    // exactly this slice of the catalog.
+    const leadTimeDays = resolved.matchedRule && resolved.params.leadTimeDays !== ctx.defaults.leadTimeDays
+      ? resolved.params.leadTimeDays
+      : supplier.leadTimeDays ?? defaultLeadTime;
+    const targets = computeReorderTargets(
+      { ...resolved.params, leadTimeDays },
+      {
+        currentQuantity: row.currentQuantity,
+        // avgDailySales only, deliberately — NOT `manualDailySales ??
+        // avgDailySales`. stockOutDays is itself computed from avgDailySales
+        // alone (velocity.server.ts), so mixing a manual rate in here would
+        // compare a manual-rate quantity against a market-rate runway. The
+        // preview still *displays* manualDailySales; that display-vs-compute
+        // split predates this change and is left as-is rather than silently
+        // altering existing suggestions.
+        avgDailySales: row.avgDailySales,
+        stockOutDays: row.stockOutDays,
+        effectiveThreshold,
+      },
+    );
+    if (!targets.shouldReorder) continue;
 
     const line: PreviewLine = {
       productId: row.productId.toString(),
@@ -120,7 +156,8 @@ export async function previewPurchaseOrders(shop: string, supplierIds?: string[]
       unitCost: row.unitCost,
       price: null,
       compareAtPrice: null,
-      suggestedQuantity: suggestReorderQuantity(row.currentQuantity, row.avgDailySales, leadTimeDays),
+      suggestedQuantity: targets.suggestedQuantity,
+      matchedRuleName: resolved.matchedRule?.name ?? null,
     };
     const list = bySupplier.get(supplierId);
     if (list) list.push(line); else bySupplier.set(supplierId, [line]);
@@ -162,9 +199,11 @@ export type ProductPickerRow = {
 
 // Any tracked product, independent of supplier assignment or at-risk status —
 // the manual "search & add" side of PO creation. Forecast data is still
-// attached (via suggestReorderQuantity against the shop's default lead time)
-// so a manually-added line still gets a sane default quantity, but nothing
-// here gates which products are searchable.
+// attached (via the shop's forecast mode against its default lead time) so a
+// manually-added line still gets a sane default quantity, but nothing here
+// gates which products are searchable — unlike previewPurchaseOrders, a row
+// is returned whether or not it's actually due for reorder, so
+// shouldReorder is deliberately ignored and only the quantity is used.
 export async function searchTrackedProducts(shop: string, opts: { search?: string; limit?: number } = {}): Promise<ProductPickerRow[]> {
   const search = (opts.search ?? "").trim();
   const limit = opts.limit ?? 25;
@@ -189,6 +228,13 @@ export async function searchTrackedProducts(shop: string, opts: { search?: strin
   ]);
 
   const defaultLeadTime = settings?.supplierLeadTimeDays ?? 7;
+  const effectiveThreshold = settings?.lowStockThreshold ?? 5;
+  const forecastParams = storeForecastParams({
+    forecastMode: settings?.forecastMode ?? "smart",
+    supplierLeadTimeDays: defaultLeadTime,
+    safetyStockDays: settings?.safetyStockDays ?? 0,
+    minStockLevel: settings?.minStockLevel ?? null,
+  });
 
   return rows.map((row) => ({
     productId: row.productId.toString(),
@@ -205,7 +251,12 @@ export async function searchTrackedProducts(shop: string, opts: { search?: strin
     price: null,
     compareAtPrice: null,
     supplierId: row.supplierId,
-    suggestedQuantity: suggestReorderQuantity(row.currentQuantity, row.avgDailySales, defaultLeadTime),
+    suggestedQuantity: computeReorderTargets(forecastParams, {
+      currentQuantity: row.currentQuantity,
+      avgDailySales: row.avgDailySales,
+      stockOutDays: row.stockOutDays,
+      effectiveThreshold,
+    }).suggestedQuantity,
   }));
 }
 
